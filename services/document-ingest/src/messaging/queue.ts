@@ -8,12 +8,15 @@ const OCR_QUEUE = 'ocr_processing';
 const CLASSIFICATION_QUEUE = 'document_classification';
 
 let connection: amqp.Connection | null = null;
-let channel: amqp.Channel | null = null;
+let channel: amqp.ConfirmChannel | null = null;
 
 export async function connectQueue(): Promise<void> {
   try {
     connection = await amqp.connect(RABBITMQ_URL);
-    channel = await connection.createChannel();
+    if (!connection) {
+      throw new Error('Failed to connect to RabbitMQ');
+    }
+    channel = await connection.createConfirmChannel();
 
     // Declare queues
     await channel.assertQueue(OCR_QUEUE, { durable: true });
@@ -27,7 +30,7 @@ export async function connectQueue(): Promise<void> {
 }
 
 export async function publishOCRJob(documentId: string, storageKey: string): Promise<void> {
-  if (!channel) {
+  if (!channel || !connection) {
     throw new Error('Message queue not connected');
   }
 
@@ -58,7 +61,7 @@ export async function publishClassificationJob(documentId: string, extractedText
 
 export async function closeQueue(): Promise<void> {
   if (channel) {
-    await channel.close();
+    channel.close();
   }
   if (connection) {
     await connection.close();

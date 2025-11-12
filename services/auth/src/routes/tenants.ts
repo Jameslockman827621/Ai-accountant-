@@ -29,7 +29,19 @@ router.get('/current', authenticate, async (req: AuthRequest, res: Response) => 
       return;
     }
 
-    const tenant = result.rows[0];
+    const tenant = result.rows[0] as {
+      id: string;
+      name: string;
+      country: string;
+      tax_id: string | null;
+      vat_number: string | null;
+      subscription_tier: string;
+      subscription_status: string | null;
+      current_period_start: Date | null;
+      current_period_end: Date | null;
+      created_at: Date;
+      updated_at: Date;
+    };
     res.json({
       tenant: {
         id: tenant.id,

@@ -4,9 +4,9 @@ import { db } from '@ai-accountant/database';
 import bcrypt from 'bcrypt';
 
 describe('Document Ingest Service', () => {
-  let testTenantId: string;
-  let testUserId: string;
-  let authToken: string;
+  let testTenantId: string = '';
+  let testUserId: string = '';
+  let authToken: string = '';
 
   beforeAll(async () => {
     // Create test tenant and user
@@ -15,16 +15,16 @@ describe('Document Ingest Service', () => {
        VALUES ('Test Tenant', 'GB', 'freelancer')
        RETURNING id`
     );
-    testTenantId = tenantResult.rows[0]?.id;
+    testTenantId = (tenantResult.rows[0] as { id: string })?.id || '';
 
     const passwordHash = await bcrypt.hash('testpass123', 10);
-    const userResult = await db.query(
+    const userResult = await db.query<{ id: string }>(
       `INSERT INTO users (tenant_id, email, name, password_hash, role)
        VALUES ($1, 'test@example.com', 'Test User', $2, 'client')
        RETURNING id`,
       [testTenantId, passwordHash]
     );
-    testUserId = userResult.rows[0]?.id;
+    testUserId = userResult.rows[0]?.id || '';
 
     // Get auth token
     const loginResponse = await request(app)

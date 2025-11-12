@@ -11,7 +11,7 @@ describe('Database', () => {
   });
 
   it('should execute queries', async () => {
-    const result = await db.query('SELECT 1 as test');
+    const result = await db.query<{ test: number }>('SELECT 1 as test');
     expect(result.rows[0]?.test).toBe(1);
   });
 });

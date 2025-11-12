@@ -62,40 +62,54 @@ class Logger {
   }
 
   debug(message: string, metadata?: Record<string, unknown>): void {
-    this.log({
+    const entry: LogEntry = {
       level: LogLevel.DEBUG,
       message,
       timestamp: new Date(),
-      metadata,
-    });
+    };
+    if (metadata) {
+      entry.metadata = metadata;
+    }
+    this.log(entry);
   }
 
   info(message: string, metadata?: Record<string, unknown>): void {
-    this.log({
+    const entry: LogEntry = {
       level: LogLevel.INFO,
       message,
       timestamp: new Date(),
-      metadata,
-    });
+    };
+    if (metadata) {
+      entry.metadata = metadata;
+    }
+    this.log(entry);
   }
 
   warn(message: string, metadata?: Record<string, unknown>): void {
-    this.log({
+    const entry: LogEntry = {
       level: LogLevel.WARN,
       message,
       timestamp: new Date(),
-      metadata,
-    });
+    };
+    if (metadata) {
+      entry.metadata = metadata;
+    }
+    this.log(entry);
   }
 
   error(message: string, error?: Error, metadata?: Record<string, unknown>): void {
-    this.log({
+    const entry: LogEntry = {
       level: LogLevel.ERROR,
       message,
       timestamp: new Date(),
-      error,
-      metadata,
-    });
+    };
+    if (error) {
+      entry.error = error;
+    }
+    if (metadata) {
+      entry.metadata = metadata;
+    }
+    this.log(entry);
   }
 }
 

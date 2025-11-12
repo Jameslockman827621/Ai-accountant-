@@ -4,9 +4,9 @@ import { db } from '@ai-accountant/database';
 import bcrypt from 'bcrypt';
 
 describe('Auth Service - Comprehensive Tests', () => {
-  let testTenantId: string;
-  let testUserId: string;
-  let authToken: string;
+  let testTenantId: string = '';
+  let testUserId: string = '';
+  let authToken: string = '';
 
   beforeAll(async () => {
     // Create test tenant
@@ -15,7 +15,7 @@ describe('Auth Service - Comprehensive Tests', () => {
        VALUES ('Test Tenant', 'GB', 'freelancer')
        RETURNING id`
     );
-    testTenantId = tenantResult.rows[0]?.id;
+    testTenantId = (tenantResult.rows[0] as { id: string })?.id || '';
 
     // Create test user
     const passwordHash = await bcrypt.hash('testpass123', 10);
@@ -25,7 +25,7 @@ describe('Auth Service - Comprehensive Tests', () => {
        RETURNING id`,
       [testTenantId, passwordHash]
     );
-    testUserId = userResult.rows[0]?.id;
+    testUserId = (userResult.rows[0] as { id: string })?.id || '';
   });
 
   afterAll(async () => {

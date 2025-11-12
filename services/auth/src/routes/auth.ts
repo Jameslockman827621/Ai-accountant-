@@ -53,7 +53,7 @@ router.post('/register', async (req: Request<unknown, unknown, RegisterBody>, re
     }
 
     // Create tenant and user in transaction
-    const result = await db.transaction(async (client) => {
+    const result = await db.transaction(async (client: any) => {
       // Create tenant
       const tenantResult = await client.query(
         `INSERT INTO tenants (name, country, subscription_tier)
@@ -147,7 +147,7 @@ router.post('/register', async (req: Request<unknown, unknown, RegisterBody>, re
         subscriptionTier: result.tenant.subscription_tier,
       },
     });
-  } catch (error) {
+  } catch (error: unknown) {
     logger.error('Registration failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {
       res.status(400).json({ error: error.message });
@@ -176,13 +176,25 @@ router.post('/login', async (req: Request<unknown, unknown, LoginBody>, res: Res
       params.push(tenantId);
     }
 
-    const result = await db.query(query, params);
+    const result = await db.query<{
+      id: string;
+      email: string;
+      name: string;
+      role: string;
+      password_hash: string;
+      is_active: boolean;
+      tenant_id: string;
+      tenant_name: string;
+    }>(query, params);
 
     if (result.rows.length === 0) {
       throw new ValidationError('Invalid email or password');
     }
 
     const user = result.rows[0];
+    if (!user) {
+      throw new ValidationError('Invalid email or password');
+    }
 
     if (!user.is_active) {
       throw new ValidationError('Account is inactive');
@@ -223,7 +235,7 @@ router.post('/login', async (req: Request<unknown, unknown, LoginBody>, res: Res
         name: user.tenant_name,
       },
     });
-  } catch (error) {
+  } catch (error: unknown) {
     logger.error('Login failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {
       res.status(400).json({ error: error.message });
@@ -241,7 +253,18 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const result = await db.query(
+    const result = await db.query<{
+      id: string;
+      email: string;
+      name: string;
+      role: string;
+      last_login_at: Date | null;
+      created_at: Date;
+      tenant_id: string;
+      tenant_name: string;
+      country: string;
+      subscription_tier: string;
+    }>(
       `SELECT u.id, u.email, u.name, u.role, u.last_login_at, u.created_at,
               t.id as tenant_id, t.name as tenant_name, t.country, t.subscription_tier
        FROM users u
@@ -256,6 +279,11 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
     }
 
     const user = result.rows[0];
+    if (!user) {
+      res.status(404).json({ error: 'User not found' });
+      return;
+    }
+    
     res.json({
       user: {
         id: user.id,
@@ -272,7 +300,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: Response) => {
         subscriptionTier: user.subscription_tier,
       },
     });
-  } catch (error) {
+  } catch (error: unknown) {
     logger.error('Get user failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get user' });
   }

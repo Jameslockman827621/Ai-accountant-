@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response } from 'express';
 import multer from 'multer';
 import { randomUUID } from 'crypto';
 import { db } from '@ai-accountant/database';
@@ -72,6 +72,10 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
     );
 
     const document = result.rows[0];
+    if (!document) {
+      res.status(500).json({ error: 'Failed to create document record' });
+      return;
+    }
 
     // Publish OCR job
     try {

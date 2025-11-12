@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { authenticate, requireRole, AuthRequest } from '../middleware/auth';
+import { authenticate, AuthRequest } from '../middleware/auth';
 import { UserRole } from '@ai-accountant/shared-types';
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
@@ -53,7 +53,7 @@ router.get('/:userId', authenticate, async (req: AuthRequest, res: Response) => 
     }
 
     res.json({ user: result.rows[0] });
-  } catch (error) {
+  } catch (error: unknown) {
     if (error instanceof NotFoundError) {
       res.status(404).json({ error: error.message });
       return;
@@ -123,7 +123,7 @@ router.patch('/:userId', authenticate, async (req: AuthRequest, res: Response) =
     logger.info('User updated', { userId, updatedBy: req.user.userId });
 
     res.json({ message: 'User updated successfully' });
-  } catch (error) {
+  } catch (error: unknown) {
     if (error instanceof NotFoundError || error instanceof AuthorizationError) {
       res.status(error.statusCode).json({ error: error.message });
       return;

@@ -29,7 +29,8 @@ export function requireRole(...allowedRoles: UserRole[]) {
       throw new AuthenticationError('Authentication required');
     }
 
-    if (!allowedRoles.includes(req.user.role)) {
+    const userRole = req.user.role as UserRole;
+    if (!allowedRoles.includes(userRole)) {
       throw new AuthorizationError(`Required role: ${allowedRoles.join(' or ')}`);
     }
 

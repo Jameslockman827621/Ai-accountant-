@@ -11,7 +11,7 @@ async function seed(): Promise<void> {
        VALUES (uuid_generate_v4(), 'Demo Company', 'GB', 'freelancer')
        RETURNING id`
     );
-    const tenantId = tenantResult.rows[0]?.id;
+    const tenantId = (tenantResult.rows[0] as { id: string })?.id;
 
     if (!tenantId) {
       throw new Error('Failed to create tenant');

@@ -42,7 +42,7 @@ export class Database {
     }
   }
 
-  async query<T = unknown>(text: string, params?: unknown[]): Promise<QueryResult<T>> {
+  async query<T extends Record<string, unknown> = Record<string, unknown>>(text: string, params?: unknown[]): Promise<QueryResult<T>> {
     const start = Date.now();
     try {
       const result = await this.pool.query<T>(text, params);
