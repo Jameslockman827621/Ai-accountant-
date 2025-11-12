@@ -119,11 +119,21 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const page = parseInt(req.query.page as string) || 1;
-    const limit = parseInt(req.query.limit as string) || 20;
+    const page = parseInt(String(req.query.page || '1'), 10);
+    const limit = parseInt(String(req.query.limit || '20'), 10);
     const offset = (page - 1) * limit;
 
-    const result = await db.query(
+    const result = await db.query<{
+      id: string;
+      file_name: string;
+      file_type: string;
+      file_size: number;
+      document_type: string | null;
+      status: string;
+      confidence_score: number | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
       `SELECT id, file_name, file_type, file_size, document_type, status,
               confidence_score, created_at, updated_at
        FROM documents
@@ -133,17 +143,22 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       [req.user.tenantId, limit, offset]
     );
 
-    const countResult = await db.query(
+    const countResult = await db.query<{
+      total: string | number;
+    }>(
       'SELECT COUNT(*) as total FROM documents WHERE tenant_id = $1',
       [req.user.tenantId]
     );
 
+    const totalRow = countResult.rows[0];
+    const total = totalRow ? (typeof totalRow.total === 'number' ? totalRow.total : parseInt(String(totalRow.total || '0'), 10)) : 0;
+    
     res.json({
       documents: result.rows,
       pagination: {
         page,
         limit,
-        total: parseInt(countResult.rows[0]?.total || '0', 10),
+        total,
       },
     });
   } catch (error) {

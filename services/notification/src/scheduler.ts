@@ -36,7 +36,11 @@ async function checkFilingDeadlines(): Promise<void> {
     logger.info('Checking filing deadlines...');
 
     // Get all active tenants
-    const tenantsResult = await db.query(
+    const tenantsResult = await db.query<{
+      id: string;
+      name: string;
+      email: string;
+    }>(
       `SELECT t.id, t.name, u.email
        FROM tenants t
        JOIN users u ON u.tenant_id = t.id

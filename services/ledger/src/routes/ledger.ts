@@ -6,6 +6,7 @@ import {
   getLedgerEntries,
   reconcileEntries,
   getAccountBalance,
+  CreateLedgerEntryInput,
 } from '../services/ledger';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
@@ -40,8 +41,7 @@ router.post('/entries', async (req: AuthRequest, res: Response) => {
       throw new ValidationError('Missing required fields');
     }
 
-    const entry = await createLedgerEntry(req.user.tenantId, {
-      documentId,
+    const entryInput: CreateLedgerEntryInput = {
       entryType,
       accountCode,
       accountName,
@@ -49,13 +49,29 @@ router.post('/entries', async (req: AuthRequest, res: Response) => {
       currency: currency || 'GBP',
       description,
       transactionDate: new Date(transactionDate),
-      taxAmount: taxAmount ? parseFloat(taxAmount) : undefined,
-      taxRate: taxRate ? parseFloat(taxRate) : undefined,
-      metadata,
       createdBy: req.user.userId,
-      modelVersion,
-      reasoningTrace,
-    });
+    };
+    
+    if (documentId) {
+      entryInput.documentId = documentId;
+    }
+    if (taxAmount) {
+      entryInput.taxAmount = parseFloat(taxAmount);
+    }
+    if (taxRate) {
+      entryInput.taxRate = parseFloat(taxRate);
+    }
+    if (metadata) {
+      entryInput.metadata = metadata;
+    }
+    if (modelVersion) {
+      entryInput.modelVersion = modelVersion;
+    }
+    if (reasoningTrace) {
+      entryInput.reasoningTrace = reasoningTrace;
+    }
+
+    const entry = await createLedgerEntry(req.user.tenantId, entryInput);
 
     res.status(201).json({ entry });
   } catch (error) {
@@ -85,14 +101,34 @@ router.get('/entries', async (req: AuthRequest, res: Response) => {
       limit,
     } = req.query;
 
-    const result = await getLedgerEntries(req.user.tenantId, {
-      startDate: startDate ? new Date(startDate as string) : undefined,
-      endDate: endDate ? new Date(endDate as string) : undefined,
-      accountCode: accountCode as string | undefined,
-      reconciled: reconciled === 'true' ? true : reconciled === 'false' ? false : undefined,
+    const filters: {
+      startDate?: Date;
+      endDate?: Date;
+      accountCode?: string;
+      reconciled?: boolean;
+      limit?: number;
+      offset?: number;
+    } = {
       limit: limit ? parseInt(limit as string, 10) : 100,
       offset: page ? (parseInt(page as string, 10) - 1) * (limit ? parseInt(limit as string, 10) : 100) : 0,
-    });
+    };
+
+    if (startDate) {
+      filters.startDate = new Date(startDate as string);
+    }
+    if (endDate) {
+      filters.endDate = new Date(endDate as string);
+    }
+    if (accountCode) {
+      filters.accountCode = accountCode as string;
+    }
+    if (reconciled === 'true') {
+      filters.reconciled = true;
+    } else if (reconciled === 'false') {
+      filters.reconciled = false;
+    }
+
+    const result = await getLedgerEntries(req.user.tenantId, filters);
 
     res.json(result);
   } catch (error) {
@@ -137,6 +173,10 @@ router.get('/accounts/:accountCode/balance', async (req: AuthRequest, res: Respo
     }
 
     const { accountCode } = req.params;
+    if (!accountCode) {
+      res.status(400).json({ error: 'Account code is required' });
+      return;
+    }
     const { asOfDate } = req.query;
 
     const balance = await getAccountBalance(

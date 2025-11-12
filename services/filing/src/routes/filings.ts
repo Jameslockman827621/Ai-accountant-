@@ -149,7 +149,15 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const filing = filingResult.rows[0];
+    const filing = filingResult.rows[0] as {
+      id: string;
+      status: string;
+    } | undefined;
+
+    if (!filing) {
+      res.status(404).json({ error: 'Filing not found' });
+      return;
+    }
 
     if (filing.status !== FilingStatus.DRAFT && filing.status !== FilingStatus.PENDING_APPROVAL) {
       throw new ValidationError('Filing can only be submitted from draft or pending approval status');

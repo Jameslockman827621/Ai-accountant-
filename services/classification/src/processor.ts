@@ -140,19 +140,38 @@ Respond with JSON only:
     }
 
     const result = JSON.parse(response);
+    const extractedData: ExtractedData = {
+      currency: result.currency || 'GBP',
+    };
+    
+    if (result.vendor) {
+      extractedData.vendor = result.vendor;
+    }
+    if (result.date) {
+      extractedData.date = new Date(result.date);
+    }
+    if (result.total !== null && result.total !== undefined) {
+      extractedData.total = result.total;
+    }
+    if (result.tax !== null && result.tax !== undefined) {
+      extractedData.tax = result.tax;
+    }
+    if (result.taxRate !== null && result.taxRate !== undefined) {
+      extractedData.taxRate = result.taxRate;
+    }
+    if (result.category) {
+      extractedData.category = result.category;
+    }
+    if (result.description) {
+      extractedData.description = result.description;
+    }
+    if (result.invoiceNumber) {
+      extractedData.invoiceNumber = result.invoiceNumber;
+    }
+
     return {
       documentType: mapDocumentType(result.documentType),
-      extractedData: {
-        vendor: result.vendor || undefined,
-        date: result.date ? new Date(result.date) : undefined,
-        total: result.total || undefined,
-        tax: result.tax || undefined,
-        taxRate: result.taxRate || undefined,
-        currency: result.currency || 'GBP',
-        category: result.category || undefined,
-        description: result.description || undefined,
-        invoiceNumber: result.invoiceNumber || undefined,
-      },
+      extractedData,
       confidenceScore: result.confidenceScore || 0.7,
     };
   } catch (error) {
@@ -184,22 +203,40 @@ function extractInvoiceData(text: string): ExtractedData {
   const totalMatch = text.match(/(?:total|amount)[\s:£$]*([\d,]+\.?\d*)/i);
   const taxMatch = text.match(/(?:vat|tax)[\s:£$]*([\d,]+\.?\d*)/i);
 
-  return {
-    invoiceNumber: invoiceNumberMatch?.[1],
-    date: dateMatch ? new Date(dateMatch[1]) : undefined,
-    total: totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : undefined,
-    tax: taxMatch ? parseFloat(taxMatch[1].replace(/,/g, '')) : undefined,
+  const data: ExtractedData = {
     currency: 'GBP',
   };
+  
+  if (invoiceNumberMatch?.[1]) {
+    data.invoiceNumber = invoiceNumberMatch[1];
+  }
+  if (dateMatch?.[1]) {
+    data.date = new Date(dateMatch[1]);
+  }
+  if (totalMatch?.[1]) {
+    data.total = parseFloat(totalMatch[1].replace(/,/g, ''));
+  }
+  if (taxMatch?.[1]) {
+    data.tax = parseFloat(taxMatch[1].replace(/,/g, ''));
+  }
+  
+  return data;
 }
 
 function extractReceiptData(text: string): ExtractedData {
   const dateMatch = text.match(/(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})/);
   const totalMatch = text.match(/(?:total|paid)[\s:£$]*([\d,]+\.?\d*)/i);
 
-  return {
-    date: dateMatch ? new Date(dateMatch[1]) : undefined,
-    total: totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : undefined,
+  const data: ExtractedData = {
     currency: 'GBP',
   };
+  
+  if (dateMatch?.[1]) {
+    data.date = new Date(dateMatch[1]);
+  }
+  if (totalMatch?.[1]) {
+    data.total = parseFloat(totalMatch[1].replace(/,/g, ''));
+  }
+  
+  return data;
 }

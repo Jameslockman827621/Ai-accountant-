@@ -1,6 +1,5 @@
 import axios, { AxiosInstance } from 'axios';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { FilingType, FilingStatus } from '@ai-accountant/shared-types';
 
 const logger = createLogger('filing-service');
 
@@ -135,14 +134,15 @@ export class HMRCClient {
 }
 
 export async function generateVATFiling(
-  tenantId: string,
+  _tenantId: string,
   periodStart: Date,
-  periodEnd: Date
+  _periodEnd: Date
 ): Promise<Record<string, unknown>> {
   // This would calculate VAT from ledger entries
   // For now, return a template structure
+  const periodKey = `${periodStart.getFullYear()}${String(periodStart.getMonth() + 1).padStart(2, '0')}`;
   return {
-    periodKey: `${periodStart.getFullYear()}${String(periodStart.getMonth() + 1).padStart(2, '0')}`,
+    periodKey,
     vatDueSales: 0,
     vatDueAcquisitions: 0,
     totalVatDue: 0,

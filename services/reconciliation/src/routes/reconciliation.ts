@@ -16,6 +16,10 @@ router.get('/matches/:transactionId', async (req: AuthRequest, res: Response) =>
     }
 
     const { transactionId } = req.params;
+    if (!transactionId) {
+      res.status(400).json({ error: 'Transaction ID is required' });
+      return;
+    }
 
     const matches = await findMatches(req.user.tenantId, transactionId);
 

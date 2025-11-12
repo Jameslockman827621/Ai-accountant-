@@ -60,11 +60,13 @@ async function startWorker(): Promise<void> {
           // Queue for ledger posting
           const ledgerQueue = 'ledger_posting';
           await channel.assertQueue(ledgerQueue, { durable: true });
-          channel.sendToQueue(
-            ledgerQueue,
-            Buffer.from(JSON.stringify({ documentId, classification: result })),
-            { persistent: true }
-          );
+          if (channel) {
+            channel.sendToQueue(
+              ledgerQueue,
+              Buffer.from(JSON.stringify({ documentId, classification: result })),
+              { persistent: true }
+            );
+          }
         }
 
         channel.ack(msg);

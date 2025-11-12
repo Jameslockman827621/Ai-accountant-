@@ -1,4 +1,4 @@
-import Tesseract from 'tesseract.js';
+import { createWorker } from 'tesseract.js';
 import pdfParse from 'pdf-parse';
 import sharp from 'sharp';
 import { createLogger } from '@ai-accountant/shared-utils';
@@ -42,13 +42,9 @@ async function processImage(buffer: Buffer): Promise<string> {
       .toBuffer();
 
     // Run OCR with Tesseract
-    const { data: { text } } = await Tesseract.recognize(processedImage, 'eng', {
-      logger: (info) => {
-        if (info.status === 'recognizing text') {
-          logger.debug(`OCR progress: ${Math.round(info.progress * 100)}%`);
-        }
-      },
-    });
+    const worker = await createWorker('eng');
+    const { data: { text } } = await worker.recognize(processedImage);
+    await worker.terminate();
 
     return text;
   } catch (error) {

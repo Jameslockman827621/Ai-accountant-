@@ -60,7 +60,15 @@ export async function getTaxRulepack(country: string, version?: string): Promise
     query += ' ORDER BY effective_from DESC LIMIT 1';
   }
 
-  const result = await db.query(query, params);
+  const result = await db.query<{
+    id: string;
+    country: string;
+    version: string;
+    rules: unknown;
+    effective_from: Date;
+    effective_to: Date | null;
+    is_active: boolean;
+  }>(query, params);
 
   if (result.rows.length === 0) {
     // Return default UK rules if none found
@@ -78,15 +86,21 @@ export async function getTaxRulepack(country: string, version?: string): Promise
   }
 
   const row = result.rows[0];
-  return {
+  if (!row) {
+    return null;
+  }
+  const rulepack: TaxRulepack = {
     id: row.id,
     country: row.country,
     version: row.version,
     rules: row.rules as TaxRule[],
     effectiveFrom: row.effective_from,
-    effectiveTo: row.effective_to || undefined,
     isActive: row.is_active,
   };
+  if (row.effective_to) {
+    rulepack.effectiveTo = row.effective_to;
+  }
+  return rulepack;
 }
 
 export async function applyTaxRules(
@@ -226,8 +240,20 @@ function evaluateCondition(condition: string, context: Record<string, unknown>):
         evalCondition = evalCondition.replace(regex, String(value));
       }
     }
-    // eslint-disable-next-line no-eval
-    return eval(evalCondition) as boolean;
+    // Simple evaluation for common patterns
+    if (evalCondition.includes('===')) {
+      const parts = evalCondition.split('===').map(s => s.trim());
+      const left = parts[0];
+      const right = parts[1];
+      if (!left || !right) {
+        return false;
+      }
+      return String(context[left.replace(/'/g, '')] || left) === String(context[right.replace(/'/g, '')] || right);
+    }
+    if (evalCondition.includes('&&')) {
+      return evalCondition.split('&&').every(part => evaluateCondition(part.trim(), context));
+    }
+    return false;
   } catch {
     return false;
   }
@@ -238,20 +264,32 @@ function executeAction(action: string, context: Record<string, unknown>): { taxR
   const result: { taxRate: number | null; taxAmount: number } = { taxRate: null, taxAmount: 0 };
 
   try {
-    // Replace variables and execute
-    let evalAction = action;
-    for (const [key, value] of Object.entries(context)) {
-      const regex = new RegExp(`\\b${key}\\b`, 'g');
-      if (typeof value === 'string') {
-        evalAction = evalAction.replace(regex, `'${value}'`);
-      } else {
-        evalAction = evalAction.replace(regex, String(value));
+    // Parse action like "taxRate = 0.20; taxAmount = amount * 0.20"
+    const statements = action.split(';').map(s => s.trim());
+    for (const statement of statements) {
+      if (statement.includes('taxRate =')) {
+        const value = statement.split('=')[1]?.trim();
+        if (value) {
+          result.taxRate = parseFloat(value);
+        }
+      }
+      if (statement.includes('taxAmount =')) {
+        const expr = statement.split('=')[1]?.trim();
+        if (expr && expr.includes('*')) {
+          const parts = expr.split('*').map(s => s.trim());
+          const left = parts[0];
+          const right = parts[1];
+          if (left && right) {
+            const amount = parseFloat(String(context[left] || left));
+            const rate = parseFloat(right);
+            result.taxAmount = amount * rate;
+          }
+        }
       }
     }
-    // eslint-disable-next-line no-eval
-    eval(evalAction);
     return result;
   } catch {
-    return { taxRate: 0.20, taxAmount: (context.amount as number) * 0.20 };
+    const amount = (context.amount as number) || 0;
+    return { taxRate: 0.20, taxAmount: amount * 0.20 };
   }
 }

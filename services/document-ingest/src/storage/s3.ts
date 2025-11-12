@@ -1,6 +1,5 @@
 import AWS from 'aws-sdk';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { Readable } from 'stream';
 
 const logger = createLogger('document-ingest-service');
 

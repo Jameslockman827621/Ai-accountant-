@@ -32,7 +32,7 @@ export async function createLedgerEntry(
 
   const entryId = randomUUID();
 
-  const result = await db.query(
+  const result = await db.query<Record<string, unknown>>(
     `INSERT INTO ledger_entries (
       id, tenant_id, document_id, entry_type, account_code, account_name,
       amount, currency, description, transaction_date, tax_amount, tax_rate,
@@ -61,7 +61,11 @@ export async function createLedgerEntry(
 
   logger.info('Ledger entry created', { entryId, tenantId });
 
-  return result.rows[0] as LedgerEntry;
+  const entry = result.rows[0];
+  if (!entry) {
+    throw new Error('Failed to create ledger entry');
+  }
+  return entry as unknown as LedgerEntry;
 }
 
 export async function getLedgerEntries(
@@ -102,7 +106,7 @@ export async function getLedgerEntries(
   const limit = filters.limit || 100;
   const offset = filters.offset || 0;
 
-  const entriesResult = await db.query(
+  const entriesResult = await db.query<Record<string, unknown>>(
     `SELECT * FROM ledger_entries
      WHERE ${conditions.join(' AND ')}
      ORDER BY transaction_date DESC, created_at DESC
@@ -110,14 +114,14 @@ export async function getLedgerEntries(
     [...params, limit, offset]
   );
 
-  const countResult = await db.query(
+  const countResult = await db.query<{ total: string | number }>(
     `SELECT COUNT(*) as total FROM ledger_entries WHERE ${conditions.join(' AND ')}`,
     params
   );
 
   return {
-    entries: entriesResult.rows as LedgerEntry[],
-    total: parseInt(countResult.rows[0]?.total || '0', 10),
+    entries: entriesResult.rows as unknown as LedgerEntry[],
+    total: parseInt(String(countResult.rows[0]?.total || '0'), 10),
   };
 }
 
@@ -127,7 +131,11 @@ export async function reconcileEntries(
   entryId2: string
 ): Promise<void> {
   // Verify both entries belong to tenant
-  const entries = await db.query(
+  const entries = await db.query<{
+    id: string;
+    amount: number;
+    entry_type: string;
+  }>(
     `SELECT id, amount, entry_type FROM ledger_entries
      WHERE id IN ($1, $2) AND tenant_id = $3`,
     [entryId1, entryId2, tenantId]
@@ -137,7 +145,12 @@ export async function reconcileEntries(
     throw new ValidationError('One or both entries not found');
   }
 
-  const [entry1, entry2] = entries.rows;
+  const entry1 = entries.rows[0];
+  const entry2 = entries.rows[1];
+  
+  if (!entry1 || !entry2) {
+    throw new ValidationError('One or both entries not found');
+  }
 
   // Verify entries balance (one debit, one credit with same amount)
   if (
@@ -178,7 +191,10 @@ export async function getAccountBalance(
     params.push(asOfDate);
   }
 
-  const result = await db.query(
+  const result = await db.query<{
+    debit_total: string | number;
+    credit_total: string | number;
+  }>(
     `SELECT
        COALESCE(SUM(CASE WHEN entry_type = 'debit' THEN amount ELSE 0 END), 0) as debit_total,
        COALESCE(SUM(CASE WHEN entry_type = 'credit' THEN amount ELSE 0 END), 0) as credit_total
@@ -188,8 +204,11 @@ export async function getAccountBalance(
   );
 
   const row = result.rows[0];
-  const debitTotal = parseFloat(row?.debit_total || '0');
-  const creditTotal = parseFloat(row?.credit_total || '0');
+  if (!row) {
+    return { balance: 0, debitTotal: 0, creditTotal: 0 };
+  }
+  const debitTotal = typeof row.debit_total === 'number' ? row.debit_total : parseFloat(String(row.debit_total || '0'));
+  const creditTotal = typeof row.credit_total === 'number' ? row.credit_total : parseFloat(String(row.credit_total || '0'));
 
   // For asset/expense accounts: balance = debits - credits
   // For liability/equity/revenue accounts: balance = credits - debits

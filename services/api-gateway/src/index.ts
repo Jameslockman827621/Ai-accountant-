@@ -58,10 +58,10 @@ function createServiceProxy(target: string, pathRewrite?: Record<string, string>
     target,
     changeOrigin: true,
     pathRewrite: pathRewrite || {},
-    onProxyReq: (proxyReq, req) => {
+    onProxyReq: (_proxyReq, req) => {
       logger.debug(`Proxying ${req.method} ${req.url} to ${target}`);
     },
-    onError: (err, req) => {
+    onError: (err: Error, req) => {
       logger.error(`Proxy error for ${req.url}`, err);
     },
   });

@@ -31,15 +31,36 @@ router.get('/audit-logs', async (req: AuthRequest, res: Response) => {
       limit,
     } = req.query;
 
-    const result = await getAuditLogs(req.user.tenantId, {
-      userId: userId as string | undefined,
-      resourceType: resourceType as string | undefined,
-      resourceId: resourceId as string | undefined,
-      startDate: startDate ? new Date(startDate as string) : undefined,
-      endDate: endDate ? new Date(endDate as string) : undefined,
+    const filters: {
+      userId?: string;
+      resourceType?: string;
+      resourceId?: string;
+      startDate?: Date;
+      endDate?: Date;
+      limit?: number;
+      offset?: number;
+    } = {
       limit: limit ? parseInt(limit as string, 10) : 100,
       offset: page ? (parseInt(page as string, 10) - 1) * (limit ? parseInt(limit as string, 10) : 100) : 0,
-    });
+    };
+
+    if (userId) {
+      filters.userId = userId as string;
+    }
+    if (resourceType) {
+      filters.resourceType = resourceType as string;
+    }
+    if (resourceId) {
+      filters.resourceId = resourceId as string;
+    }
+    if (startDate) {
+      filters.startDate = new Date(startDate as string);
+    }
+    if (endDate) {
+      filters.endDate = new Date(endDate as string);
+    }
+
+    const result = await getAuditLogs(req.user.tenantId, filters);
 
     res.json(result);
   } catch (error) {

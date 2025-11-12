@@ -47,7 +47,7 @@ export function useAuth() {
         throw new Error('Login failed');
       }
 
-      const data = await response.json();
+      const data = await response.json() as { token: string; user: User };
       setAuthState({
         token: data.token,
         user: data.user,

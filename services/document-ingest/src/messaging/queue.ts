@@ -8,19 +8,20 @@ const OCR_QUEUE = 'ocr_processing';
 const CLASSIFICATION_QUEUE = 'document_classification';
 
 let connection: amqp.Connection | null = null;
-let channel: amqp.ConfirmChannel | null = null;
+let channel: amqp.Channel | null = null;
 
 export async function connectQueue(): Promise<void> {
   try {
-    connection = await amqp.connect(RABBITMQ_URL);
-    if (!connection) {
-      throw new Error('Failed to connect to RabbitMQ');
-    }
-    channel = await connection.createConfirmChannel();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const conn: any = await amqp.connect(RABBITMQ_URL);
+    connection = conn as amqp.Connection;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ch: any = await conn.createChannel();
+    channel = ch as amqp.Channel;
 
     // Declare queues
-    await channel.assertQueue(OCR_QUEUE, { durable: true });
-    await channel.assertQueue(CLASSIFICATION_QUEUE, { durable: true });
+    await ch.assertQueue(OCR_QUEUE, { durable: true });
+    await ch.assertQueue(CLASSIFICATION_QUEUE, { durable: true });
 
     logger.info('Connected to message queue');
   } catch (error) {
@@ -60,10 +61,17 @@ export async function publishClassificationJob(documentId: string, extractedText
 }
 
 export async function closeQueue(): Promise<void> {
-  if (channel) {
-    channel.close();
-  }
-  if (connection) {
-    await connection.close();
+  try {
+    if (channel) {
+      await channel.close();
+      channel = null;
+    }
+    if (connection) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (connection as any).close();
+      connection = null;
+    }
+  } catch (error) {
+    logger.error('Error closing queue connection', error instanceof Error ? error : new Error(String(error)));
   }
 }

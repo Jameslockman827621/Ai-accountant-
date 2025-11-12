@@ -5,9 +5,11 @@ import bcrypt from 'bcrypt';
 import { LedgerEntryType } from '@ai-accountant/shared-types';
 
 describe('Ledger Service', () => {
-  let testTenantId: string;
-  let testUserId: string;
-  let authToken: string;
+  let testTenantId: string = '';
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  let testUserId: string = '';
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  let authToken: string = '';
 
   beforeAll(async () => {
     const tenantResult = await db.query(
@@ -15,7 +17,7 @@ describe('Ledger Service', () => {
        VALUES ('Test Tenant', 'GB', 'freelancer')
        RETURNING id`
     );
-    testTenantId = tenantResult.rows[0]?.id;
+    testTenantId = (tenantResult.rows[0] as { id: string })?.id || '';
 
     const passwordHash = await bcrypt.hash('testpass123', 10);
     const userResult = await db.query(
@@ -24,7 +26,7 @@ describe('Ledger Service', () => {
        RETURNING id`,
       [testTenantId, passwordHash]
     );
-    testUserId = userResult.rows[0]?.id;
+    testUserId = (userResult.rows[0] as { id: string })?.id || '';
 
     // Create chart of accounts
     await db.query(

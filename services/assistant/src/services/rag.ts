@@ -1,4 +1,3 @@
-import { ChromaClient } from 'chromadb';
 import OpenAI from 'openai';
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
@@ -6,16 +5,32 @@ import { AssistantResponse, Citation, TenantId } from '@ai-accountant/shared-typ
 
 const logger = createLogger('assistant-service');
 
-const chromaClient = new ChromaClient({
-  path: process.env.CHROMA_URL || 'http://localhost:8000',
-});
+// Chroma client - using simple HTTP client for now
+// In production, use proper Chroma client library
+const CHROMA_API_URL = process.env.CHROMA_URL || 'http://localhost:8000';
+const COLLECTION_NAME = 'accounting-knowledge';
+
+// Simplified Chroma client using fetch
+async function chromaRequest(endpoint: string, method: string = 'GET', body?: unknown): Promise<unknown> {
+  const init: RequestInit = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body) {
+    init.body = JSON.stringify(body);
+  }
+  const response = await fetch(`${CHROMA_API_URL}${endpoint}`, init);
+  if (!response.ok) {
+    throw new Error(`Chroma request failed: ${response.statusText}`);
+  }
+  return response.json();
+}
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
 const MODEL_VERSION = process.env.OPENAI_MODEL || 'gpt-4';
-const COLLECTION_NAME = 'accounting-knowledge';
 
 export async function queryAssistant(
   tenantId: TenantId,
@@ -56,14 +71,19 @@ export async function queryAssistant(
     // Determine suggested action
     const suggestedAction = determineSuggestedAction(question, answer);
 
-    return {
+    const response: AssistantResponse = {
       answer,
       confidenceScore,
       citations,
-      suggestedAction,
       modelVersion: MODEL_VERSION,
       promptTemplate: 'rag-with-context',
     };
+    
+    if (suggestedAction) {
+      response.suggestedAction = suggestedAction;
+    }
+    
+    return response;
   } catch (error) {
     logger.error('Assistant query failed', error instanceof Error ? error : new Error(String(error)));
     throw error;
@@ -75,11 +95,6 @@ async function retrieveContext(
   question: string
 ): Promise<Array<{ type: string; id: string; reference: string; content: string }>> {
   try {
-    // Get collection
-    const collection = await chromaClient.getOrCreateCollection({
-      name: COLLECTION_NAME,
-    });
-
     // Generate query embedding
     const embeddingResponse = await openai.embeddings.create({
       model: 'text-embedding-3-small',
@@ -92,26 +107,36 @@ async function retrieveContext(
       throw new Error('Failed to generate embedding');
     }
 
-    // Search similar documents
-    const results = await collection.query({
-      queryEmbeddings: [queryEmbedding],
-      nResults: 5,
-      where: { tenantId: { $eq: tenantId } },
-    });
+    // Search similar documents using Chroma API
+    const results = await chromaRequest(
+      `/collections/${COLLECTION_NAME}/query`,
+      'POST',
+      {
+        query_embeddings: [queryEmbedding],
+        n_results: 5,
+        where: { tenantId: { $eq: tenantId } },
+      }
+    ) as {
+      ids?: string[][];
+      metadatas?: Array<Record<string, unknown>>[][];
+      documents?: string[][];
+    };
 
     const context: Array<{ type: string; id: string; reference: string; content: string }> = [];
 
     if (results.ids && results.ids[0]) {
       for (let i = 0; i < results.ids[0].length; i++) {
-        const id = results.ids[0][i];
-        const metadata = results.metadatas?.[0]?.[i];
-        const document = results.documents?.[0]?.[i];
+        const id = results.ids[0]?.[i];
+        const metadataArray = results.metadatas?.[0];
+        const documentArray = results.documents?.[0];
+        const metadata = metadataArray?.[i] as Record<string, unknown> | undefined;
+        const document = documentArray?.[i] as string | undefined;
 
         if (id && metadata && document) {
           context.push({
-            type: metadata.type as string,
-            id: metadata.id as string,
-            reference: metadata.reference as string,
+            type: (metadata.type as string) || 'document',
+            id: (metadata.id as string) || id,
+            reference: (metadata.reference as string) || id,
             content: document,
           });
         }
@@ -119,7 +144,12 @@ async function retrieveContext(
     }
 
     // Also get recent ledger entries and documents from database
-    const ledgerEntries = await db.query(
+    const ledgerEntries = await db.query<{
+      id: string;
+      description: string;
+      amount: number;
+      transaction_date: Date;
+    }>(
       `SELECT id, description, amount, transaction_date
        FROM ledger_entries
        WHERE tenant_id = $1
@@ -190,10 +220,6 @@ export async function indexDocument(
   metadata: Record<string, unknown>
 ): Promise<void> {
   try {
-    const collection = await chromaClient.getOrCreateCollection({
-      name: COLLECTION_NAME,
-    });
-
     // Generate embedding
     const embeddingResponse = await openai.embeddings.create({
       model: 'text-embedding-3-small',
@@ -206,22 +232,26 @@ export async function indexDocument(
       throw new Error('Failed to generate embedding');
     }
 
-    // Add to collection
-    await collection.add({
-      ids: [`doc-${tenantId}-${documentId}`],
-      embeddings: [embedding],
-      documents: [content],
-      metadatas: [
-        {
-          tenantId,
-          documentId,
-          type: 'document',
-          id: documentId,
-          reference: `Document ${documentId.substring(0, 8)}`,
-          ...metadata,
-        },
-      ],
-    });
+    // Add to collection using Chroma API
+    await chromaRequest(
+      `/collections/${COLLECTION_NAME}/add`,
+      'POST',
+      {
+        ids: [`doc-${tenantId}-${documentId}`],
+        embeddings: [embedding],
+        documents: [content],
+        metadatas: [
+          {
+            tenantId,
+            documentId,
+            type: 'document',
+            id: documentId,
+            reference: `Document ${documentId.substring(0, 8)}`,
+            ...metadata,
+          },
+        ],
+      }
+    );
 
     logger.info('Document indexed', { tenantId, documentId });
   } catch (error) {

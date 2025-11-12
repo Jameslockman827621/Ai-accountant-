@@ -15,9 +15,14 @@ router.get('/tax/:country', async (req: AuthRequest, res: Response) => {
     }
 
     const { country } = req.params;
+    if (!country) {
+      res.status(400).json({ error: 'Country is required' });
+      return;
+    }
     const { version } = req.query;
 
-    const rulepack = await getTaxRulepack(country, version as string | undefined);
+    const versionStr: string | undefined = version ? String(version) : undefined;
+    const rulepack = await getTaxRulepack(country, versionStr);
 
     if (!rulepack) {
       res.status(404).json({ error: 'Tax rulepack not found' });

@@ -18,7 +18,10 @@ router.post('/vat-estimation', async (req: AuthRequest, res: Response) => {
     const { period } = req.body;
 
     // Get tenant info
-    const tenantResult = await db.query(
+    const tenantResult = await db.query<{
+      name: string;
+      email: string;
+    }>(
       `SELECT t.name, u.email
        FROM tenants t
        JOIN users u ON u.tenant_id = t.id
@@ -32,9 +35,15 @@ router.post('/vat-estimation', async (req: AuthRequest, res: Response) => {
     }
 
     const tenant = tenantResult.rows[0];
+    if (!tenant) {
+      res.status(404).json({ error: 'Tenant not found' });
+      return;
+    }
 
     // Calculate estimated VAT (simplified)
-    const ledgerResult = await db.query(
+    const ledgerResult = await db.query<{
+      estimated_vat: string | number;
+    }>(
       `SELECT COALESCE(SUM(tax_amount), 0) as estimated_vat
        FROM ledger_entries
        WHERE tenant_id = $1
@@ -43,7 +52,8 @@ router.post('/vat-estimation', async (req: AuthRequest, res: Response) => {
       [req.user.tenantId]
     );
 
-    const estimatedVAT = parseFloat(ledgerResult.rows[0]?.estimated_vat || '0');
+    const row = ledgerResult.rows[0];
+    const estimatedVAT = row ? (typeof row.estimated_vat === 'number' ? row.estimated_vat : parseFloat(String(row.estimated_vat || '0'))) : 0;
 
     const { subject, html } = generateVATEstimationEmail(
       estimatedVAT,

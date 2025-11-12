@@ -16,7 +16,18 @@ export async function findMatches(
   bankTransactionId: string
 ): Promise<MatchCandidate[]> {
   // Get bank transaction
-  const transactionResult = await db.query(
+  const transactionResult = await db.query<{
+    id: string;
+    tenant_id: string;
+    account_id: string;
+    transaction_id: string;
+    date: Date;
+    amount: number;
+    currency: string;
+    description: string;
+    category: string | null;
+    reconciled: boolean;
+  }>(
     'SELECT * FROM bank_transactions WHERE id = $1 AND tenant_id = $2',
     [bankTransactionId, tenantId]
   );
@@ -26,6 +37,9 @@ export async function findMatches(
   }
 
   const transaction = transactionResult.rows[0];
+  if (!transaction) {
+    return [];
+  }
   const candidates: MatchCandidate[] = [];
 
   // Match by amount and date proximity
@@ -35,7 +49,11 @@ export async function findMatches(
   dateRangeEnd.setDate(dateRangeEnd.getDate() + 7); // 7 days after
 
   // Find matching documents
-  const documentsResult = await db.query(
+  const documentsResult = await db.query<{
+    id: string;
+    extracted_data: Record<string, unknown> | null;
+    document_type: string | null;
+  }>(
     `SELECT d.id, d.extracted_data, d.document_type
      FROM documents d
      WHERE d.tenant_id = $1
@@ -49,8 +67,12 @@ export async function findMatches(
 
   for (const doc of documentsResult.rows) {
     const extractedData = doc.extracted_data || {};
-    const docTotal = parseFloat(extractedData.total || '0');
-    const docDate = extractedData.date ? new Date(extractedData.date) : null;
+    const docTotal = typeof extractedData.total === 'number' 
+      ? extractedData.total 
+      : parseFloat(String(extractedData.total || '0'));
+    const docDate = extractedData.date 
+      ? (extractedData.date instanceof Date ? extractedData.date : new Date(String(extractedData.date)))
+      : null;
 
     let score = 0.5; // Base score
     const reasons: string[] = [];
@@ -75,7 +97,7 @@ export async function findMatches(
 
     // Description similarity (simple keyword matching)
     const transactionDesc = (transaction.description || '').toLowerCase();
-    const docDesc = (extractedData.description || extractedData.vendor || '').toLowerCase();
+    const docDesc = String(extractedData.description || extractedData.vendor || '').toLowerCase();
     if (transactionDesc && docDesc) {
       const commonWords = transactionDesc.split(' ').filter((word: string) => docDesc.includes(word));
       if (commonWords.length > 0) {
@@ -93,7 +115,12 @@ export async function findMatches(
   }
 
   // Find matching ledger entries
-  const ledgerResult = await db.query(
+  const ledgerResult = await db.query<{
+    id: string;
+    amount: number;
+    transaction_date: Date;
+    description: string;
+  }>(
     `SELECT le.id, le.amount, le.transaction_date, le.description
      FROM ledger_entries le
      WHERE le.tenant_id = $1

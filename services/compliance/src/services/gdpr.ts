@@ -50,7 +50,12 @@ export async function exportUserData(tenantId: TenantId, userId: UserId): Promis
     db.query('SELECT * FROM documents WHERE uploaded_by = $1 AND tenant_id = $2', [userId, tenantId]),
     db.query('SELECT * FROM ledger_entries WHERE created_by = $1 AND tenant_id = $2', [userId, tenantId]),
     db.query('SELECT * FROM audit_logs WHERE user_id = $1 AND tenant_id = $2', [userId, tenantId]),
-  ]);
+  ]) as [
+    { rows: Array<Record<string, unknown>> },
+    { rows: Array<Record<string, unknown>> },
+    { rows: Array<Record<string, unknown>> },
+    { rows: Array<Record<string, unknown>> },
+  ];
 
   return {
     user: userResult.rows[0] || null,
@@ -118,8 +123,11 @@ export async function getAuditLogs(
     params
   );
 
+  const totalRow = countResult.rows[0];
+  const total = totalRow ? (typeof totalRow.total === 'number' ? totalRow.total : parseInt(String(totalRow.total || '0'), 10)) : 0;
+  
   return {
     logs: logsResult.rows,
-    total: parseInt(countResult.rows[0]?.total || '0', 10),
+    total,
   };
 }
