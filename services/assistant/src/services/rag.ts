@@ -5,26 +5,13 @@ import { AssistantResponse, Citation, TenantId } from '@ai-accountant/shared-typ
 
 const logger = createLogger('assistant-service');
 
-// Chroma client - using simple HTTP client for now
-// In production, use proper Chroma client library
-const CHROMA_API_URL = process.env.CHROMA_URL || 'http://localhost:8000';
-const COLLECTION_NAME = 'accounting-knowledge';
+import { ChromaClient } from 'chromadb';
 
-// Simplified Chroma client using fetch
-async function chromaRequest(endpoint: string, method: string = 'GET', body?: unknown): Promise<unknown> {
-  const init: RequestInit = {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-  };
-  if (body) {
-    init.body = JSON.stringify(body);
-  }
-  const response = await fetch(`${CHROMA_API_URL}${endpoint}`, init);
-  if (!response.ok) {
-    throw new Error(`Chroma request failed: ${response.statusText}`);
-  }
-  return response.json();
-}
+const chromaClient = new ChromaClient({
+  path: process.env.CHROMA_URL || 'http://localhost:8000',
+});
+
+const COLLECTION_NAME = 'accounting-knowledge';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
@@ -107,30 +94,25 @@ async function retrieveContext(
       throw new Error('Failed to generate embedding');
     }
 
-    // Search similar documents using Chroma API
-    const results = await chromaRequest(
-      `/collections/${COLLECTION_NAME}/query`,
-      'POST',
-      {
-        query_embeddings: [queryEmbedding],
-        n_results: 5,
-        where: { tenantId: { $eq: tenantId } },
-      }
-    ) as {
-      ids?: string[][];
-      metadatas?: Array<Record<string, unknown>>[][];
-      documents?: string[][];
-    };
+    // Get or create collection
+    const collection = await chromaClient.getOrCreateCollection({
+      name: COLLECTION_NAME,
+    });
+
+    // Search similar documents
+    const results = await collection.query({
+      queryEmbeddings: [queryEmbedding],
+      nResults: 5,
+      where: { tenantId: { $eq: tenantId } },
+    });
 
     const context: Array<{ type: string; id: string; reference: string; content: string }> = [];
 
     if (results.ids && results.ids[0]) {
       for (let i = 0; i < results.ids[0].length; i++) {
         const id = results.ids[0]?.[i];
-        const metadataArray = results.metadatas?.[0];
-        const documentArray = results.documents?.[0];
-        const metadata = metadataArray?.[i] as Record<string, unknown> | undefined;
-        const document = documentArray?.[i] as string | undefined;
+        const metadata = results.metadatas?.[0]?.[i] as Record<string, unknown> | undefined;
+        const document = results.documents?.[0]?.[i];
 
         if (id && metadata && document) {
           context.push({
@@ -232,26 +214,27 @@ export async function indexDocument(
       throw new Error('Failed to generate embedding');
     }
 
-    // Add to collection using Chroma API
-    await chromaRequest(
-      `/collections/${COLLECTION_NAME}/add`,
-      'POST',
-      {
-        ids: [`doc-${tenantId}-${documentId}`],
-        embeddings: [embedding],
-        documents: [content],
-        metadatas: [
-          {
-            tenantId,
-            documentId,
-            type: 'document',
-            id: documentId,
-            reference: `Document ${documentId.substring(0, 8)}`,
-            ...metadata,
-          },
-        ],
-      }
-    );
+    // Get or create collection
+    const collection = await chromaClient.getOrCreateCollection({
+      name: COLLECTION_NAME,
+    });
+
+    // Add to collection
+    await collection.add({
+      ids: [`doc-${tenantId}-${documentId}`],
+      embeddings: [embedding],
+      documents: [content],
+      metadatas: [
+        {
+          tenantId,
+          documentId,
+          type: 'document',
+          id: documentId,
+          reference: `Document ${documentId.substring(0, 8)}`,
+          ...metadata,
+        },
+      ],
+    });
 
     logger.info('Document indexed', { tenantId, documentId });
   } catch (error) {

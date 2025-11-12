@@ -1,70 +1,43 @@
-// Plaid SDK - using simplified approach for now
-// In production, use proper Plaid SDK
-const PLAID_CLIENT_ID = process.env.PLAID_CLIENT_ID || '';
-const PLAID_SECRET = process.env.PLAID_SECRET || '';
-const PLAID_ENV = process.env.PLAID_ENV || 'sandbox';
-
-interface PlaidLinkTokenResponse {
-  link_token: string;
-}
-
-interface PlaidExchangeResponse {
-  access_token: string;
-  item_id: string;
-}
-
-interface PlaidTransaction {
-  transaction_id: string;
-  account_id: string;
-  date: string;
-  amount: number;
-  name: string;
-  merchant_name?: string;
-  category?: string[];
-  iso_currency_code?: string;
-  payment_channel?: string;
-}
-
-// PlaidTransactionsResponse interface removed - using inline type
+import { Configuration, PlaidApi, PlaidEnvironments, CountryCode, Products } from 'plaid';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('bank-feed-service');
 
-const PLAID_BASE_URL = PLAID_ENV === 'production' 
-  ? 'https://production.plaid.com'
-  : 'https://sandbox.plaid.com';
+const PLAID_CLIENT_ID = process.env.PLAID_CLIENT_ID || '';
+const PLAID_SECRET = process.env.PLAID_SECRET || '';
+const PLAID_ENV = process.env.PLAID_ENV || 'sandbox';
 
-async function plaidRequest(endpoint: string, body: Record<string, unknown>): Promise<unknown> {
-  const response = await fetch(`${PLAID_BASE_URL}${endpoint}`, {
-    method: 'POST',
+const basePath: string = PLAID_ENV === 'production' 
+  ? PlaidEnvironments.production 
+  : PlaidEnvironments.sandbox;
+
+const configuration = new Configuration({
+  basePath: basePath as string,
+  baseOptions: {
     headers: {
-      'Content-Type': 'application/json',
       'PLAID-CLIENT-ID': PLAID_CLIENT_ID,
       'PLAID-SECRET': PLAID_SECRET,
     },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    throw new Error(`Plaid request failed: ${response.statusText}`);
-  }
-  return response.json();
-}
+  },
+});
+
+export const plaidClient = new PlaidApi(configuration);
 
 export async function createLinkToken(userId: string): Promise<string> {
   try {
-    const response = await plaidRequest('/link/token/create', {
+    const response = await plaidClient.linkTokenCreate({
       user: {
         client_user_id: userId,
       },
       client_name: 'AI Accountant',
-      products: ['transactions'],
-      country_codes: ['GB'],
+      products: [Products.Transactions],
+      country_codes: [CountryCode.Gb],
       language: 'en',
-    }) as PlaidLinkTokenResponse;
+    });
 
-    return response.link_token;
+    return response.data.link_token;
   } catch (error) {
     logger.error('Failed to create Plaid link token', error instanceof Error ? error : new Error(String(error)));
     throw new Error('Failed to create Plaid link token');
@@ -76,16 +49,12 @@ export async function exchangePublicToken(
   tenantId: TenantId
 ): Promise<{ accessToken: string; itemId: string }> {
   try {
-    const response = await plaidRequest('/item/public_token/exchange', {
+    const response = await plaidClient.itemPublicTokenExchange({
       public_token: publicToken,
-    }) as PlaidExchangeResponse;
+    });
 
-    const accessToken = response.access_token || '';
-    const itemId = response.item_id || '';
-    
-    if (!accessToken || !itemId) {
-      throw new Error('Invalid response from Plaid');
-    }
+    const accessToken = response.data.access_token;
+    const itemId = response.data.item_id;
 
     // Store access token securely (in production, encrypt this)
     await db.query(
@@ -110,13 +79,20 @@ export async function fetchTransactions(
   endDate: Date
 ): Promise<void> {
   try {
-    const response = await plaidRequest('/transactions/get', {
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+    
+    if (!startDateStr || !endDateStr) {
+      throw new Error('Invalid date format');
+    }
+    
+    const response = await plaidClient.transactionsGet({
       access_token: accessToken,
-      start_date: startDate.toISOString().split('T')[0],
-      end_date: endDate.toISOString().split('T')[0],
-    }) as { transactions: PlaidTransaction[] };
+      start_date: startDateStr,
+      end_date: endDateStr,
+    });
 
-    const transactions = response.transactions;
+    const transactions = response.data.transactions;
 
     // Store transactions in database
     for (const transaction of transactions) {

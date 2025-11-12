@@ -4,7 +4,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import { db } from '@ai-accountant/database';
 import { FilingType, FilingStatus } from '@ai-accountant/shared-types';
-import { generateVATFiling } from '../services/hmrc';
+import { generateVATFiling, HMRCClient } from '../services/hmrc';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
@@ -163,18 +163,96 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
       throw new ValidationError('Filing can only be submitted from draft or pending approval status');
     }
 
-    // Update status to submitted
-    // In production, this would call HMRC API
-    await db.query(
-      `UPDATE filings
-       SET status = $1, submitted_at = NOW(), updated_at = NOW()
-       WHERE id = $2`,
-      [FilingStatus.SUBMITTED, filingId]
+    // Get tenant VAT number
+    const tenantResult = await db.query<{ vat_number: string | null }>(
+      'SELECT vat_number FROM tenants WHERE id = $1',
+      [req.user.tenantId]
     );
 
-    logger.info('Filing submitted', { filingId, tenantId: req.user.tenantId });
+    const tenant = tenantResult.rows[0];
+    if (!tenant || !tenant.vat_number) {
+      res.status(400).json({ error: 'Tenant VAT number not configured' });
+      return;
+    }
 
-    res.json({ message: 'Filing submitted successfully' });
+    // Get filing data
+    const filingDataResult = await db.query<{ filing_data: Record<string, unknown> }>(
+      'SELECT filing_data FROM filings WHERE id = $1',
+      [filingId]
+    );
+
+    const filingDataRow = filingDataResult.rows[0];
+    if (!filingDataRow) {
+      res.status(404).json({ error: 'Filing not found' });
+      return;
+    }
+
+    const filingData = filingDataRow.filing_data;
+
+    // Submit to HMRC
+    try {
+      const hmrcClient = new HMRCClient({
+        clientId: process.env.HMRC_CLIENT_ID || '',
+        clientSecret: process.env.HMRC_CLIENT_SECRET || '',
+        serverToken: process.env.HMRC_SERVER_TOKEN || '',
+        isSandbox: process.env.HMRC_ENV !== 'production',
+      });
+
+      const submissionResult = await hmrcClient.submitVATReturn(
+        tenant.vat_number,
+        filingData.periodKey as string,
+        filingData.vatDueSales as number,
+        filingData.vatDueAcquisitions as number,
+        filingData.totalVatDue as number,
+        filingData.vatReclaimedCurrPeriod as number,
+        filingData.netVatDue as number,
+        filingData.totalValueSalesExVAT as number,
+        filingData.totalValuePurchasesExVAT as number,
+        filingData.totalValueGoodsSuppliedExVAT as number,
+        filingData.totalAcquisitionsExVAT as number
+      );
+
+      // Update status to submitted with submission details
+      await db.query(
+        `UPDATE filings
+         SET status = $1, 
+             submitted_at = NOW(), 
+             updated_at = NOW(),
+             filing_data = jsonb_set(filing_data, '{submissionId}', $3::jsonb),
+             filing_data = jsonb_set(filing_data, '{processingDate}', $4::jsonb)
+         WHERE id = $2`,
+        [
+          FilingStatus.SUBMITTED,
+          filingId,
+          JSON.stringify(submissionResult.submissionId),
+          JSON.stringify(submissionResult.processingDate),
+        ]
+      );
+
+      res.json({
+        message: 'Filing submitted successfully',
+        submissionId: submissionResult.submissionId,
+        processingDate: submissionResult.processingDate,
+      });
+    } catch (error) {
+      logger.error('HMRC submission failed', error instanceof Error ? error : new Error(String(error)));
+      
+      // Update status to error
+      await db.query(
+        `UPDATE filings
+         SET status = 'error',
+             updated_at = NOW(),
+             rejection_reason = $2
+         WHERE id = $1`,
+        [filingId, error instanceof Error ? error.message : 'Submission failed']
+      );
+
+      res.status(500).json({
+        error: 'Failed to submit filing to HMRC',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return;
+    }
   } catch (error) {
     logger.error('Submit filing failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {

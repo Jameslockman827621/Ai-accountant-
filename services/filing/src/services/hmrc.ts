@@ -1,5 +1,7 @@
 import axios, { AxiosInstance } from 'axios';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { calculateVATFromLedger } from './vatCalculation';
+import { TenantId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('filing-service');
 
@@ -79,22 +81,25 @@ export class HMRCClient {
     totalAcquisitionsExVAT: number
   ): Promise<{ submissionId: string; processingDate: string }> {
     await this.ensureAuthenticated();
-
+    
     try {
+      // HMRC API expects amounts in pence (multiply by 100)
+      const vatReturn = {
+        periodKey,
+        vatDueSales: Math.round(vatDueSales * 100),
+        vatDueAcquisitions: Math.round(vatDueAcquisitions * 100),
+        totalVatDue: Math.round(totalVatDue * 100),
+        vatReclaimedCurrPeriod: Math.round(vatReclaimedCurrPeriod * 100),
+        netVatDue: Math.round(netVatDue * 100),
+        totalValueSalesExVAT: Math.round(totalValueSalesExVAT * 100),
+        totalValuePurchasesExVAT: Math.round(totalValuePurchasesExVAT * 100),
+        totalValueGoodsSuppliedExVAT: Math.round(totalValueGoodsSuppliedExVAT * 100),
+        totalAcquisitionsExVAT: Math.round(totalAcquisitionsExVAT * 100),
+      };
+
       const response = await this.client.post(
         `/organisations/vat/${vrn}/returns`,
-        {
-          periodKey,
-          vatDueSales,
-          vatDueAcquisitions,
-          totalVatDue,
-          vatReclaimedCurrPeriod,
-          netVatDue,
-          totalValueSalesExVAT,
-          totalValuePurchasesExVAT,
-          totalValueGoodsSuppliedExVAT,
-          totalAcquisitionsExVAT,
-        },
+        vatReturn,
         {
           headers: {
             Authorization: `Bearer ${this.accessToken}`,
@@ -103,8 +108,8 @@ export class HMRCClient {
       );
 
       return {
-        submissionId: response.data.formBundleNumber,
-        processingDate: response.data.processingDate,
+        submissionId: response.data.formBundleNumber || response.data.receiptId || String(Date.now()),
+        processingDate: response.data.processingDate || new Date().toISOString(),
       };
     } catch (error) {
       logger.error('VAT return submission failed', error instanceof Error ? error : new Error(String(error)));
@@ -134,23 +139,23 @@ export class HMRCClient {
 }
 
 export async function generateVATFiling(
-  _tenantId: string,
+  tenantId: TenantId,
   periodStart: Date,
-  _periodEnd: Date
+  periodEnd: Date
 ): Promise<Record<string, unknown>> {
-  // This would calculate VAT from ledger entries
-  // For now, return a template structure
-  const periodKey = `${periodStart.getFullYear()}${String(periodStart.getMonth() + 1).padStart(2, '0')}`;
+  // Calculate VAT from ledger entries
+  const calculation = await calculateVATFromLedger(tenantId, periodStart, periodEnd);
+  
   return {
-    periodKey,
-    vatDueSales: 0,
-    vatDueAcquisitions: 0,
-    totalVatDue: 0,
-    vatReclaimedCurrPeriod: 0,
-    netVatDue: 0,
-    totalValueSalesExVAT: 0,
-    totalValuePurchasesExVAT: 0,
-    totalValueGoodsSuppliedExVAT: 0,
-    totalAcquisitionsExVAT: 0,
+    periodKey: calculation.periodKey,
+    vatDueSales: calculation.vatDueSales,
+    vatDueAcquisitions: calculation.vatDueAcquisitions,
+    totalVatDue: calculation.totalVatDue,
+    vatReclaimedCurrPeriod: calculation.vatReclaimedCurrPeriod,
+    netVatDue: calculation.netVatDue,
+    totalValueSalesExVAT: calculation.totalValueSalesExVAT,
+    totalValuePurchasesExVAT: calculation.totalValuePurchasesExVAT,
+    totalValueGoodsSuppliedExVAT: calculation.totalValueGoodsSuppliedExVAT,
+    totalAcquisitionsExVAT: calculation.totalAcquisitionsExVAT,
   };
 }
