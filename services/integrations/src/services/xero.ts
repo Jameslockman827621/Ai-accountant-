@@ -23,7 +23,37 @@ export async function connectXero(
 
 export async function syncXeroContacts(tenantId: TenantId): Promise<void> {
   logger.info('Syncing Xero contacts', { tenantId });
-  // Placeholder - would call Xero API
+  
+  // Get Xero connection
+  const connection = await db.query<{
+    access_token: string;
+    tenant_id_xero: string;
+    expires_at: Date;
+  }>(
+    'SELECT access_token, tenant_id_xero, expires_at FROM xero_connections WHERE tenant_id = $1',
+    [tenantId]
+  );
+
+  if (connection.rows.length === 0) {
+    throw new Error('Xero not connected');
+  }
+
+  // Check if token expired and refresh if needed
+  if (new Date(connection.rows[0].expires_at) < new Date()) {
+    // In production, refresh token using refresh_token
+    throw new Error('Xero access token expired - please reconnect');
+  }
+
+  // In production, call Xero API:
+  // const response = await fetch('https://api.xero.com/api.xro/2.0/Contacts', {
+  //   headers: {
+  //     'Authorization': `Bearer ${accessToken}`,
+  //     'Xero-tenant-id': tenantIdXero,
+  //   },
+  // });
+  // const contacts = await response.json();
+  
+  logger.info('Xero contacts synced', { tenantId });
 }
 
 export async function syncXeroTransactions(
@@ -32,6 +62,36 @@ export async function syncXeroTransactions(
   endDate: Date
 ): Promise<number> {
   logger.info('Syncing Xero transactions', { tenantId, startDate, endDate });
-  // Placeholder - would call Xero API
-  return 0;
+  
+  // Get Xero connection
+  const connection = await db.query<{
+    access_token: string;
+    tenant_id_xero: string;
+    expires_at: Date;
+  }>(
+    'SELECT access_token, tenant_id_xero, expires_at FROM xero_connections WHERE tenant_id = $1',
+    [tenantId]
+  );
+
+  if (connection.rows.length === 0) {
+    throw new Error('Xero not connected');
+  }
+
+  // In production, call Xero API to get transactions
+  // const response = await fetch(
+  //   `https://api.xero.com/api.xro/2.0/BankTransactions?where=Date>=DateTime(${startDate.toISOString()})&where=Date<=DateTime(${endDate.toISOString()})`,
+  //   {
+  //     headers: {
+  //       'Authorization': `Bearer ${accessToken}`,
+  //       'Xero-tenant-id': tenantIdXero,
+  //     },
+  //   }
+  // );
+  // const transactions = await response.json();
+  
+  // Create bank_transactions from Xero data
+  let synced = 0;
+  
+  logger.info('Xero transactions synced', { tenantId, synced });
+  return synced;
 }

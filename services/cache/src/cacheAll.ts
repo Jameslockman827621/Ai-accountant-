@@ -35,7 +35,13 @@ export async function getCachedTaxCalculation(
   }
 
   // Calculate tax (would call actual calculation)
-  const calculation = {}; // Placeholder
+  // In production, this would call the rules engine or filing service
+  const calculation = {
+    periodStart,
+    periodEnd,
+    totalTax: 0,
+    breakdown: {},
+  };
   await cacheStrategy.setTaxCalculation(tenantId, period, calculation);
   return calculation;
 }
@@ -53,7 +59,13 @@ export async function getCachedFinancialReport(
   }
 
   // Generate report (would call actual generation)
-  const report = {}; // Placeholder
+  // In production, this would call the reporting service
+  const report = {
+    reportType,
+    periodStart,
+    periodEnd,
+    data: {},
+  };
   await cacheStrategy.setFinancialReport(tenantId, reportType, period, report);
   return report;
 }

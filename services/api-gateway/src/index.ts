@@ -32,6 +32,11 @@ const INTEGRATIONS_SERVICE = process.env.INTEGRATIONS_SERVICE_URL || 'http://loc
 const BANK_FEED_SERVICE = process.env.BANK_FEED_SERVICE_URL || 'http://localhost:3016';
 const CLASSIFICATION_SERVICE = process.env.CLASSIFICATION_SERVICE_URL || 'http://localhost:3017';
 const OCR_SERVICE = process.env.OCR_SERVICE_URL || 'http://localhost:3018';
+const VALIDATION_SERVICE = process.env.VALIDATION_SERVICE_URL || 'http://localhost:3020';
+const SUPPORT_SERVICE = process.env.SUPPORT_SERVICE_URL || 'http://localhost:3021';
+const ONBOARDING_SERVICE = process.env.ONBOARDING_SERVICE_URL || 'http://localhost:3022';
+const BACKUP_SERVICE = process.env.BACKUP_SERVICE_URL || 'http://localhost:3023';
+const ERROR_HANDLING_SERVICE = process.env.ERROR_HANDLING_SERVICE_URL || 'http://localhost:3024';
 
 // Security middleware
 app.use(helmet());
@@ -93,6 +98,11 @@ app.use('/api/analytics', createServiceProxy(ANALYTICS_SERVICE, { '^/api/analyti
 app.use('/api/automation', createServiceProxy(AUTOMATION_SERVICE, { '^/api/automation': '/api/automation' }));
 app.use('/api/integrations', createServiceProxy(INTEGRATIONS_SERVICE, { '^/api/integrations': '/api/integrations' }));
 app.use('/api/bank-feed', createServiceProxy(BANK_FEED_SERVICE, { '^/api/bank-feed': '/api/bank-feed' }));
+app.use('/api/validation', createServiceProxy(VALIDATION_SERVICE, { '^/api/validation': '/api/validation' }));
+app.use('/api/support', createServiceProxy(SUPPORT_SERVICE, { '^/api/support': '/api/support' }));
+app.use('/api/onboarding', createServiceProxy(ONBOARDING_SERVICE, { '^/api/onboarding': '/api/onboarding' }));
+app.use('/api/backup', createServiceProxy(BACKUP_SERVICE, { '^/api/backup': '/api/backup' }));
+app.use('/api/errors', createServiceProxy(ERROR_HANDLING_SERVICE, { '^/api/errors': '/api/errors' }));
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
@@ -125,6 +135,11 @@ app.listen(PORT, () => {
     automation: AUTOMATION_SERVICE,
     integrations: INTEGRATIONS_SERVICE,
     bankFeed: BANK_FEED_SERVICE,
+    validation: VALIDATION_SERVICE,
+    support: SUPPORT_SERVICE,
+    onboarding: ONBOARDING_SERVICE,
+    backup: BACKUP_SERVICE,
+    errorHandling: ERROR_HANDLING_SERVICE,
   });
 });
 

@@ -197,4 +197,122 @@ router.get('/:documentId', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Get review queue
+router.get('/review/queue', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { limit } = req.query;
+    const { getReviewQueue } = await import('../services/documentReview');
+
+    const queue = await getReviewQueue(req.user.tenantId, limit ? parseInt(String(limit), 10) : 50);
+    res.json({ queue });
+  } catch (error) {
+    logger.error('Get review queue failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get review queue' });
+  }
+});
+
+// Update extracted data
+router.put('/:documentId/extracted-data', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const { extractedData } = req.body;
+
+    if (!extractedData) {
+      throw new ValidationError('extractedData is required');
+    }
+
+    const { updateExtractedData } = await import('../services/documentReview');
+
+    await updateExtractedData(documentId, req.user.tenantId, extractedData);
+
+    res.json({ message: 'Extracted data updated' });
+  } catch (error) {
+    logger.error('Update extracted data failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to update extracted data' });
+  }
+});
+
+// Approve document
+router.post('/:documentId/approve', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const { approveDocument } = await import('../services/documentReview');
+
+    await approveDocument(documentId, req.user.tenantId);
+
+    res.json({ message: 'Document approved' });
+  } catch (error) {
+    logger.error('Approve document failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to approve document' });
+  }
+});
+
+// Reject document
+router.post('/:documentId/reject', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const { reason } = req.body;
+
+    if (!reason) {
+      throw new ValidationError('reason is required');
+    }
+
+    const { rejectDocument } = await import('../services/documentReview');
+
+    await rejectDocument(documentId, req.user.tenantId, reason);
+
+    res.json({ message: 'Document rejected' });
+  } catch (error) {
+    logger.error('Reject document failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to reject document' });
+  }
+});
+
+// Detect duplicates
+router.get('/:documentId/duplicates', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const { detectDuplicates } = await import('../services/duplicateDetection');
+
+    const duplicates = await detectDuplicates(req.user.tenantId, documentId);
+    res.json({ duplicates });
+  } catch (error) {
+    logger.error('Detect duplicates failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to detect duplicates' });
+  }
+});
+
 export { router as documentRouter };
