@@ -1,0 +1,98 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: auth-service
+        image: ai-accountant/auth-service:latest
+        ports:
+        - containerPort: 3001
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: document-ingest-service
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: document-ingest-service
+        image: ai-accountant/document-ingest-service:latest
+        ports:
+        - containerPort: 3002
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocr-service
+spec:
+  replicas: 5
+  template:
+    spec:
+      containers:
+      - name: ocr-service
+        image: ai-accountant/ocr-service:latest
+        ports:
+        - containerPort: 3003
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: ledger-service
+        image: ai-accountant/ledger-service:latest
+        ports:
+        - containerPort: 3004
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: assistant-service
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: assistant-service
+        image: ai-accountant/assistant-service:latest
+        ports:
+        - containerPort: 3005
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: filing-service
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+      - name: filing-service
+        image: ai-accountant/filing-service:latest
+        ports:
+        - containerPort: 3006
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reporting-service
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers:
+      - name: reporting-service
+        image: ai-accountant/reporting-service:latest
+        ports:
+        - containerPort: 3010

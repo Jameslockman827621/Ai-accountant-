@@ -1,13 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { db } from '@ai-accountant/database';
 
-describe('Ledger Service', () => {
+describe('Billing Service', () => {
   let testTenantId: string;
 
   beforeAll(async () => {
     const tenantResult = await db.query<{ id: string }>(
       `INSERT INTO tenants (name, country, subscription_tier)
-       VALUES ('Test Ledger Tenant', 'GB', 'freelancer')
+       VALUES ('Test Billing Tenant', 'GB', 'freelancer')
        RETURNING id`
     );
     testTenantId = tenantResult.rows[0]?.id || '';
@@ -20,20 +20,23 @@ describe('Ledger Service', () => {
     await db.close();
   });
 
-  it('should create ledger entry', async () => {
+  it('should create subscription', async () => {
     const result = await db.query(
-      `INSERT INTO ledger_entries (
-        tenant_id, entry_type, amount, description, transaction_date, account_code, account_name
-      ) VALUES ($1, 'credit', 1000, 'Test Entry', NOW(), '4001', 'Sales')
-      RETURNING id`,
+      `INSERT INTO subscriptions (tenant_id, plan, status, current_period_start, current_period_end)
+       VALUES ($1, 'freelancer', 'active', NOW(), NOW() + INTERVAL '1 month')
+       RETURNING id`,
       [testTenantId]
     );
     expect(result.rows[0]?.id).toBeDefined();
   });
 
-  it('should enforce double-entry accounting', () => {
-    const debit = 500;
-    const credit = 500;
-    expect(debit).toBe(credit);
+  it('should track usage', async () => {
+    const result = await db.query(
+      `INSERT INTO usage_metrics (tenant_id, metric_type, value, period)
+       VALUES ($1, 'documents_processed', 100, DATE_TRUNC('month', NOW()))
+       RETURNING id`,
+      [testTenantId]
+    );
+    expect(result.rows[0]?.id).toBeDefined();
   });
 });

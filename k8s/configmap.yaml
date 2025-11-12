@@ -2,25 +2,28 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: ai-accountant-config
-  namespace: ai-accountant
 data:
   NODE_ENV: "production"
   LOG_LEVEL: "info"
-  RABBITMQ_URL: "amqp://rabbitmq:5672"
-  S3_ENDPOINT: "http://minio:9000"
-  CHROMA_URL: "http://chromadb:8000"
-  REDIS_URL: "redis://redis:6379"
+  DATABASE_POOL_SIZE: "20"
+  REDIS_TTL: "3600"
+  CACHE_ENABLED: "true"
 
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: ai-accountant-secrets
-  namespace: ai-accountant
+  name: database-secrets
 type: Opaque
 stringData:
-  database-url: "postgresql://postgres:postgres@postgres:5432/ai_accountant"
-  jwt-secret: "change-me-in-production"
-  openai-api-key: "change-me"
-  plaid-client-id: "change-me"
-  plaid-secret: "change-me"
+  url: "postgresql://user:password@postgres:5432/ai_accountant"
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+type: Opaque
+stringData:
+  jwt-secret: "your-jwt-secret-here"
+  encryption-key: "your-encryption-key-here"

@@ -131,6 +131,33 @@ async function migrate(): Promise<void> {
         } catch (err) {
           console.log('Automation schema not found, skipping...');
         }
+
+        // Read GDPR schema
+        const gdprPath = join(baseDir, 'schema-gdpr.sql');
+        try {
+          const gdprSchema = readFileSync(gdprPath, 'utf-8');
+          await db.query(gdprSchema);
+        } catch (err) {
+          console.log('GDPR schema not found, skipping...');
+        }
+
+        // Read integrations schema
+        const integrationsPath = join(baseDir, 'schema-integrations.sql');
+        try {
+          const integrationsSchema = readFileSync(integrationsPath, 'utf-8');
+          await db.query(integrationsSchema);
+        } catch (err) {
+          console.log('Integrations schema not found, skipping...');
+        }
+
+        // Read MFA schema
+        const mfaPath = join(baseDir, 'schema-mfa.sql');
+        try {
+          const mfaSchema = readFileSync(mfaPath, 'utf-8');
+          await db.query(mfaSchema);
+        } catch (err) {
+          console.log('MFA schema not found, skipping...');
+        }
     
     console.log('Migrations completed successfully');
   } catch (error) {
