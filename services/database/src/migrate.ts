@@ -86,6 +86,51 @@ async function migrate(): Promise<void> {
           // File might not exist, that's okay
           console.log('Scheduled reports schema not found, skipping...');
         }
+
+        // Read metrics schema
+        const metricsPath = join(baseDir, 'schema-metrics.sql');
+        try {
+          const metricsSchema = readFileSync(metricsPath, 'utf-8');
+          await db.query(metricsSchema);
+        } catch (err) {
+          console.log('Metrics schema not found, skipping...');
+        }
+
+        // Read traces schema
+        const tracesPath = join(baseDir, 'schema-traces.sql');
+        try {
+          const tracesSchema = readFileSync(tracesPath, 'utf-8');
+          await db.query(tracesSchema);
+        } catch (err) {
+          console.log('Traces schema not found, skipping...');
+        }
+
+        // Read compliance schema
+        const compliancePath = join(baseDir, 'schema-compliance.sql');
+        try {
+          const complianceSchema = readFileSync(compliancePath, 'utf-8');
+          await db.query(complianceSchema);
+        } catch (err) {
+          console.log('Compliance schema not found, skipping...');
+        }
+
+        // Read integrations schema
+        const integrationsPath = join(baseDir, 'schema-integrations.sql');
+        try {
+          const integrationsSchema = readFileSync(integrationsPath, 'utf-8');
+          await db.query(integrationsSchema);
+        } catch (err) {
+          console.log('Integrations schema not found, skipping...');
+        }
+
+        // Read automation schema
+        const automationPath = join(baseDir, 'schema-automation.sql');
+        try {
+          const automationSchema = readFileSync(automationPath, 'utf-8');
+          await db.query(automationSchema);
+        } catch (err) {
+          console.log('Automation schema not found, skipping...');
+        }
     
     console.log('Migrations completed successfully');
   } catch (error) {

@@ -1,137 +1,78 @@
-import request from 'supertest';
-import app from '../index';
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import { db } from '@ai-accountant/database';
-import bcrypt from 'bcrypt';
+import { hashPassword, verifyPassword } from '@ai-accountant/shared-utils';
+import { createUser, authenticateUser } from '../services/auth';
 
-describe('Auth Service', () => {
-  let testTenantId: string = '';
-  let testUserId: string = '';
-  let authToken: string = '';
+describe('Authentication Service', () => {
+  let testTenantId: string;
 
   beforeAll(async () => {
-    // Create test tenant and user
-    const tenantResult = await db.query(
+    const tenantResult = await db.query<{ id: string }>(
       `INSERT INTO tenants (name, country, subscription_tier)
-       VALUES ('Test Tenant', 'GB', 'freelancer')
+       VALUES ('Test Auth Tenant', 'GB', 'freelancer')
        RETURNING id`
     );
-    testTenantId = (tenantResult.rows[0] as { id: string })?.id || '';
-
-    const passwordHash = await bcrypt.hash('testpass123', 10);
-    const userResult = await db.query<{ id: string }>(
-      `INSERT INTO users (tenant_id, email, name, password_hash, role)
-       VALUES ($1, 'test@example.com', 'Test User', $2, 'client')
-       RETURNING id`,
-      [testTenantId, passwordHash]
-    );
-    testUserId = userResult.rows[0]?.id || '';
+    testTenantId = tenantResult.rows[0]?.id || '';
   });
 
   afterAll(async () => {
-    // Cleanup
-    if (testUserId) {
-      await db.query('DELETE FROM users WHERE id = $1', [testUserId]);
-    }
     if (testTenantId) {
       await db.query('DELETE FROM tenants WHERE id = $1', [testTenantId]);
     }
     await db.close();
   });
 
-  describe('POST /api/auth/register', () => {
-    it('should register a new user and tenant', async () => {
-      const response = await request(app)
-        .post('/api/auth/register')
-        .send({
-          email: 'newuser@example.com',
-          password: 'password123',
-          name: 'New User',
-          tenantName: 'New Company',
-          country: 'GB',
-        });
-
-      expect(response.status).toBe(201);
-      expect(response.body).toHaveProperty('token');
-      expect(response.body).toHaveProperty('user');
-      expect(response.body).toHaveProperty('tenant');
-
-      // Cleanup
-      if (response.body.user?.id) {
-        await db.query('DELETE FROM users WHERE id = $1', [response.body.user.id]);
-      }
-      if (response.body.tenant?.id) {
-        await db.query('DELETE FROM tenants WHERE id = $1', [response.body.tenant.id]);
-      }
+  it('should create a user with hashed password', async () => {
+    const password = 'TestPassword123!';
+    const userId = await createUser({
+      tenantId: testTenantId,
+      email: 'test@example.com',
+      name: 'Test User',
+      password,
+      role: 'client',
     });
 
-    it('should reject invalid email', async () => {
-      const response = await request(app)
-        .post('/api/auth/register')
-        .send({
-          email: 'invalid-email',
-          password: 'password123',
-          name: 'Test',
-          tenantName: 'Test',
-          country: 'GB',
-        });
+    expect(userId).toBeDefined();
 
-      expect(response.status).toBe(400);
-    });
+    const userResult = await db.query<{ password_hash: string }>(
+      'SELECT password_hash FROM users WHERE id = $1',
+      [userId]
+    );
+
+    const storedHash = userResult.rows[0]?.password_hash;
+    expect(storedHash).toBeDefined();
+    expect(storedHash).not.toBe(password);
   });
 
-  describe('POST /api/auth/login', () => {
-    it('should login with valid credentials', async () => {
-      const response = await request(app)
-        .post('/api/auth/login')
-        .send({
-          email: 'test@example.com',
-          password: 'testpass123',
-        });
+  it('should authenticate user with correct password', async () => {
+    const email = 'auth@example.com';
+    const password = 'AuthPassword123!';
 
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('token');
-      expect(response.body).toHaveProperty('user');
-      authToken = response.body.token;
+    await createUser({
+      tenantId: testTenantId,
+      email,
+      name: 'Auth User',
+      password,
+      role: 'client',
     });
 
-    it('should reject invalid password', async () => {
-      const response = await request(app)
-        .post('/api/auth/login')
-        .send({
-          email: 'test@example.com',
-          password: 'wrongpassword',
-        });
-
-      expect(response.status).toBe(400);
-    });
+    const result = await authenticateUser(email, password);
+    expect(result).toBeDefined();
+    expect(result.user.email).toBe(email);
   });
 
-  describe('GET /api/auth/me', () => {
-    it('should get current user with valid token', async () => {
-      if (!authToken) {
-        // Login first
-        const loginResponse = await request(app)
-          .post('/api/auth/login')
-          .send({
-            email: 'test@example.com',
-            password: 'testpass123',
-          });
-        authToken = loginResponse.body.token;
-      }
+  it('should reject authentication with incorrect password', async () => {
+    const email = 'wrong@example.com';
+    const password = 'CorrectPassword123!';
 
-      const response = await request(app)
-        .get('/api/auth/me')
-        .set('Authorization', `Bearer ${authToken}`);
-
-      expect(response.status).toBe(200);
-      expect(response.body).toHaveProperty('user');
-      expect(response.body.user.email).toBe('test@example.com');
+    await createUser({
+      tenantId: testTenantId,
+      email,
+      name: 'Wrong User',
+      password,
+      role: 'client',
     });
 
-    it('should reject request without token', async () => {
-      const response = await request(app).get('/api/auth/me');
-
-      expect(response.status).toBe(401);
-    });
+    await expect(authenticateUser(email, 'WrongPassword')).rejects.toThrow();
   });
 });

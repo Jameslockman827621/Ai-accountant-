@@ -4,130 +4,111 @@ import { TenantId, UserId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('compliance-service');
 
-export async function deleteUserData(tenantId: TenantId, userId: UserId): Promise<void> {
-  logger.info('Deleting user data for GDPR compliance', { tenantId, userId });
-
-  await db.transaction(async (client) => {
-    // Anonymize user data instead of deleting (for audit trail)
-    await client.query(
-      `UPDATE users
-       SET email = $1, name = $2, password_hash = $3, is_active = false
-       WHERE id = $4 AND tenant_id = $5`,
-      [
-        `deleted-${userId}@deleted.local`,
-        'Deleted User',
-        'deleted',
-        userId,
-        tenantId,
-      ]
-    );
-
-    // Anonymize documents uploaded by user
-    await client.query(
-      `UPDATE documents
-       SET uploaded_by = NULL, file_name = 'deleted', storage_key = 'deleted'
-       WHERE uploaded_by = $1 AND tenant_id = $2`,
-      [userId, tenantId]
-    );
-
-    // Anonymize ledger entries created by user
-    await client.query(
-      `UPDATE ledger_entries
-       SET created_by = NULL, description = 'Deleted entry'
-       WHERE created_by = $1 AND tenant_id = $2`,
-      [userId, tenantId]
-    );
-
-    logger.info('User data deleted', { tenantId, userId });
-  });
+export interface GDPRConsent {
+  id: string;
+  tenantId: TenantId;
+  userId: UserId;
+  consentType: string;
+  granted: boolean;
+  grantedAt: Date;
+  revokedAt: Date | null;
 }
 
-export async function exportUserData(tenantId: TenantId, userId: UserId): Promise<Record<string, unknown>> {
-  logger.info('Exporting user data for GDPR compliance', { tenantId, userId });
+export async function grantConsent(
+  tenantId: TenantId,
+  userId: UserId,
+  consentType: string,
+  metadata?: Record<string, unknown>
+): Promise<string> {
+  const consentId = crypto.randomUUID();
 
-  const [userResult, documentsResult, ledgerResult, auditResult] = await Promise.all([
-    db.query('SELECT * FROM users WHERE id = $1 AND tenant_id = $2', [userId, tenantId]),
-    db.query('SELECT * FROM documents WHERE uploaded_by = $1 AND tenant_id = $2', [userId, tenantId]),
-    db.query('SELECT * FROM ledger_entries WHERE created_by = $1 AND tenant_id = $2', [userId, tenantId]),
-    db.query('SELECT * FROM audit_logs WHERE user_id = $1 AND tenant_id = $2', [userId, tenantId]),
-  ]) as [
-    { rows: Array<Record<string, unknown>> },
-    { rows: Array<Record<string, unknown>> },
-    { rows: Array<Record<string, unknown>> },
-    { rows: Array<Record<string, unknown>> },
-  ];
+  // Revoke any existing consent of this type
+  await db.query(
+    `UPDATE gdpr_consents
+     SET revoked_at = NOW()
+     WHERE tenant_id = $1 AND user_id = $2 AND consent_type = $3 AND revoked_at IS NULL`,
+    [tenantId, userId, consentType]
+  );
+
+  // Grant new consent
+  await db.query(
+    `INSERT INTO gdpr_consents (id, tenant_id, user_id, consent_type, granted, metadata)
+     VALUES ($1, $2, $3, $4, true, $5::jsonb)`,
+    [consentId, tenantId, userId, consentType, JSON.stringify(metadata || {})]
+  );
+
+  logger.info('GDPR consent granted', { tenantId, userId, consentType });
+  return consentId;
+}
+
+export async function revokeConsent(
+  tenantId: TenantId,
+  userId: UserId,
+  consentType: string
+): Promise<void> {
+  await db.query(
+    `UPDATE gdpr_consents
+     SET revoked_at = NOW()
+     WHERE tenant_id = $1 AND user_id = $2 AND consent_type = $3 AND revoked_at IS NULL`,
+    [tenantId, userId, consentType]
+  );
+
+  logger.info('GDPR consent revoked', { tenantId, userId, consentType });
+}
+
+export async function hasConsent(
+  tenantId: TenantId,
+  userId: UserId,
+  consentType: string
+): Promise<boolean> {
+  const result = await db.query<{ count: string | number }>(
+    `SELECT COUNT(*) as count
+     FROM gdpr_consents
+     WHERE tenant_id = $1 AND user_id = $2 AND consent_type = $3
+       AND granted = true AND revoked_at IS NULL`,
+    [tenantId, userId, consentType]
+  );
+
+  const count = typeof result.rows[0]?.count === 'number'
+    ? result.rows[0].count
+    : parseInt(String(result.rows[0]?.count || '0'), 10);
+
+  return count > 0;
+}
+
+export async function exportUserData(userId: UserId): Promise<Record<string, unknown>> {
+  // Export all user data for GDPR right to data portability
+  const userResult = await db.query(
+    'SELECT * FROM users WHERE id = $1',
+    [userId]
+  );
+
+  const documentsResult = await db.query(
+    'SELECT * FROM documents WHERE uploaded_by = $1',
+    [userId]
+  );
+
+  const ledgerEntriesResult = await db.query(
+    'SELECT * FROM ledger_entries WHERE created_by = $1',
+    [userId]
+  );
 
   return {
     user: userResult.rows[0] || null,
     documents: documentsResult.rows,
-    ledgerEntries: ledgerResult.rows,
-    auditLogs: auditResult.rows,
+    ledgerEntries: ledgerEntriesResult.rows,
     exportedAt: new Date().toISOString(),
   };
 }
 
-export async function getAuditLogs(
-  tenantId: TenantId,
-  filters: {
-    userId?: UserId;
-    resourceType?: string;
-    resourceId?: string;
-    startDate?: Date;
-    endDate?: Date;
-    limit?: number;
-    offset?: number;
-  } = {}
-): Promise<{ logs: unknown[]; total: number }> {
-  const conditions: string[] = ['tenant_id = $1'];
-  const params: unknown[] = [tenantId];
-  let paramCount = 2;
-
-  if (filters.userId) {
-    conditions.push(`user_id = $${paramCount++}`);
-    params.push(filters.userId);
-  }
-
-  if (filters.resourceType) {
-    conditions.push(`resource_type = $${paramCount++}`);
-    params.push(filters.resourceType);
-  }
-
-  if (filters.resourceId) {
-    conditions.push(`resource_id = $${paramCount++}`);
-    params.push(filters.resourceId);
-  }
-
-  if (filters.startDate) {
-    conditions.push(`created_at >= $${paramCount++}`);
-    params.push(filters.startDate);
-  }
-
-  if (filters.endDate) {
-    conditions.push(`created_at <= $${paramCount++}`);
-    params.push(filters.endDate);
-  }
-
-  const limit = filters.limit || 100;
-  const offset = filters.offset || 0;
-
-  const logsResult = await db.query(
-    `SELECT * FROM audit_logs
-     WHERE ${conditions.join(' AND ')}
-     ORDER BY created_at DESC
-     LIMIT $${paramCount} OFFSET $${paramCount + 1}`,
-    [...params, limit, offset]
-  );
-
-  const countResult = await db.query(
-    `SELECT COUNT(*) as total FROM audit_logs WHERE ${conditions.join(' AND ')}`,
-    params
-  );
-
-  const totalRow = countResult.rows[0];
-  const total = totalRow ? (typeof totalRow.total === 'number' ? totalRow.total : parseInt(String(totalRow.total || '0'), 10)) : 0;
+export async function deleteUserData(userId: UserId): Promise<void> {
+  // Delete all user data for GDPR right to erasure
+  // Note: Some data may need to be retained for legal/compliance reasons
   
-  return {
-    logs: logsResult.rows,
-    total,
-  };
+  await db.query('DELETE FROM gdpr_consents WHERE user_id = $1', [userId]);
+  await db.query('UPDATE documents SET uploaded_by = NULL WHERE uploaded_by = $1', [userId]);
+  await db.query('UPDATE ledger_entries SET created_by = NULL WHERE created_by = $1', [userId]);
+  await db.query('DELETE FROM users WHERE id = $1', [userId]);
+
+  logger.info('User data deleted', { userId });
 }
