@@ -123,3 +123,16 @@ export function createMonitoringApp(): Express {
 
   return app;
 }
+
+// Start server if this file is run directly
+if (require.main === module) {
+  const { config } = require('dotenv');
+  config();
+
+  const app = createMonitoringApp();
+  const PORT = process.env.PORT || 3010;
+
+  app.listen(PORT, () => {
+    logger.info(`Monitoring service listening on port ${PORT}`);
+  });
+}
