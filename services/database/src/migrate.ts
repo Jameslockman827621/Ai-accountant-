@@ -66,6 +66,26 @@ async function migrate(): Promise<void> {
           // File might not exist, that's okay
           console.log('Accountant schema not found, skipping...');
         }
+
+        // Read custom reports schema
+        const customReportsPath = join(baseDir, 'schema-custom-reports.sql');
+        try {
+          const customReportsSchema = readFileSync(customReportsPath, 'utf-8');
+          await db.query(customReportsSchema);
+        } catch (err) {
+          // File might not exist, that's okay
+          console.log('Custom reports schema not found, skipping...');
+        }
+
+        // Read scheduled reports schema
+        const scheduledReportsPath = join(baseDir, 'schema-scheduled-reports.sql');
+        try {
+          const scheduledReportsSchema = readFileSync(scheduledReportsPath, 'utf-8');
+          await db.query(scheduledReportsSchema);
+        } catch (err) {
+          // File might not exist, that's okay
+          console.log('Scheduled reports schema not found, skipping...');
+        }
     
     console.log('Migrations completed successfully');
   } catch (error) {
