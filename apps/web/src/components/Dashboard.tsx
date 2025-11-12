@@ -1,102 +1,129 @@
-'use client';
+import React, { useState, useEffect } from 'react';
+import { useAuth } from '../hooks/useAuth';
 
-import { useState, useEffect } from 'react';
-import DocumentUpload from './DocumentUpload';
-import AssistantChat from './AssistantChat';
-import LedgerView from './LedgerView';
-
-interface User {
-  id: string;
-  email: string;
-  name: string;
-  role: string;
+interface DashboardStats {
+  revenue: number;
+  expenses: number;
+  profit: number;
+  vatDue: number;
+  upcomingDeadlines: Array<{ type: string; due: Date; amount: number }>;
 }
 
-interface DashboardProps {
-  user: User;
-  token: string;
-  onLogout: () => void;
-}
-
-export default function Dashboard({ user, token, onLogout }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState<'documents' | 'ledger' | 'assistant'>('documents');
-  const [documents, setDocuments] = useState<any[]>([]);
+export function Dashboard() {
+  const { token } = useAuth();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDocuments();
+    async function fetchStats() {
+      try {
+        const response = await fetch('/api/dashboard/stats', {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          setStats(data);
+        }
+      } catch (error) {
+        console.error('Failed to fetch dashboard stats', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    if (token) {
+      fetchStats();
+    }
   }, [token]);
 
-  const fetchDocuments = async () => {
-    try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/documents`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+  if (loading) {
+    return <div className="flex items-center justify-center h-screen">Loading...</div>;
+  }
 
-      if (response.ok) {
-        const data = await response.json();
-        setDocuments(data.documents || []);
-      }
-    } catch (error) {
-      console.error('Failed to fetch documents:', error);
-    }
+  if (!stats) {
+    return <div className="flex items-center justify-center h-screen">No data available</div>;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50 p-8">
+      <div className="max-w-7xl mx-auto">
+        <h1 className="text-3xl font-bold mb-8">Dashboard</h1>
+
+        {/* Stats Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          <StatCard
+            title="Revenue"
+            value={`£${stats.revenue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            trend="up"
+            color="green"
+          />
+          <StatCard
+            title="Expenses"
+            value={`£${stats.expenses.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            trend="down"
+            color="red"
+          />
+          <StatCard
+            title="Profit"
+            value={`£${stats.profit.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            trend={stats.profit >= 0 ? 'up' : 'down'}
+            color={stats.profit >= 0 ? 'green' : 'red'}
+          />
+          <StatCard
+            title="VAT Due"
+            value={`£${stats.vatDue.toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+            trend="neutral"
+            color="blue"
+          />
+        </div>
+
+        {/* Upcoming Deadlines */}
+        <div className="bg-white rounded-lg shadow p-6">
+          <h2 className="text-xl font-semibold mb-4">Upcoming Deadlines</h2>
+          {stats.upcomingDeadlines.length > 0 ? (
+            <div className="space-y-3">
+              {stats.upcomingDeadlines.map((deadline, index) => (
+                <div key={index} className="flex justify-between items-center p-3 bg-gray-50 rounded">
+                  <div>
+                    <p className="font-medium">{deadline.type}</p>
+                    <p className="text-sm text-gray-600">
+                      Due: {new Date(deadline.due).toLocaleDateString('en-GB')}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="font-semibold">£{deadline.amount.toFixed(2)}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-gray-500">No upcoming deadlines</p>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ title, value, trend, color }: {
+  title: string;
+  value: string;
+  trend: 'up' | 'down' | 'neutral';
+  color: 'green' | 'red' | 'blue';
+}) {
+  const colorClasses = {
+    green: 'bg-green-50 border-green-200',
+    red: 'bg-red-50 border-red-200',
+    blue: 'bg-blue-50 border-blue-200',
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <nav className="bg-white shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between h-16">
-            <div className="flex">
-              <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-primary-600">AI Accountant</h1>
-              </div>
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
-                <button
-                  onClick={() => setActiveTab('documents')}
-                  className={`border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'documents' ? 'border-primary-500 text-primary-600' : ''
-                  }`}
-                >
-                  Documents
-                </button>
-                <button
-                  onClick={() => setActiveTab('ledger')}
-                  className={`border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'ledger' ? 'border-primary-500 text-primary-600' : ''
-                  }`}
-                >
-                  Ledger
-                </button>
-                <button
-                  onClick={() => setActiveTab('assistant')}
-                  className={`border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm ${
-                    activeTab === 'assistant' ? 'border-primary-500 text-primary-600' : ''
-                  }`}
-                >
-                  Assistant
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center">
-              <span className="text-sm text-gray-700 mr-4">{user.name}</span>
-              <button
-                onClick={onLogout}
-                className="text-sm text-gray-500 hover:text-gray-700"
-              >
-                Logout
-              </button>
-            </div>
-          </div>
-        </div>
-      </nav>
-
-      <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-        {activeTab === 'documents' && <DocumentUpload token={token} onUpload={fetchDocuments} />}
-        {activeTab === 'ledger' && <LedgerView token={token} />}
-        {activeTab === 'assistant' && <AssistantChat token={token} />}
-      </main>
+    <div className={`bg-white rounded-lg shadow p-6 border-l-4 ${colorClasses[color]}`}>
+      <h3 className="text-sm font-medium text-gray-600 mb-2">{title}</h3>
+      <p className="text-2xl font-bold">{value}</p>
     </div>
   );
 }

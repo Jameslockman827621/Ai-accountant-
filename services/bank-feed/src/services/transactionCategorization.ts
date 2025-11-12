@@ -287,9 +287,10 @@ export async function autoCategorizeTransactions(
 
       categorized++;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('Failed to categorize transaction', {
         transactionId: transaction.id,
-        error: error instanceof Error ? error : new Error(String(error)),
+        error: errorMessage,
       });
       failed++;
     }

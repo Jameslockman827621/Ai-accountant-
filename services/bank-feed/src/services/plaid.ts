@@ -9,9 +9,9 @@ const PLAID_CLIENT_ID = process.env.PLAID_CLIENT_ID || '';
 const PLAID_SECRET = process.env.PLAID_SECRET || '';
 const PLAID_ENV = process.env.PLAID_ENV || 'sandbox';
 
-const basePath: string = PLAID_ENV === 'production' 
+const basePath = (PLAID_ENV === 'production' 
   ? PlaidEnvironments.production 
-  : PlaidEnvironments.sandbox;
+  : PlaidEnvironments.sandbox) as string;
 
 const configuration = new Configuration({
   basePath: basePath as string,

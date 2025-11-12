@@ -59,11 +59,16 @@ async function trueLayerRequest(
     headers['Authorization'] = `Basic ${credentials}`;
   }
 
-  const response = await fetch(`${TRUELAYER_BASE_URL}${endpoint}`, {
+  const fetchOptions: RequestInit = {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+  
+  if (body) {
+    fetchOptions.body = JSON.stringify(body);
+  }
+  
+  const response = await fetch(`${TRUELAYER_BASE_URL}${endpoint}`, fetchOptions);
 
   if (!response.ok) {
     throw new Error(`TrueLayer request failed: ${response.statusText}`);
@@ -72,7 +77,7 @@ async function trueLayerRequest(
   return response.json();
 }
 
-export async function createTrueLayerAuthLink(userId: string, redirectUri: string): Promise<string> {
+export async function createTrueLayerAuthLink(_userId: string, redirectUri: string): Promise<string> {
   try {
     const response = await trueLayerRequest(
       '/connect/token',
