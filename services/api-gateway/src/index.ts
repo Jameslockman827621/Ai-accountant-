@@ -18,6 +18,12 @@ const DOCUMENT_SERVICE = process.env.DOCUMENT_SERVICE_URL || 'http://localhost:3
 const LEDGER_SERVICE = process.env.LEDGER_SERVICE_URL || 'http://localhost:3003';
 const RULES_SERVICE = process.env.RULES_SERVICE_URL || 'http://localhost:3004';
 const ASSISTANT_SERVICE = process.env.ASSISTANT_SERVICE_URL || 'http://localhost:3005';
+const BILLING_SERVICE = process.env.BILLING_SERVICE_URL || 'http://localhost:3006';
+const FILING_SERVICE = process.env.FILING_SERVICE_URL || 'http://localhost:3007';
+const RECONCILIATION_SERVICE = process.env.RECONCILIATION_SERVICE_URL || 'http://localhost:3008';
+const NOTIFICATION_SERVICE = process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3009';
+const COMPLIANCE_SERVICE = process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:3010';
+const BANK_FEED_SERVICE = process.env.BANK_FEED_SERVICE_URL || 'http://localhost:3011';
 
 // Security middleware
 app.use(helmet());
@@ -67,6 +73,12 @@ app.use('/api/documents', createServiceProxy(DOCUMENT_SERVICE, { '^/api/document
 app.use('/api/ledger', createServiceProxy(LEDGER_SERVICE, { '^/api/ledger': '/api/ledger' }));
 app.use('/api/rules', createServiceProxy(RULES_SERVICE, { '^/api/rules': '/api/rules' }));
 app.use('/api/assistant', createServiceProxy(ASSISTANT_SERVICE, { '^/api/assistant': '/api/assistant' }));
+app.use('/api/billing', createServiceProxy(BILLING_SERVICE, { '^/api/billing': '/api/billing' }));
+app.use('/api/filings', createServiceProxy(FILING_SERVICE, { '^/api/filings': '/api/filings' }));
+app.use('/api/reconciliation', createServiceProxy(RECONCILIATION_SERVICE, { '^/api/reconciliation': '/api/reconciliation' }));
+app.use('/api/notifications', createServiceProxy(NOTIFICATION_SERVICE, { '^/api/notifications': '/api/notifications' }));
+app.use('/api/compliance', createServiceProxy(COMPLIANCE_SERVICE, { '^/api/compliance': '/api/compliance' }));
+app.use('/api/bank-feed', createServiceProxy(BANK_FEED_SERVICE, { '^/api/bank-feed': '/api/bank-feed' }));
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
@@ -87,6 +99,12 @@ app.listen(PORT, () => {
     ledger: LEDGER_SERVICE,
     rules: RULES_SERVICE,
     assistant: ASSISTANT_SERVICE,
+    billing: BILLING_SERVICE,
+    filing: FILING_SERVICE,
+    reconciliation: RECONCILIATION_SERVICE,
+    notification: NOTIFICATION_SERVICE,
+    compliance: COMPLIANCE_SERVICE,
+    bankFeed: BANK_FEED_SERVICE,
   });
 });
 
