@@ -12,7 +12,7 @@ config();
 
 const app: Express = express();
 const logger = createLogger('reporting-service');
-const PORT = process.env.PORT || 3010;
+const PORT = process.env.PORT || 3009;
 
 // Security middleware
 app.use(helmet());

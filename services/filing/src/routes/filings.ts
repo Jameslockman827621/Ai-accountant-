@@ -28,6 +28,12 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     let filingData: Record<string, unknown>;
     if (filingType === FilingType.VAT) {
       filingData = await generateVATFiling(req.user.tenantId, new Date(periodStart), new Date(periodEnd));
+    } else if (filingType === FilingType.PAYE) {
+      const { generatePAYEFiling } = await import('../services/payeCalculation');
+      filingData = await generatePAYEFiling(req.user.tenantId, new Date(periodStart), new Date(periodEnd));
+    } else if (filingType === FilingType.CORPORATION_TAX) {
+      const { generateCorporationTaxFiling } = await import('../services/corporationTaxCalculation');
+      filingData = await generateCorporationTaxFiling(req.user.tenantId, new Date(periodStart), new Date(periodEnd));
     } else {
       throw new ValidationError(`Filing type ${filingType} not yet supported`);
     }

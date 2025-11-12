@@ -130,7 +130,7 @@ if (require.main === module) {
   config();
 
   const app = createMonitoringApp();
-  const PORT = process.env.PORT || 3010;
+  const PORT = process.env.PORT || 3019;
 
   app.listen(PORT, () => {
     logger.info(`Monitoring service listening on port ${PORT}`);
