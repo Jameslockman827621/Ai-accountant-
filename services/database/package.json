@@ -1,0 +1,23 @@
+{
+  "name": "@ai-accountant/database",
+  "version": "1.0.0",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "migrate": "node dist/migrate.js",
+    "seed": "node dist/seed.js",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ai-accountant/shared-types": "*",
+    "pg": "^8.11.3",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3",
+    "@types/pg": "^8.10.9",
+    "@types/node": "^20.10.5"
+  }
+}

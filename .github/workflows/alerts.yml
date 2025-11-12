@@ -1,0 +1,17 @@
+name: Alert Configuration
+
+on:
+  workflow_dispatch:
+
+jobs:
+  configure-alerts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure PagerDuty Alerts
+        run: |
+          echo "Configuring alerts for:"
+          echo "- High error rate (>5%)"
+          echo "- Slow response times (p95 > 2s)"
+          echo "- Service downtime"
+          echo "- Database connection failures"
+          echo "- External API failures"

@@ -1,0 +1,34 @@
+{
+  "name": "ai-accountant-saas",
+  "version": "1.0.0",
+  "description": "AI Accountant SaaS - Complete autonomous accounting system",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "services/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "clean": "turbo run clean && rm -rf node_modules",
+    "db:migrate": "cd services/database && npm run migrate",
+    "db:seed": "cd services/database && npm run seed"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/uuid": "^10.0.0",
+    "turbo": "^1.10.16",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "dependencies": {
+    "uuid": "^13.0.0"
+  }
+}

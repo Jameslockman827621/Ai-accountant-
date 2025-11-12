@@ -1,0 +1,23 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build and push Docker images
+        run: |
+          docker build -t ai-accountant/api-gateway:${{ github.sha }} .
+          docker push ai-accountant/api-gateway:${{ github.sha }}
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl set image deployment/api-gateway api-gateway=ai-accountant/api-gateway:${{ github.sha }}
+      - name: Run health checks
+        run: |
+          ./scripts/health-check.sh
