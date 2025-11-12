@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { ruleEngine, AutomationRule } from './ruleEngine';
+import { ruleEngine } from './services/ruleEngine';
+import { AutomationRule } from './services/rules';
 
 const logger = createLogger('automation-service');
 

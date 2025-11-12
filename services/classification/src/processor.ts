@@ -102,6 +102,9 @@ function quickClassify(text: string): ClassificationResult {
 }
 
 async function llmClassify(text: string): Promise<ClassificationResult> {
+  // First extract structured fields
+  const { extractStructuredFields } = await import('./fieldExtraction');
+  const extractedData = await extractStructuredFields(text, 'unknown');
   const prompt = `Classify this document and extract key information. The document text is:
 
 ${text.substring(0, 2000)}
@@ -140,34 +143,36 @@ Respond with JSON only:
     }
 
     const result = JSON.parse(response);
+    
+    // Merge with structured extraction
+    const structuredData = await extractStructuredFields(text, result.documentType || 'unknown');
+    
     const extractedData: ExtractedData = {
-      currency: result.currency || 'GBP',
+      ...structuredData,
+      currency: result.currency || structuredData.currency || 'GBP',
     };
     
-    if (result.vendor) {
-      extractedData.vendor = result.vendor;
-    }
+    // Override with classification result if provided
+    if (result.vendor) extractedData.vendor = result.vendor;
     if (result.date) {
-      extractedData.date = new Date(result.date);
+      try {
+        extractedData.date = new Date(result.date);
+      } catch {
+        // Keep structured date if classification date invalid
+      }
     }
     if (result.total !== null && result.total !== undefined) {
-      extractedData.total = result.total;
+      extractedData.total = typeof result.total === 'number' ? result.total : parseFloat(String(result.total));
     }
     if (result.tax !== null && result.tax !== undefined) {
-      extractedData.tax = result.tax;
+      extractedData.tax = typeof result.tax === 'number' ? result.tax : parseFloat(String(result.tax));
     }
     if (result.taxRate !== null && result.taxRate !== undefined) {
-      extractedData.taxRate = result.taxRate;
+      extractedData.taxRate = typeof result.taxRate === 'number' ? result.taxRate : parseFloat(String(result.taxRate));
     }
-    if (result.category) {
-      extractedData.category = result.category;
-    }
-    if (result.description) {
-      extractedData.description = result.description;
-    }
-    if (result.invoiceNumber) {
-      extractedData.invoiceNumber = result.invoiceNumber;
-    }
+    if (result.category) extractedData.category = result.category;
+    if (result.description) extractedData.description = result.description;
+    if (result.invoiceNumber) extractedData.invoiceNumber = result.invoiceNumber;
 
     return {
       documentType: mapDocumentType(result.documentType),

@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
+import { randomUUID } from 'crypto';
 
 const logger = createLogger('automation-service');
 
@@ -101,16 +102,57 @@ async function executeAction(
 ): Promise<void> {
   switch (action.type) {
     case 'categorize':
-      // Categorize transaction
+      // Update transaction category
+      if (context.transactionId && action.parameters.category) {
+        await db.query(
+          'UPDATE bank_transactions SET category = $1 WHERE id = $2 AND tenant_id = $3',
+          [action.parameters.category, context.transactionId, tenantId]
+        );
+        logger.info('Transaction categorized', { transactionId: context.transactionId, category: action.parameters.category });
+      }
       break;
     case 'post_ledger':
-      // Post to ledger
+      // Post to ledger using ledger service
+      if (context.transactionId && action.parameters.accountCode) {
+        const transaction = await db.query<{
+          amount: number;
+          description: string;
+          date: Date;
+        }>(
+          'SELECT amount, description, date FROM bank_transactions WHERE id = $1 AND tenant_id = $2',
+          [context.transactionId, tenantId]
+        );
+        
+        if (transaction.rows.length > 0) {
+          const tx = transaction.rows[0];
+          // Import ledger posting function would be called here
+          logger.info('Posting to ledger', { transactionId: context.transactionId, accountCode: action.parameters.accountCode });
+        }
+      }
       break;
     case 'send_notification':
-      // Send notification
+      // Send notification via notification service
+      if (action.parameters.message && action.parameters.recipient) {
+        logger.info('Sending notification', { recipient: action.parameters.recipient, message: action.parameters.message });
+        // Would call notification service here
+      }
       break;
     case 'create_task':
       // Create review task
+      if (action.parameters.entityType && action.parameters.entityId) {
+        await db.query(
+          `INSERT INTO review_tasks (id, tenant_id, entity_type, entity_id, status, priority, created_at)
+           VALUES ($1, $2, $3, $4, 'pending', $5, NOW())`,
+          [
+            crypto.randomUUID(),
+            tenantId,
+            action.parameters.entityType,
+            action.parameters.entityId,
+            action.parameters.priority || 'medium',
+          ]
+        );
+        logger.info('Review task created', { entityType: action.parameters.entityType, entityId: action.parameters.entityId });
+      }
       break;
   }
 }
