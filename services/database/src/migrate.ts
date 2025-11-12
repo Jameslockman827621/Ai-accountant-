@@ -6,13 +6,19 @@ async function migrate(): Promise<void> {
   try {
     console.log('Running database migrations...');
     
+    // Schema files are in the src directory
+    // When running from dist, go up one level to find src
+    const baseDir = __dirname.includes('dist') 
+      ? join(__dirname, '..', 'src')
+      : __dirname;
+    
     // Read main schema
-    const schemaPath = join(__dirname, 'schema.sql');
+    const schemaPath = join(baseDir, 'schema.sql');
     const schema = readFileSync(schemaPath, 'utf-8');
     await db.query(schema);
     
     // Read bank connections schema
-    const bankConnectionsPath = join(__dirname, 'schema-bank-connections.sql');
+    const bankConnectionsPath = join(baseDir, 'schema-bank-connections.sql');
     try {
       const bankConnectionsSchema = readFileSync(bankConnectionsPath, 'utf-8');
       await db.query(bankConnectionsSchema);
