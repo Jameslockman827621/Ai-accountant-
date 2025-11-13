@@ -46,9 +46,19 @@ export async function syncQuickBooksAccounts(tenantId: TenantId): Promise<void> 
     throw new Error('QuickBooks not connected');
   }
 
-  // Check if token expired
+  // Check if token expired and refresh if needed
   if (new Date(connection.rows[0].expires_at) < new Date()) {
-    throw new Error('QuickBooks access token expired - please reconnect');
+    await refreshQuickBooksToken(tenantId);
+    // Re-fetch connection after refresh
+    const refreshed = await db.query<{
+      access_token: string;
+      realm_id: string;
+    }>(
+      'SELECT access_token, realm_id FROM quickbooks_connections WHERE tenant_id = $1',
+      [tenantId]
+    );
+    connection.rows[0].access_token = refreshed.rows[0].access_token;
+    connection.rows[0].realm_id = refreshed.rows[0].realm_id;
   }
 
   // In production, call QuickBooks API:
@@ -123,4 +133,56 @@ export async function syncQuickBooksTransactions(
   
   logger.info('QuickBooks transactions synced', { tenantId, synced });
   return synced;
+}
+
+export async function refreshQuickBooksToken(tenantId: TenantId): Promise<void> {
+  logger.info('Refreshing QuickBooks token', { tenantId });
+
+  const connection = await db.query<{
+    refresh_token: string;
+  }>(
+    'SELECT refresh_token FROM quickbooks_connections WHERE tenant_id = $1',
+    [tenantId]
+  );
+
+  if (connection.rows.length === 0) {
+    throw new Error('QuickBooks not connected');
+  }
+
+  const { refresh_token } = connection.rows[0];
+
+  try {
+    // QuickBooks token refresh
+    const response = await fetch('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refresh_token,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Token refresh failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const expiresAt = new Date(Date.now() + (data.expires_in * 1000));
+
+    // Update stored token
+    await db.query(
+      `UPDATE quickbooks_connections
+       SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
+       WHERE tenant_id = $4`,
+      [data.access_token, data.refresh_token, expiresAt, tenantId]
+    );
+
+    logger.info('QuickBooks token refreshed', { tenantId });
+  } catch (error) {
+    logger.error('QuickBooks token refresh failed', error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
 }

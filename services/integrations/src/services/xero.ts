@@ -40,8 +40,17 @@ export async function syncXeroContacts(tenantId: TenantId): Promise<void> {
 
   // Check if token expired and refresh if needed
   if (new Date(connection.rows[0].expires_at) < new Date()) {
-    // In production, refresh token using refresh_token
-    throw new Error('Xero access token expired - please reconnect');
+    await refreshXeroToken(tenantId);
+    // Re-fetch connection after refresh
+    const refreshed = await db.query<{
+      access_token: string;
+      tenant_id_xero: string;
+    }>(
+      'SELECT access_token, tenant_id_xero FROM xero_connections WHERE tenant_id = $1',
+      [tenantId]
+    );
+    connection.rows[0].access_token = refreshed.rows[0].access_token;
+    connection.rows[0].tenant_id_xero = refreshed.rows[0].tenant_id_xero;
   }
 
   // In production, call Xero API:
@@ -94,4 +103,57 @@ export async function syncXeroTransactions(
   
   logger.info('Xero transactions synced', { tenantId, synced });
   return synced;
+}
+
+export async function refreshXeroToken(tenantId: TenantId): Promise<void> {
+  logger.info('Refreshing Xero token', { tenantId });
+
+  const connection = await db.query<{
+    refresh_token: string;
+  }>(
+    'SELECT refresh_token FROM xero_connections WHERE tenant_id = $1',
+    [tenantId]
+  );
+
+  if (connection.rows.length === 0) {
+    throw new Error('Xero not connected');
+  }
+
+  const { refresh_token } = connection.rows[0];
+
+  try {
+    // Xero token refresh
+    const response = await fetch('https://identity.xero.com/connect/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refresh_token,
+        client_id: process.env.XERO_CLIENT_ID || '',
+        client_secret: process.env.XERO_CLIENT_SECRET || '',
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Token refresh failed: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const expiresAt = new Date(Date.now() + (data.expires_in * 1000));
+
+    // Update stored token
+    await db.query(
+      `UPDATE xero_connections
+       SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
+       WHERE tenant_id = $4`,
+      [data.access_token, data.refresh_token, expiresAt, tenantId]
+    );
+
+    logger.info('Xero token refreshed', { tenantId });
+  } catch (error) {
+    logger.error('Xero token refresh failed', error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
 }

@@ -125,16 +125,46 @@ async function executeAction(
         
         if (transaction.rows.length > 0) {
           const tx = transaction.rows[0];
-          // Import ledger posting function would be called here
-          logger.info('Posting to ledger', { transactionId: context.transactionId, accountCode: action.parameters.accountCode });
+          // Import and call ledger posting function
+          const { postDoubleEntry } = await import('@ai-accountant/ledger/services/posting');
+          await postDoubleEntry({
+            tenantId,
+            description: tx.description || 'Automated posting',
+            transactionDate: tx.date,
+            entries: [
+              {
+                entryType: tx.amount >= 0 ? 'debit' : 'credit',
+                accountCode: action.parameters.accountCode as string,
+                accountName: action.parameters.accountName as string || 'Automated Entry',
+                amount: Math.abs(tx.amount),
+              },
+              {
+                entryType: tx.amount >= 0 ? 'credit' : 'debit',
+                accountCode: '1100', // Cash account
+                accountName: 'Cash',
+                amount: Math.abs(tx.amount),
+              },
+            ],
+            createdBy: context.userId as string || 'system',
+          });
+          logger.info('Posted to ledger', { transactionId: context.transactionId, accountCode: action.parameters.accountCode });
         }
       }
       break;
     case 'send_notification':
       // Send notification via notification service
       if (action.parameters.message && action.parameters.recipient) {
-        logger.info('Sending notification', { recipient: action.parameters.recipient, message: action.parameters.message });
-        // Would call notification service here
+        try {
+          const { sendEmail } = await import('@ai-accountant/notification/services/email');
+          await sendEmail(
+            action.parameters.recipient as string,
+            action.parameters.subject as string || 'Notification',
+            action.parameters.message as string
+          );
+          logger.info('Notification sent', { recipient: action.parameters.recipient });
+        } catch (error) {
+          logger.error('Failed to send notification', error instanceof Error ? error : new Error(String(error)));
+        }
       }
       break;
     case 'create_task':

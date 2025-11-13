@@ -1,6 +1,7 @@
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { db } from '@ai-accountant/database';
+import crypto from 'crypto';
 
 const logger = createLogger('integrations-service');
 
@@ -63,12 +64,64 @@ export async function syncStripeTransactions(
   return synced;
 }
 
+export async function verifyStripeWebhookSignature(
+  payload: string,
+  signature: string,
+  webhookSecret: string
+): Promise<boolean> {
+  try {
+    const elements = signature.split(',');
+    const sigHash = elements.find((el) => el.startsWith('v1='))?.substring(3);
+    
+    if (!sigHash) {
+      return false;
+    }
+
+    const expectedSignature = crypto
+      .createHmac('sha256', webhookSecret)
+      .update(payload)
+      .digest('hex');
+
+    return crypto.timingSafeEqual(
+      Buffer.from(sigHash),
+      Buffer.from(expectedSignature)
+    );
+  } catch (error) {
+    logger.error('Webhook signature verification failed', error instanceof Error ? error : new Error(String(error)));
+    return false;
+  }
+}
+
 export async function handleStripeWebhook(
   tenantId: TenantId,
   event: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  signature?: string
 ): Promise<void> {
   logger.info('Handling Stripe webhook', { tenantId, event });
+  
+  // Verify webhook signature if provided
+  if (signature) {
+    const connection = await db.query<{
+      webhook_secret: string | null;
+    }>(
+      'SELECT webhook_secret FROM stripe_connections WHERE tenant_id = $1',
+      [tenantId]
+    );
+
+    if (connection.rows.length > 0 && connection.rows[0].webhook_secret) {
+      const payload = JSON.stringify(data);
+      const isValid = await verifyStripeWebhookSignature(
+        payload,
+        signature,
+        connection.rows[0].webhook_secret
+      );
+
+      if (!isValid) {
+        throw new Error('Invalid webhook signature');
+      }
+    }
+  }
   
   // Handle different Stripe events
   switch (event) {
