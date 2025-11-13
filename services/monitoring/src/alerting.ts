@@ -1,100 +1,141 @@
 import { createLogger } from '@ai-accountant/shared-utils';
-import { metricsCollector } from './index';
+import { db } from '@ai-accountant/database';
+import { sendEmail } from '../../notification/src/services/email';
 
 const logger = createLogger('monitoring-service');
 
-// Alerting System (PagerDuty/Opsgenie integration)
-export class AlertingSystem {
-  private alertRules: Array<{
+export interface AlertRule {
+  id: string;
+  tenantId: string;
+  name: string;
+  metric: string;
+  condition: 'greater_than' | 'less_than' | 'equals' | 'not_equals';
+  threshold: number;
+  severity: 'critical' | 'warning' | 'info';
+  recipients: string[];
+  isActive: boolean;
+}
+
+export interface Alert {
+  id: string;
+  ruleId: string;
+  tenantId: string;
+  severity: AlertRule['severity'];
+  message: string;
+  metricValue: number;
+  threshold: number;
+  timestamp: Date;
+  acknowledged: boolean;
+}
+
+/**
+ * Check alert rules and trigger alerts
+ */
+export async function checkAlerts(tenantId: string): Promise<Alert[]> {
+  const rules = await db.query<{
+    id: string;
+    tenant_id: string;
     name: string;
-    condition: () => Promise<boolean>;
-    severity: 'low' | 'medium' | 'high' | 'critical';
-    action: () => Promise<void>;
-  }> = [];
+    metric: string;
+    condition: string;
+    threshold: number;
+    severity: string;
+    recipients: unknown;
+  }>(
+    'SELECT * FROM alert_rules WHERE tenant_id = $1 AND is_active = true',
+    [tenantId]
+  );
 
-  async addAlertRule(
-    name: string,
-    condition: () => Promise<boolean>,
-    severity: 'low' | 'medium' | 'high' | 'critical',
-    action: () => Promise<void>
-  ): Promise<void> {
-    this.alertRules.push({ name, condition, severity, action });
-    logger.info('Alert rule added', { name, severity });
-  }
+  const triggeredAlerts: Alert[] = [];
 
-  async checkAlerts(): Promise<void> {
-    for (const rule of this.alertRules) {
-      try {
-        const triggered = await rule.condition();
-        if (triggered) {
-          logger.warn('Alert triggered', { name: rule.name, severity: rule.severity });
-          await rule.action();
-          metricsCollector.incrementCounter('alerts_triggered_total', {
-            name: rule.name,
-            severity: rule.severity,
-          });
-        }
-      } catch (error) {
-        logger.error('Error checking alert rule', {
-          name: rule.name,
-          error: error instanceof Error ? error : new Error(String(error)),
-        });
+  for (const rule of rules.rows) {
+    const metricValue = await getMetricValue(tenantId, rule.metric);
+    const shouldAlert = evaluateCondition(metricValue, rule.condition, rule.threshold);
+
+    if (shouldAlert) {
+      const alert = await createAlert({
+        ruleId: rule.id,
+        tenantId: rule.tenant_id,
+        severity: rule.severity as AlertRule['severity'],
+        message: `${rule.name}: ${rule.metric} is ${rule.condition} ${rule.threshold} (current: ${metricValue})`,
+        metricValue,
+        threshold: rule.threshold,
+      });
+
+      triggeredAlerts.push(alert);
+
+      // Send notifications
+      const recipients = rule.recipients as string[] || [];
+      for (const recipient of recipients) {
+        await sendEmail(
+          recipient,
+          `Alert: ${rule.name}`,
+          alert.message
+        ).catch(err => logger.error('Failed to send alert email', err));
       }
     }
   }
 
-  startMonitoring(intervalMs: number = 60000): void {
-    setInterval(() => {
-      this.checkAlerts().catch(error => {
-        logger.error('Alert monitoring error', error instanceof Error ? error : new Error(String(error)));
-      });
-    }, intervalMs);
-    logger.info('Alert monitoring started', { intervalMs });
-  }
+  return triggeredAlerts;
+}
 
-  // Pre-configured alert rules
-  async setupDefaultAlerts(): Promise<void> {
-    // High error rate alert
-    await this.addAlertRule(
-      'high_error_rate',
-      async () => {
-        // Check if error rate > 5%
-        const errorRate = 0.06; // In production, calculate from metrics
-        return errorRate > 0.05;
-      },
-      'high',
-      async () => {
-        // In production, send to PagerDuty
-        logger.error('High error rate detected - sending alert');
-      }
-    );
-
-    // Slow response time alert
-    await this.addAlertRule(
-      'slow_response_time',
-      async () => {
-        const p95ResponseTime = 2500; // ms
-        return p95ResponseTime > 2000;
-      },
-      'medium',
-      async () => {
-        logger.warn('Slow response time detected - sending alert');
-      }
-    );
-
-    // Service downtime alert
-    await this.addAlertRule(
-      'service_down',
-      async () => {
-        // Check health endpoint
-        return false; // In production, check actual health
-      },
-      'critical',
-      async () => {
-        logger.error('Service down - sending critical alert');
-      }
-    );
+async function getMetricValue(tenantId: string, metric: string): Promise<number> {
+  // Get metric from monitoring system
+  // Simplified - in production would query Prometheus/CloudWatch/etc
+  switch (metric) {
+    case 'error_rate':
+      const errors = await db.query<{ count: string | number }>(
+        `SELECT COUNT(*) as count FROM error_records
+         WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '1 hour'`,
+        [tenantId]
+      );
+      return typeof errors.rows[0]?.count === 'number' 
+        ? errors.rows[0].count 
+        : parseInt(String(errors.rows[0]?.count || '0'), 10);
+    case 'pending_reviews':
+      const reviews = await db.query<{ count: string | number }>(
+        `SELECT COUNT(*) as count FROM review_tasks
+         WHERE tenant_id = $1 AND status = 'pending'`,
+        [tenantId]
+      );
+      return typeof reviews.rows[0]?.count === 'number'
+        ? reviews.rows[0].count
+        : parseInt(String(reviews.rows[0]?.count || '0'), 10);
+    default:
+      return 0;
   }
 }
 
-export const alertingSystem = new AlertingSystem();
+function evaluateCondition(value: number, condition: string, threshold: number): boolean {
+  switch (condition) {
+    case 'greater_than':
+      return value > threshold;
+    case 'less_than':
+      return value < threshold;
+    case 'equals':
+      return value === threshold;
+    case 'not_equals':
+      return value !== threshold;
+    default:
+      return false;
+  }
+}
+
+async function createAlert(alert: Omit<Alert, 'id' | 'timestamp' | 'acknowledged'>): Promise<Alert> {
+  const alertId = crypto.randomUUID();
+  const timestamp = new Date();
+
+  await db.query(
+    `INSERT INTO alerts (
+      id, rule_id, tenant_id, severity, message, metric_value, threshold, timestamp, acknowledged, created_at
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, false, NOW())`,
+    [alertId, alert.ruleId, alert.tenantId, alert.severity, alert.message, alert.metricValue, alert.threshold, timestamp]
+  );
+
+  return {
+    id: alertId,
+    ...alert,
+    timestamp,
+    acknowledged: false,
+  };
+}

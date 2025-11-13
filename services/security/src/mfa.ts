@@ -1,68 +1,98 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
-import crypto from 'crypto';
-import { authenticator } from 'otplib';
+import { createLogger } from '@ai-accountant/shared-utils';
+import { TenantId, UserId } from '@ai-accountant/shared-types';
+import speakeasy from 'speakeasy';
+import QRCode from 'qrcode';
 
 const logger = createLogger('security-service');
 
-// Multi-Factor Authentication
-export class MFA {
-  async generateSecret(userId: string): Promise<string> {
-    const secret = authenticator.generateSecret();
-    
-    await db.query(
-      `INSERT INTO user_mfa (user_id, secret, enabled, created_at)
-       VALUES ($1, $2, false, NOW())
-       ON CONFLICT (user_id) DO UPDATE
-       SET secret = $2, updated_at = NOW()`,
-      [userId, secret]
-    );
+/**
+ * Enable MFA for user
+ */
+export async function enableMFA(
+  tenantId: TenantId,
+  userId: UserId
+): Promise<{ secret: string; qrCodeUrl: string }> {
+  const secret = speakeasy.generateSecret({
+    name: `AI Accountant (${userId})`,
+    issuer: 'AI Accountant SaaS',
+  });
 
-    logger.info('MFA secret generated', { userId });
-    return secret;
-  }
+  // Store secret (encrypted in production)
+  await db.query(
+    `UPDATE users
+     SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{mfa_secret}', $1::jsonb),
+         mfa_enabled = true,
+         updated_at = NOW()
+     WHERE id = $2 AND tenant_id = $3`,
+    [JSON.stringify(secret.base32), userId, tenantId]
+  );
 
-  async verifyToken(userId: string, token: string): Promise<boolean> {
-    const result = await db.query<{ secret: string }>(
-      'SELECT secret FROM user_mfa WHERE user_id = $1 AND enabled = true',
-      [userId]
-    );
+  // Generate QR code
+  const qrCodeUrl = await QRCode.toDataURL(secret.otpauth_url || '');
 
-    if (result.rows.length === 0) {
-      return false;
-    }
-
-    const secret = result.rows[0]?.secret || '';
-    const isValid = authenticator.verify({ token, secret });
-
-    if (isValid) {
-      logger.info('MFA token verified', { userId });
-    } else {
-      logger.warn('MFA token verification failed', { userId });
-    }
-
-    return isValid;
-  }
-
-  async enableMFA(userId: string, token: string): Promise<boolean> {
-    const isValid = await this.verifyToken(userId, token);
-    
-    if (isValid) {
-      await db.query(
-        'UPDATE user_mfa SET enabled = true, updated_at = NOW() WHERE user_id = $1',
-        [userId]
-      );
-      logger.info('MFA enabled', { userId });
-    }
-
-    return isValid;
-  }
-
-  generateQRCode(userId: string, secret: string, issuer: string = 'AI Accountant'): string {
-    const otpAuthUrl = authenticator.keyuri(userId, issuer, secret);
-    // In production, generate QR code image
-    return otpAuthUrl;
-  }
+  logger.info('MFA enabled', { userId, tenantId });
+  return { secret: secret.base32 || '', qrCodeUrl };
 }
 
-export const mfa = new MFA();
+/**
+ * Verify MFA token
+ */
+export async function verifyMFAToken(
+  tenantId: TenantId,
+  userId: UserId,
+  token: string
+): Promise<boolean> {
+  const user = await db.query<{
+    metadata: unknown;
+    mfa_enabled: boolean;
+  }>(
+    'SELECT metadata, mfa_enabled FROM users WHERE id = $1 AND tenant_id = $2',
+    [userId, tenantId]
+  );
+
+  if (user.rows.length === 0 || !user.rows[0].mfa_enabled) {
+    return false;
+  }
+
+  const metadata = user.rows[0].metadata as Record<string, unknown> | null;
+  const secret = metadata?.mfa_secret as string | undefined;
+
+  if (!secret) {
+    return false;
+  }
+
+  const verified = speakeasy.totp.verify({
+    secret,
+    encoding: 'base32',
+    token,
+    window: 2, // Allow 2 time steps (60 seconds) tolerance
+  });
+
+  if (verified) {
+    logger.info('MFA token verified', { userId, tenantId });
+  } else {
+    logger.warn('MFA token verification failed', { userId, tenantId });
+  }
+
+  return verified;
+}
+
+/**
+ * Disable MFA for user
+ */
+export async function disableMFA(
+  tenantId: TenantId,
+  userId: UserId
+): Promise<void> {
+  await db.query(
+    `UPDATE users
+     SET mfa_enabled = false,
+         metadata = metadata - 'mfa_secret',
+         updated_at = NOW()
+     WHERE id = $1 AND tenant_id = $2`,
+    [userId, tenantId]
+  );
+
+  logger.info('MFA disabled', { userId, tenantId });
+}

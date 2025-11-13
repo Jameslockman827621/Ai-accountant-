@@ -1,227 +1,152 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
+import { generateProfitAndLoss, generateBalanceSheet, generateCashFlow } from './financialReports';
 
 const logger = createLogger('reporting-service');
 
-export interface CustomReportConfig {
+export interface CustomReportDefinition {
+  id: string;
+  tenantId: TenantId;
   name: string;
-  description?: string;
-  dateRange: { start: Date; end: Date };
-  accounts: string[]; // Account codes to include
-  grouping: 'none' | 'account' | 'month' | 'category';
-  filters: {
-    entryType?: 'debit' | 'credit' | 'both';
-    minAmount?: number;
-    maxAmount?: number;
-    description?: string;
-  };
-  columns: Array<{
-    field: string;
-    label: string;
-    format?: 'currency' | 'number' | 'date' | 'text';
-  }>;
+  description: string;
+  sections: ReportSection[];
+  filters: ReportFilter[];
+  format: 'table' | 'chart' | 'summary';
 }
 
-export interface CustomReportResult {
-  config: CustomReportConfig;
-  data: Array<Record<string, unknown>>;
-  totals: Record<string, number>;
-  generatedAt: Date;
+export interface ReportSection {
+  type: 'revenue' | 'expense' | 'asset' | 'liability' | 'equity' | 'custom';
+  accountCodes: string[];
+  label: string;
+  calculation?: 'sum' | 'average' | 'count' | 'custom';
 }
 
-export async function buildCustomReport(
+export interface ReportFilter {
+  field: string;
+  operator: 'equals' | 'greater_than' | 'less_than' | 'between' | 'in';
+  value: unknown;
+}
+
+/**
+ * Generate custom report based on definition
+ */
+export async function generateCustomReport(
   tenantId: TenantId,
-  config: CustomReportConfig
-): Promise<CustomReportResult> {
-  logger.info('Building custom report', { tenantId, reportName: config.name });
+  definition: CustomReportDefinition,
+  periodStart: Date,
+  periodEnd: Date
+): Promise<Record<string, unknown>> {
+  logger.info('Generating custom report', { tenantId, reportId: definition.id });
 
-  // Build query based on config
+  const report: Record<string, unknown> = {
+    reportId: definition.id,
+    reportName: definition.name,
+    period: { start: periodStart, end: periodEnd },
+    generatedAt: new Date(),
+    sections: [],
+  };
+
+  // Generate each section
+  for (const section of definition.sections) {
+    const sectionData = await generateSection(
+      tenantId,
+      section,
+      definition.filters,
+      periodStart,
+      periodEnd
+    );
+    (report.sections as unknown[]).push({
+      ...section,
+      data: sectionData,
+    });
+  }
+
+  return report;
+}
+
+async function generateSection(
+  tenantId: TenantId,
+  section: ReportSection,
+  filters: ReportFilter[],
+  periodStart: Date,
+  periodEnd: Date
+): Promise<unknown> {
   let query = `
     SELECT 
-      ${buildSelectClause(config.columns)}
+      account_code,
+      account_name,
+      ${section.calculation === 'average' ? 'AVG' : section.calculation === 'count' ? 'COUNT' : 'SUM'}(amount) as value
     FROM ledger_entries
     WHERE tenant_id = $1
       AND transaction_date >= $2
       AND transaction_date <= $3
+      AND account_code = ANY($4::text[])
   `;
 
-  const params: unknown[] = [tenantId, config.dateRange.start, config.dateRange.end];
+  const params: unknown[] = [tenantId, periodStart, periodEnd, section.accountCodes];
 
-  // Add account filter
-  if (config.accounts.length > 0) {
-    query += ` AND account_code = ANY($${params.length + 1})`;
-    params.push(config.accounts);
-  }
+  // Apply filters
+  filters.forEach((filter, index) => {
+    const paramIndex = params.length + 1;
+    switch (filter.operator) {
+      case 'equals':
+        query += ` AND ${filter.field} = $${paramIndex}`;
+        params.push(filter.value);
+        break;
+      case 'greater_than':
+        query += ` AND ${filter.field} > $${paramIndex}`;
+        params.push(filter.value);
+        break;
+      case 'less_than':
+        query += ` AND ${filter.field} < $${paramIndex}`;
+        params.push(filter.value);
+        break;
+      case 'between':
+        if (Array.isArray(filter.value) && filter.value.length === 2) {
+          query += ` AND ${filter.field} BETWEEN $${paramIndex} AND $${paramIndex + 1}`;
+          params.push(filter.value[0], filter.value[1]);
+        }
+        break;
+      case 'in':
+        if (Array.isArray(filter.value)) {
+          query += ` AND ${filter.field} = ANY($${paramIndex}::text[])`;
+          params.push(filter.value);
+        }
+        break;
+    }
+  });
 
-  // Add entry type filter
-  if (config.filters.entryType && config.filters.entryType !== 'both') {
-    query += ` AND entry_type = $${params.length + 1}`;
-    params.push(config.filters.entryType);
-  }
-
-  // Add amount filters
-  if (config.filters.minAmount !== undefined) {
-    query += ` AND amount >= $${params.length + 1}`;
-    params.push(config.filters.minAmount);
-  }
-
-  if (config.filters.maxAmount !== undefined) {
-    query += ` AND amount <= $${params.length + 1}`;
-    params.push(config.filters.maxAmount);
-  }
-
-  // Add description filter
-  if (config.filters.description) {
-    query += ` AND description ILIKE $${params.length + 1}`;
-    params.push(`%${config.filters.description}%`);
-  }
-
-  // Add grouping
-  if (config.grouping !== 'none') {
-    query += ` GROUP BY ${getGroupByClause(config.grouping)}`;
-  }
-
-  query += ' ORDER BY transaction_date DESC';
+  query += ' GROUP BY account_code, account_name';
 
   const result = await db.query(query, params);
-
-  // Process data
-  const data = result.rows.map(row => {
-    const record: Record<string, unknown> = {};
-    for (const column of config.columns) {
-      const value = row[column.field];
-      record[column.field] = formatValue(value, column.format);
-    }
-    return record;
-  });
-
-  // Calculate totals
-  const totals: Record<string, number> = {};
-  for (const column of config.columns) {
-    if (column.format === 'currency' || column.format === 'number') {
-      totals[column.field] = data.reduce((sum, row) => {
-        const value = row[column.field];
-        return sum + (typeof value === 'number' ? value : parseFloat(String(value || '0')));
-      }, 0);
-    }
-  }
-
-  logger.info('Custom report generated', {
-    tenantId,
-    reportName: config.name,
-    rowCount: data.length,
-  });
-
-  return {
-    config,
-    data,
-    totals,
-    generatedAt: new Date(),
-  };
+  return result.rows;
 }
 
-function buildSelectClause(columns: CustomReportConfig['columns']): string {
-  const selects: string[] = [];
-
-  for (const column of columns) {
-    switch (column.field) {
-      case 'date':
-        selects.push('transaction_date as date');
-        break;
-      case 'account':
-        selects.push('account_code || \' - \' || account_name as account');
-        break;
-      case 'description':
-        selects.push('description');
-        break;
-      case 'amount':
-        selects.push('amount');
-        break;
-      case 'type':
-        selects.push('entry_type as type');
-        break;
-      case 'tax':
-        selects.push('COALESCE(tax_amount, 0) as tax');
-        break;
-      default:
-        selects.push(column.field);
-    }
-  }
-
-  return selects.join(', ');
-}
-
-function getGroupByClause(grouping: CustomReportConfig['grouping']): string {
-  switch (grouping) {
-    case 'account':
-      return 'account_code, account_name';
-    case 'month':
-      return 'DATE_TRUNC(\'month\', transaction_date)';
-    case 'category':
-      return 'account_code';
-    default:
-      return '';
-  }
-}
-
-function formatValue(value: unknown, format?: string): unknown {
-  if (value === null || value === undefined) {
-    return null;
-  }
-
-  switch (format) {
-    case 'currency':
-      return typeof value === 'number' ? Math.round(value * 100) / 100 : parseFloat(String(value));
-    case 'number':
-      return typeof value === 'number' ? value : parseFloat(String(value));
-    case 'date':
-      return value instanceof Date ? value.toISOString().split('T')[0] : String(value);
-    default:
-      return value;
-  }
-}
-
-export async function saveCustomReport(
+/**
+ * Create custom report definition
+ */
+export async function createCustomReport(
   tenantId: TenantId,
-  config: CustomReportConfig
+  definition: Omit<CustomReportDefinition, 'id'>
 ): Promise<string> {
   const reportId = crypto.randomUUID();
 
   await db.query(
     `INSERT INTO custom_reports (
-      id, tenant_id, name, description, config, created_at, updated_at
-    ) VALUES ($1, $2, $3, $4, $5::jsonb, NOW(), NOW())`,
-    [reportId, tenantId, config.name, config.description || '', JSON.stringify(config)]
+      id, tenant_id, name, description, sections, filters, format, created_at, updated_at
+    ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7, NOW(), NOW())`,
+    [
+      reportId,
+      tenantId,
+      definition.name,
+      definition.description,
+      JSON.stringify(definition.sections),
+      JSON.stringify(definition.filters),
+      definition.format,
+    ]
   );
 
-  logger.info('Custom report saved', { reportId, tenantId, name: config.name });
+  logger.info('Custom report created', { reportId, tenantId });
   return reportId;
-}
-
-export async function getCustomReports(tenantId: TenantId): Promise<Array<{
-  id: string;
-  name: string;
-  description: string | null;
-  config: CustomReportConfig;
-  createdAt: Date;
-}>> {
-  const result = await db.query<{
-    id: string;
-    name: string;
-    description: string | null;
-    config: unknown;
-    created_at: Date;
-  }>(
-    'SELECT id, name, description, config, created_at FROM custom_reports WHERE tenant_id = $1 ORDER BY created_at DESC',
-    [tenantId]
-  );
-
-  return result.rows.map(row => ({
-    id: row.id,
-    name: row.name,
-    description: row.description,
-    config: row.config as CustomReportConfig,
-    createdAt: row.created_at,
-  }));
 }
