@@ -2,8 +2,7 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import nodemailer from 'nodemailer';
-import { generateProfitAndLoss } from '../../reporting/src/services/financialReports';
-import { generateTaxReport } from '../../reporting/src/services/taxReports';
+import { randomUUID } from 'crypto';
 
 const logger = createLogger('notification-service');
 
@@ -36,7 +35,7 @@ export async function createScheduledReport(
   recipients: string[],
   format: ScheduledReport['format'] = 'pdf'
 ): Promise<string> {
-  const reportId = crypto.randomUUID();
+  const reportId = randomUUID();
   const nextSend = calculateNextSendDate(frequency);
 
   await db.query(
@@ -97,12 +96,12 @@ export async function processScheduledReports(): Promise<void> {
          WHERE id = $2`,
         [calculateNextSendDate(report.frequency as ScheduledReport['frequency']), report.id]
       );
-    } catch (error) {
-      logger.error('Failed to process scheduled report', {
-        reportId: report.id,
-        error: error instanceof Error ? error : new Error(String(error)),
-      });
-    }
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logger.error('Failed to process scheduled report', err, {
+          reportId: report.id,
+        });
+      }
   }
 
   logger.info('Scheduled reports processing completed', {
@@ -124,47 +123,47 @@ async function generateAndSendReport(report: ScheduledReport): Promise<void> {
   let reportData: unknown;
   let reportName: string;
 
-  switch (report.reportType) {
-    case 'profit-loss':
-      reportData = await generateProfitAndLoss(
-        report.tenantId,
-        dateRange.start,
-        dateRange.end
-      );
-      reportName = 'Profit & Loss Statement';
-      break;
+    switch (report.reportType) {
+      case 'profit-loss':
+        reportData = await generateProfitAndLossReport(
+          report.tenantId,
+          dateRange.start,
+          dateRange.end
+        );
+        reportName = 'Profit & Loss Statement';
+        break;
 
-    case 'tax':
-      reportData = await generateTaxReport(
-        report.tenantId,
-        dateRange.start,
-        dateRange.end
-      );
-      reportName = 'Tax Report';
-      break;
+      case 'tax':
+        reportData = await generateTaxReportData(
+          report.tenantId,
+          dateRange.start,
+          dateRange.end
+        );
+        reportName = 'Tax Report';
+        break;
 
-    default:
-      throw new Error(`Unsupported report type: ${report.reportType}`);
-  }
+      default:
+        throw new Error(`Unsupported report type: ${report.reportType}`);
+    }
 
   // Format report based on format
   const formattedReport = formatReport(reportData, report.format);
 
   // Send email
-  for (const recipient of report.recipients) {
-    await emailTransporter.sendMail({
-      from: process.env.SMTP_FROM || 'noreply@ai-accountant.com',
-      to: recipient,
-      subject: `${reportName} - ${new Date().toLocaleDateString('en-GB')}`,
-      text: `Please find attached your ${reportName.toLowerCase()}.`,
-      attachments: [
-        {
-          filename: `${reportName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.${report.format}`,
-          content: formattedReport,
-        },
-      ],
-    });
-  }
+    for (const recipient of report.recipients) {
+      await emailTransporter.sendMail({
+        from: process.env.SMTP_FROM || 'noreply@ai-accountant.com',
+        to: recipient,
+        subject: `${reportName} - ${new Date().toLocaleDateString('en-GB')}`,
+        text: `Please find attached your ${reportName.toLowerCase()}.`,
+        attachments: [
+          {
+            filename: `${reportName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.${report.format}`,
+            content: formattedReport,
+          },
+        ],
+      });
+    }
 
   logger.info('Report sent successfully', {
     reportId: report.id,
@@ -217,7 +216,97 @@ function getDateRangeForFrequency(frequency: ScheduledReport['frequency']): { st
 }
 
 function formatReport(data: unknown, format: ScheduledReport['format']): Buffer {
-  // In production, use proper PDF/Excel libraries
-  const jsonString = JSON.stringify(data, null, 2);
-  return Buffer.from(jsonString);
+  const payload = {
+    format,
+    generatedAt: new Date().toISOString(),
+    data,
+  };
+  return Buffer.from(JSON.stringify(payload, null, 2));
+}
+
+interface ProfitLossSummary {
+  periodStart: Date;
+  periodEnd: Date;
+  revenue: number;
+  expenses: number;
+  profit: number;
+}
+
+async function generateProfitAndLossReport(
+  tenantId: TenantId,
+  periodStart: Date,
+  periodEnd: Date
+): Promise<ProfitLossSummary> {
+  const result = await db.query<{
+    revenue: string | number | null;
+    expenses: string | number | null;
+  }>(
+    `SELECT 
+        COALESCE(SUM(CASE WHEN entry_type = 'credit' AND account_code LIKE '4%' THEN amount ELSE 0 END), 0) as revenue,
+        COALESCE(SUM(CASE WHEN entry_type = 'debit' AND (account_code LIKE '5%' OR account_code LIKE '6%') THEN amount ELSE 0 END), 0) as expenses
+     FROM ledger_entries
+     WHERE tenant_id = $1
+       AND transaction_date BETWEEN $2 AND $3`,
+    [tenantId, periodStart, periodEnd]
+  );
+
+  const revenue = typeof result.rows[0]?.revenue === 'number'
+    ? result.rows[0]?.revenue ?? 0
+    : parseFloat(String(result.rows[0]?.revenue || '0'));
+  const expenses = typeof result.rows[0]?.expenses === 'number'
+    ? result.rows[0]?.expenses ?? 0
+    : parseFloat(String(result.rows[0]?.expenses || '0'));
+
+  return {
+    periodStart,
+    periodEnd,
+    revenue: Math.round(revenue * 100) / 100,
+    expenses: Math.round(expenses * 100) / 100,
+    profit: Math.round((revenue - expenses) * 100) / 100,
+  };
+}
+
+interface TaxReportSummary {
+  periodStart: Date;
+  periodEnd: Date;
+  filings: Array<{
+    filingId: string;
+    filingType: string;
+    status: string;
+    netVatDue?: number;
+  }>;
+}
+
+async function generateTaxReportData(
+  tenantId: TenantId,
+  periodStart: Date,
+  periodEnd: Date
+): Promise<TaxReportSummary> {
+  const result = await db.query<{
+    id: string;
+    filing_type: string;
+    status: string;
+    filing_data: { netVatDue?: number } | null;
+  }>(
+    `SELECT id, filing_type, status, filing_data
+     FROM filings
+     WHERE tenant_id = $1
+       AND period_start >= $2
+       AND period_end <= $3`,
+    [tenantId, periodStart, periodEnd]
+  );
+
+  return {
+    periodStart,
+    periodEnd,
+    filings: result.rows.map(row => ({
+      filingId: row.id,
+      filingType: row.filing_type,
+      status: row.status,
+      netVatDue:
+        typeof row.filing_data?.netVatDue === 'number'
+          ? Math.round(row.filing_data.netVatDue * 100) / 100
+          : undefined,
+    })),
+  };
 }
