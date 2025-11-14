@@ -23,7 +23,20 @@ const FILING_SERVICE = process.env.FILING_SERVICE_URL || 'http://localhost:3007'
 const RECONCILIATION_SERVICE = process.env.RECONCILIATION_SERVICE_URL || 'http://localhost:3008';
 const NOTIFICATION_SERVICE = process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:3009';
 const COMPLIANCE_SERVICE = process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:3010';
-const BANK_FEED_SERVICE = process.env.BANK_FEED_SERVICE_URL || 'http://localhost:3011';
+const MONITORING_SERVICE = process.env.MONITORING_SERVICE_URL || 'http://localhost:3019';
+const WORKFLOW_SERVICE = process.env.WORKFLOW_SERVICE_URL || 'http://localhost:3011';
+const ACCOUNTANT_SERVICE = process.env.ACCOUNTANT_SERVICE_URL || 'http://localhost:3012';
+const ANALYTICS_SERVICE = process.env.ANALYTICS_SERVICE_URL || 'http://localhost:3013';
+const AUTOMATION_SERVICE = process.env.AUTOMATION_SERVICE_URL || 'http://localhost:3014';
+const INTEGRATIONS_SERVICE = process.env.INTEGRATIONS_SERVICE_URL || 'http://localhost:3015';
+const BANK_FEED_SERVICE = process.env.BANK_FEED_SERVICE_URL || 'http://localhost:3016';
+const CLASSIFICATION_SERVICE = process.env.CLASSIFICATION_SERVICE_URL || 'http://localhost:3017';
+const OCR_SERVICE = process.env.OCR_SERVICE_URL || 'http://localhost:3018';
+const VALIDATION_SERVICE = process.env.VALIDATION_SERVICE_URL || 'http://localhost:3020';
+const SUPPORT_SERVICE = process.env.SUPPORT_SERVICE_URL || 'http://localhost:3021';
+const ONBOARDING_SERVICE = process.env.ONBOARDING_SERVICE_URL || 'http://localhost:3022';
+const BACKUP_SERVICE = process.env.BACKUP_SERVICE_URL || 'http://localhost:3023';
+const ERROR_HANDLING_SERVICE = process.env.ERROR_HANDLING_SERVICE_URL || 'http://localhost:3024';
 
 // Security middleware
 app.use(helmet());
@@ -78,7 +91,18 @@ app.use('/api/filings', createServiceProxy(FILING_SERVICE, { '^/api/filings': '/
 app.use('/api/reconciliation', createServiceProxy(RECONCILIATION_SERVICE, { '^/api/reconciliation': '/api/reconciliation' }));
 app.use('/api/notifications', createServiceProxy(NOTIFICATION_SERVICE, { '^/api/notifications': '/api/notifications' }));
 app.use('/api/compliance', createServiceProxy(COMPLIANCE_SERVICE, { '^/api/compliance': '/api/compliance' }));
+app.use('/api/monitoring', createServiceProxy(MONITORING_SERVICE, { '^/api/monitoring': '' }));
+app.use('/api/workflows', createServiceProxy(WORKFLOW_SERVICE, { '^/api/workflows': '/api/workflows' }));
+app.use('/api/accountant', createServiceProxy(ACCOUNTANT_SERVICE, { '^/api/accountant': '/api/accountant' }));
+app.use('/api/analytics', createServiceProxy(ANALYTICS_SERVICE, { '^/api/analytics': '/api/analytics' }));
+app.use('/api/automation', createServiceProxy(AUTOMATION_SERVICE, { '^/api/automation': '/api/automation' }));
+app.use('/api/integrations', createServiceProxy(INTEGRATIONS_SERVICE, { '^/api/integrations': '/api/integrations' }));
 app.use('/api/bank-feed', createServiceProxy(BANK_FEED_SERVICE, { '^/api/bank-feed': '/api/bank-feed' }));
+app.use('/api/validation', createServiceProxy(VALIDATION_SERVICE, { '^/api/validation': '/api/validation' }));
+app.use('/api/support', createServiceProxy(SUPPORT_SERVICE, { '^/api/support': '/api/support' }));
+app.use('/api/onboarding', createServiceProxy(ONBOARDING_SERVICE, { '^/api/onboarding': '/api/onboarding' }));
+app.use('/api/backup', createServiceProxy(BACKUP_SERVICE, { '^/api/backup': '/api/backup' }));
+app.use('/api/errors', createServiceProxy(ERROR_HANDLING_SERVICE, { '^/api/errors': '/api/errors' }));
 
 // 404 handler
 app.use((_req: Request, res: Response) => {
@@ -104,7 +128,18 @@ app.listen(PORT, () => {
     reconciliation: RECONCILIATION_SERVICE,
     notification: NOTIFICATION_SERVICE,
     compliance: COMPLIANCE_SERVICE,
+    monitoring: MONITORING_SERVICE,
+    workflow: WORKFLOW_SERVICE,
+    accountant: ACCOUNTANT_SERVICE,
+    analytics: ANALYTICS_SERVICE,
+    automation: AUTOMATION_SERVICE,
+    integrations: INTEGRATIONS_SERVICE,
     bankFeed: BANK_FEED_SERVICE,
+    validation: VALIDATION_SERVICE,
+    support: SUPPORT_SERVICE,
+    onboarding: ONBOARDING_SERVICE,
+    backup: BACKUP_SERVICE,
+    errorHandling: ERROR_HANDLING_SERVICE,
   });
 });
 

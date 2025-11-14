@@ -66,6 +66,7 @@ async function startWorker(): Promise<void> {
               Buffer.from(JSON.stringify({ documentId, classification: result })),
               { persistent: true }
             );
+            logger.info('Document queued for ledger posting', { documentId });
           }
         }
 

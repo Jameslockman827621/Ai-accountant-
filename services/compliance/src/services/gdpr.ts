@@ -76,21 +76,24 @@ export async function hasConsent(
   return count > 0;
 }
 
-export async function exportUserData(userId: UserId): Promise<Record<string, unknown>> {
+export async function exportUserData(
+  tenantId: TenantId,
+  userId: UserId
+): Promise<Record<string, unknown>> {
   // Export all user data for GDPR right to data portability
   const userResult = await db.query(
-    'SELECT * FROM users WHERE id = $1',
-    [userId]
+    'SELECT id, email, name, role, created_at, updated_at FROM users WHERE id = $1 AND tenant_id = $2',
+    [userId, tenantId]
   );
 
   const documentsResult = await db.query(
-    'SELECT * FROM documents WHERE uploaded_by = $1',
-    [userId]
+    'SELECT id, file_name, document_type, status, created_at FROM documents WHERE uploaded_by = $1 AND tenant_id = $2',
+    [userId, tenantId]
   );
 
   const ledgerEntriesResult = await db.query(
-    'SELECT * FROM ledger_entries WHERE created_by = $1',
-    [userId]
+    'SELECT id, entry_type, amount, description, transaction_date, created_at FROM ledger_entries WHERE created_by = $1 AND tenant_id = $2',
+    [userId, tenantId]
   );
 
   return {
@@ -101,14 +104,14 @@ export async function exportUserData(userId: UserId): Promise<Record<string, unk
   };
 }
 
-export async function deleteUserData(userId: UserId): Promise<void> {
+export async function deleteUserData(tenantId: TenantId, userId: UserId): Promise<void> {
   // Delete all user data for GDPR right to erasure
   // Note: Some data may need to be retained for legal/compliance reasons
   
-  await db.query('DELETE FROM gdpr_consents WHERE user_id = $1', [userId]);
-  await db.query('UPDATE documents SET uploaded_by = NULL WHERE uploaded_by = $1', [userId]);
-  await db.query('UPDATE ledger_entries SET created_by = NULL WHERE created_by = $1', [userId]);
-  await db.query('DELETE FROM users WHERE id = $1', [userId]);
+  await db.query('DELETE FROM gdpr_consents WHERE user_id = $1 AND tenant_id = $2', [userId, tenantId]);
+  await db.query('UPDATE documents SET uploaded_by = NULL WHERE uploaded_by = $1 AND tenant_id = $2', [userId, tenantId]);
+  await db.query('UPDATE ledger_entries SET created_by = NULL WHERE created_by = $1 AND tenant_id = $2', [userId, tenantId]);
+  await db.query('DELETE FROM users WHERE id = $1 AND tenant_id = $2', [userId, tenantId]);
 
-  logger.info('User data deleted', { userId });
+  logger.info('User data deleted', { userId, tenantId });
 }

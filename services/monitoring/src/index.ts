@@ -103,12 +103,74 @@ export class Tracer {
 
 export const tracer = new Tracer();
 
+// Health check with dependencies
+export async function checkHealth(): Promise<{
+  status: 'healthy' | 'degraded' | 'unhealthy';
+  timestamp: string;
+  dependencies: Record<string, { status: 'ok' | 'error'; message?: string }>;
+}> {
+  const dependencies: Record<string, { status: 'ok' | 'error'; message?: string }> = {};
+
+  // Check database
+  try {
+    const { db } = await import('@ai-accountant/database');
+    await db.query('SELECT 1');
+    dependencies.database = { status: 'ok' };
+  } catch (error) {
+    dependencies.database = {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Database connection failed',
+    };
+  }
+
+  // Check Redis
+  try {
+    const redis = require('redis');
+    const client = redis.createClient({
+      url: process.env.REDIS_URL || 'redis://localhost:6379',
+    });
+    await client.connect();
+    await client.ping();
+    await client.quit();
+    dependencies.redis = { status: 'ok' };
+  } catch (error) {
+    dependencies.redis = {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'Redis connection failed',
+    };
+  }
+
+  // Check RabbitMQ
+  try {
+    const amqp = require('amqplib');
+    const connection = await amqp.connect(process.env.RABBITMQ_URL || 'amqp://localhost:5672');
+    await connection.close();
+    dependencies.rabbitmq = { status: 'ok' };
+  } catch (error) {
+    dependencies.rabbitmq = {
+      status: 'error',
+      message: error instanceof Error ? error.message : 'RabbitMQ connection failed',
+    };
+  }
+
+  const hasErrors = Object.values(dependencies).some(dep => dep.status === 'error');
+  const status = hasErrors ? 'degraded' : 'healthy';
+
+  return {
+    status,
+    timestamp: new Date().toISOString(),
+    dependencies,
+  };
+}
+
 // Health check endpoint
 export function createMonitoringApp(): Express {
   const app = express();
 
-  app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  app.get('/health', async (req, res) => {
+    const health = await checkHealth();
+    const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
+    res.status(statusCode).json(health);
   });
 
   app.get('/metrics', (req, res) => {
@@ -122,4 +184,17 @@ export function createMonitoringApp(): Express {
   });
 
   return app;
+}
+
+// Start server if this file is run directly
+if (require.main === module) {
+  const { config } = require('dotenv');
+  config();
+
+  const app = createMonitoringApp();
+  const PORT = process.env.PORT || 3019;
+
+  app.listen(PORT, () => {
+    logger.info(`Monitoring service listening on port ${PORT}`);
+  });
 }

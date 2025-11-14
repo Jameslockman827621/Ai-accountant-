@@ -6,6 +6,12 @@ import { db } from '@ai-accountant/database';
 import { FilingType, FilingStatus } from '@ai-accountant/shared-types';
 import { generateVATFiling, HMRCClient } from '../services/hmrc';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import {
+  createFilingReview,
+  getFilingReviewChecklist,
+  approveFilingReview,
+  rejectFilingReview,
+} from '../services/filingReview';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -28,6 +34,12 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     let filingData: Record<string, unknown>;
     if (filingType === FilingType.VAT) {
       filingData = await generateVATFiling(req.user.tenantId, new Date(periodStart), new Date(periodEnd));
+    } else if (filingType === FilingType.PAYE) {
+      const { generatePAYEFiling } = await import('../services/payeCalculation');
+      filingData = await generatePAYEFiling(req.user.tenantId, new Date(periodStart), new Date(periodEnd));
+    } else if (filingType === FilingType.CORPORATION_TAX) {
+      const { generateCorporationTaxFiling } = await import('../services/corporationTaxCalculation');
+      filingData = await generateCorporationTaxFiling(req.user.tenantId, new Date(periodStart), new Date(periodEnd));
     } else {
       throw new ValidationError(`Filing type ${filingType} not yet supported`);
     }
@@ -260,6 +272,100 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to submit filing' });
+  }
+});
+
+// Create filing review
+router.post('/:filingId/review', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+
+    const reviewId = await createFilingReview(filingId, req.user.tenantId, req.user.userId);
+
+    res.status(201).json({ reviewId, message: 'Filing review created' });
+  } catch (error) {
+    logger.error('Create filing review failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to create filing review' });
+  }
+});
+
+// Get filing review checklist
+router.get('/:filingId/review/checklist', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+
+    const checklist = await getFilingReviewChecklist(filingId, req.user.tenantId);
+
+    res.json({ checklist });
+  } catch (error) {
+    logger.error('Get filing review checklist failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get filing review checklist' });
+  }
+});
+
+// Approve filing review
+router.post('/:filingId/review/approve', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const { reviewId, notes } = req.body;
+
+    if (!reviewId) {
+      throw new ValidationError('reviewId is required');
+    }
+
+    await approveFilingReview(reviewId, req.user.userId, notes);
+
+    res.json({ message: 'Filing review approved' });
+  } catch (error) {
+    logger.error('Approve filing review failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to approve filing review' });
+  }
+});
+
+// Reject filing review
+router.post('/:filingId/review/reject', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const { reviewId, reason } = req.body;
+
+    if (!reviewId || !reason) {
+      throw new ValidationError('reviewId and reason are required');
+    }
+
+    await rejectFilingReview(reviewId, req.user.userId, reason);
+
+    res.json({ message: 'Filing review rejected' });
+  } catch (error) {
+    logger.error('Reject filing review failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to reject filing review' });
   }
 });
 

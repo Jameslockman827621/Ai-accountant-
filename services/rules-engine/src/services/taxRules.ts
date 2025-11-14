@@ -2,6 +2,11 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TaxRulepack, TaxRule } from '@ai-accountant/shared-types';
 import OpenAI from 'openai';
+import { getEntityTaxProfile, UKEntityType } from './ukTaxEntities';
+import { calculateIncomeTax, calculateCorporationTax, calculateNationalInsurance, calculateCapitalGainsTax } from './ukTaxCalculations';
+import { calculateVAT, determineVATRate } from './ukVATCalculations';
+import { calculateAllReliefs } from './ukTaxReliefs';
+import { calculateFilingDeadlines } from './ukFilingDeadlines';
 
 const logger = createLogger('rules-engine-service');
 

@@ -1,0 +1,44 @@
+import { Router, Response } from 'express';
+import { createLogger } from '@ai-accountant/shared-utils';
+import { AuthRequest } from '../middleware/auth';
+import { predictRevenue, detectTrends } from '../services/predictive';
+import { ValidationError } from '@ai-accountant/shared-utils';
+
+const router = Router();
+const logger = createLogger('analytics-service');
+
+// Predict revenue
+router.post('/predict/revenue', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { months } = req.body;
+    const prediction = await predictRevenue(req.user.tenantId, months || 6);
+
+    res.json({ prediction });
+  } catch (error) {
+    logger.error('Predict revenue failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to predict revenue' });
+  }
+});
+
+// Detect trends
+router.get('/trends', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const trends = await detectTrends(req.user.tenantId);
+    res.json({ trends });
+  } catch (error) {
+    logger.error('Detect trends failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to detect trends' });
+  }
+});
+
+export { router as analyticsRouter };

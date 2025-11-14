@@ -155,4 +155,70 @@ router.post('/truelayer/fetch', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Check connection health
+router.get('/connections/:connectionId/health', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { connectionId } = req.params;
+    const { checkConnectionHealth } = await import('../services/connectionHealth');
+
+    const health = await checkConnectionHealth(req.user.tenantId, connectionId);
+    res.json({ health });
+  } catch (error) {
+    logger.error('Check connection health failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to check connection health' });
+  }
+});
+
+// Get all connection health
+router.get('/connections/health', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { getAllConnectionHealth } = await import('../services/connectionHealth');
+
+    const health = await getAllConnectionHealth(req.user.tenantId);
+    res.json({ health });
+  } catch (error) {
+    logger.error('Get connection health failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get connection health' });
+  }
+});
+
+// Import CSV transactions
+router.post('/import/csv', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { accountId, csvContent } = req.body;
+
+    if (!accountId || !csvContent) {
+      throw new ValidationError('accountId and csvContent are required');
+    }
+
+    const { importCSVTransactions } = await import('../services/csvImport');
+
+    const imported = await importCSVTransactions(req.user.tenantId, accountId, csvContent);
+
+    res.json({ message: 'CSV imported successfully', imported });
+  } catch (error) {
+    logger.error('CSV import failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to import CSV' });
+  }
+});
+
 export { router as bankFeedRouter };

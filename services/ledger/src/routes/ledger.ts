@@ -8,6 +8,13 @@ import {
   getAccountBalance,
   CreateLedgerEntryInput,
 } from '../services/ledger';
+import { postDoubleEntry, postDocumentToLedger } from '../services/posting';
+import {
+  initializeChartOfAccounts,
+  getChartOfAccounts,
+  validateAccount,
+  updateChartOfAccounts,
+} from '../services/chartOfAccounts';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
@@ -130,7 +137,14 @@ router.get('/entries', async (req: AuthRequest, res: Response) => {
 
     const result = await getLedgerEntries(req.user.tenantId, filters);
 
-    res.json(result);
+    res.json({
+      entries: result.entries,
+      pagination: {
+        total: result.total,
+        limit: filters.limit || 100,
+        offset: filters.offset || 0,
+      },
+    });
   } catch (error) {
     logger.error('Get entries failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get entries' });
@@ -189,6 +203,130 @@ router.get('/accounts/:accountCode/balance', async (req: AuthRequest, res: Respo
   } catch (error) {
     logger.error('Get balance failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get balance' });
+  }
+});
+
+// Post double-entry transaction
+router.post('/transactions', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const {
+      documentId,
+      description,
+      transactionDate,
+      entries,
+      metadata,
+    } = req.body;
+
+    if (!description || !transactionDate || !entries || !Array.isArray(entries) || entries.length < 2) {
+      throw new ValidationError('description, transactionDate, and at least 2 entries are required');
+    }
+
+    const result = await postDoubleEntry({
+      tenantId: req.user.tenantId,
+      documentId,
+      description,
+      transactionDate: new Date(transactionDate),
+      entries,
+      createdBy: req.user.userId,
+      metadata,
+    });
+
+    res.status(201).json({ transaction: result });
+  } catch (error) {
+    logger.error('Post transaction failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to post transaction' });
+  }
+});
+
+// Post document to ledger
+router.post('/documents/:documentId/post', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+
+    const result = await postDocumentToLedger(req.user.tenantId, documentId, req.user.userId);
+
+    res.status(201).json({ transaction: result, message: 'Document posted to ledger' });
+  } catch (error) {
+    logger.error('Post document to ledger failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to post document to ledger' });
+  }
+});
+
+// Initialize chart of accounts
+router.post('/chart-of-accounts/initialize', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    await initializeChartOfAccounts(req.user.tenantId);
+
+    res.json({ message: 'Chart of accounts initialized' });
+  } catch (error) {
+    logger.error('Initialize chart of accounts failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to initialize chart of accounts' });
+  }
+});
+
+// Get chart of accounts
+router.get('/chart-of-accounts', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const accounts = await getChartOfAccounts(req.user.tenantId);
+    res.json({ accounts });
+  } catch (error) {
+    logger.error('Get chart of accounts failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get chart of accounts' });
+  }
+});
+
+// Update chart of accounts
+router.put('/chart-of-accounts', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { accounts } = req.body;
+
+    if (!accounts || !Array.isArray(accounts)) {
+      throw new ValidationError('accounts array is required');
+    }
+
+    await updateChartOfAccounts(req.user.tenantId, accounts);
+
+    res.json({ message: 'Chart of accounts updated' });
+  } catch (error) {
+    logger.error('Update chart of accounts failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to update chart of accounts' });
   }
 });
 

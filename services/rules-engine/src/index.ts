@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { rulesRouter } from './routes/rules';
+import { ukTaxRouter } from './routes/ukTax';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
@@ -26,6 +27,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/rules', authenticate, rulesRouter);
+app.use('/api/uk-tax', authenticate, ukTaxRouter);
 
 app.use(errorHandler);
 

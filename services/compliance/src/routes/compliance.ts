@@ -1,7 +1,8 @@
 import { Router, Response } from 'express';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
-import { deleteUserData, exportUserData, getAuditLogs } from '../services/gdpr';
+import { deleteUserData, exportUserData } from '../services/gdpr';
+import { getAuditLogs } from '../services/audit';
 import { UserRole } from '@ai-accountant/shared-types';
 import { AuthorizationError } from '@ai-accountant/shared-utils';
 
