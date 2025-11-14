@@ -126,12 +126,12 @@ async function persistComponent(params: PersistParams): Promise<string | null> {
       params.confidence ?? null,
     ]);
     return result.rows[0]?.id ?? null;
-  } catch (error) {
-    logger.error('Failed to persist validation result', {
-      component: params.component,
-      entityId: params.entityId,
-      error,
-    });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('Failed to persist validation result', err, {
+        component: params.component,
+        entityId: params.entityId,
+      });
     return null;
   }
 }
@@ -170,8 +170,9 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
       } else if (taxResult.warnings.length) {
         overallWarnings.push('Tax validation produced warnings');
       }
-    } catch (error) {
-      logger.error('Tax validation execution failed', { entityId, error });
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logger.error('Tax validation execution failed', err, { entityId });
       overallErrors.push('Tax validation could not be executed');
       recordsPersisted.tax = await persistComponent({
         tenantId,
@@ -199,8 +200,9 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
     if (failedChecks.length) {
       overallErrors.push('Data accuracy checks failed');
     }
-  } catch (error) {
-    logger.error('Accuracy check execution failed', { entityId, error });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('Accuracy check execution failed', err, { entityId });
     overallErrors.push('Accuracy checks could not be executed');
     recordsPersisted.accuracy = await persistComponent({
       tenantId,
@@ -215,8 +217,9 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
   let anomalyItems: Anomaly[] = [];
   try {
     anomalyItems = await detectAnomalies(tenantId, periodStart, periodEnd);
-  } catch (error) {
-    logger.error('Anomaly detection execution failed', { entityId, error });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('Anomaly detection execution failed', err, { entityId });
     overallWarnings.push('Anomaly detection could not be executed');
   }
 
@@ -243,8 +246,9 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
   if (includeConfidence) {
     try {
       confidenceChecks = await checkConfidenceThresholds(tenantId);
-    } catch (error) {
-      logger.error('Confidence check execution failed', { entityId, error });
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logger.error('Confidence check execution failed', err, { entityId });
       overallWarnings.push('Confidence checks could not be executed');
     }
   }

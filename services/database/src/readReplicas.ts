@@ -28,10 +28,8 @@ export class ReadReplicaManager {
       logger.debug('Replica health check', { replicaUrl });
       return true;
     } catch (error) {
-      logger.error('Replica health check failed', {
-        replicaUrl,
-        error: error instanceof Error ? error : new Error(String(error)),
-      });
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('Replica health check failed', err, { replicaUrl });
       return false;
     }
   }

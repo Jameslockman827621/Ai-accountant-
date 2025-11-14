@@ -1,4 +1,5 @@
 import express, { Express } from 'express';
+import crypto from 'crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
 
 const logger = createLogger('monitoring-service');
@@ -74,11 +75,9 @@ export class Tracer {
   startTrace(operation: string, parentContext?: TraceContext): TraceContext {
     const traceId = parentContext?.traceId || crypto.randomUUID();
     const spanId = crypto.randomUUID();
-    const context: TraceContext = {
-      traceId,
-      spanId,
-      parentSpanId: parentContext?.spanId,
-    };
+    const context: TraceContext = parentContext?.spanId
+      ? { traceId, spanId, parentSpanId: parentContext.spanId }
+      : { traceId, spanId };
 
     const traces = this.traces.get(traceId) || [];
     traces.push(context);
@@ -167,13 +166,13 @@ export async function checkHealth(): Promise<{
 export function createMonitoringApp(): Express {
   const app = express();
 
-  app.get('/health', async (req, res) => {
+  app.get('/health', async (_req, res) => {
     const health = await checkHealth();
     const statusCode = health.status === 'healthy' ? 200 : health.status === 'degraded' ? 200 : 503;
     res.status(statusCode).json(health);
   });
 
-  app.get('/metrics', (req, res) => {
+  app.get('/metrics', (_req, res) => {
     res.set('Content-Type', 'text/plain');
     res.send(metricsCollector.getPrometheusFormat());
   });

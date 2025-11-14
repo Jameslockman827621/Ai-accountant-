@@ -8,11 +8,22 @@ import {
   updateTicketStatus,
   assignTicket,
   addComment,
+  SupportTicket,
 } from '../services/tickets';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
 const logger = createLogger('support-service');
+const TICKET_STATUSES: ReadonlyArray<SupportTicket['status']> = [
+  'open',
+  'in_progress',
+  'resolved',
+  'closed',
+];
+
+function isTicketStatus(value: unknown): value is SupportTicket['status'] {
+  return typeof value === 'string' && TICKET_STATUSES.includes(value as SupportTicket['status']);
+}
 
 // Create support ticket
 router.post('/tickets', async (req: AuthRequest, res: Response) => {
@@ -55,14 +66,16 @@ router.get('/tickets', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { status } = req.query;
-    const userId = req.user.role === 'client' ? req.user.userId : undefined;
+    const rawStatus = Array.isArray(req.query.status) ? req.query.status[0] : req.query.status;
+    const normalizedStatus = typeof rawStatus === 'string' ? rawStatus : undefined;
+    const statusFilter = normalizedStatus && isTicketStatus(normalizedStatus) ? normalizedStatus : undefined;
 
-    const tickets = await getTickets(
-      req.user.tenantId,
-      userId,
-      status as string | undefined
-    );
+    if (normalizedStatus && !statusFilter) {
+      throw new ValidationError('Invalid status filter');
+    }
+
+    const scopedUserId = req.user.role === 'client' ? req.user.userId : undefined;
+    const tickets = await getTickets(req.user.tenantId, scopedUserId, statusFilter);
 
     res.json({ tickets });
   } catch (error) {
@@ -80,6 +93,10 @@ router.get('/tickets/:ticketId', async (req: AuthRequest, res: Response) => {
     }
 
     const { ticketId } = req.params;
+    if (!ticketId) {
+      res.status(400).json({ error: 'ticketId is required' });
+      return;
+    }
 
     const ticket = await getTicket(ticketId, req.user.tenantId);
 
@@ -104,10 +121,15 @@ router.put('/tickets/:ticketId/status', async (req: AuthRequest, res: Response) 
     }
 
     const { ticketId } = req.params;
+    if (!ticketId) {
+      res.status(400).json({ error: 'ticketId is required' });
+      return;
+    }
+
     const { status, resolution } = req.body;
 
-    if (!status) {
-      throw new ValidationError('status is required');
+    if (!isTicketStatus(status)) {
+      throw new ValidationError('Valid status is required');
     }
 
     await updateTicketStatus(ticketId, req.user.tenantId, status, resolution);
@@ -132,6 +154,10 @@ router.post('/tickets/:ticketId/assign', async (req: AuthRequest, res: Response)
     }
 
     const { ticketId } = req.params;
+    if (!ticketId) {
+      res.status(400).json({ error: 'ticketId is required' });
+      return;
+    }
     const { assignedTo } = req.body;
 
     if (!assignedTo) {
@@ -160,6 +186,10 @@ router.post('/tickets/:ticketId/comments', async (req: AuthRequest, res: Respons
     }
 
     const { ticketId } = req.params;
+    if (!ticketId) {
+      res.status(400).json({ error: 'ticketId is required' });
+      return;
+    }
     const { comment, isInternal } = req.body;
 
     if (!comment) {

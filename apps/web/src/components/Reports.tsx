@@ -1,21 +1,15 @@
 import React, { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 
-interface Report {
-  type: 'profit-loss' | 'balance-sheet' | 'cash-flow';
-  period: { start: string; end: string };
-  data: unknown;
-}
-
 export function Reports() {
   const { token } = useAuth();
-  const [selectedReport, setSelectedReport] = useState<Report['type'] | null>(null);
-  const [reportData, setReportData] = useState<unknown>(null);
+  const [selectedReport, setSelectedReport] = useState<'profit-loss' | 'balance-sheet' | 'cash-flow' | null>(null);
+  const [reportData, setReportData] = useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = useState(false);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
-  async function generateReport(type: Report['type']) {
+  async function generateReport(type: 'profit-loss' | 'balance-sheet' | 'cash-flow') {
     if (!startDate || !endDate) {
       alert('Please select start and end dates');
       return;
@@ -23,7 +17,7 @@ export function Reports() {
 
     setLoading(true);
     try {
-      const endpoint = type === 'profit-loss' ? 'profit-loss' :
+        const endpoint = type === 'profit-loss' ? 'profit-loss' :
                       type === 'balance-sheet' ? 'balance-sheet' :
                       'cash-flow';
 
@@ -37,9 +31,9 @@ export function Reports() {
         },
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setReportData(data.report);
+        if (response.ok) {
+          const data = await response.json() as { report?: Record<string, unknown> };
+          setReportData(data.report ?? null);
         setSelectedReport(type);
       } else {
         alert('Failed to generate report');
@@ -122,7 +116,7 @@ export function Reports() {
         </div>
 
         {/* Report Display */}
-        {reportData && selectedReport && (
+          {selectedReport && reportData !== null && (
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-semibold">

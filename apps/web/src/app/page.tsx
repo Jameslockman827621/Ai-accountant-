@@ -1,6 +1,5 @@
 'use client';
 
-import { useState } from 'react';
 import LoginForm from '@/components/LoginForm';
 import Dashboard from '@/components/Dashboard';
 import { useAuth } from '@/hooks/useAuth';

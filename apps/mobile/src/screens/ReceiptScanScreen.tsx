@@ -8,6 +8,11 @@ export function ReceiptScanScreen() {
   const [scanning, setScanning] = useState(false);
   const [imageUri, setImageUri] = useState<string | null>(null);
 
+  const API_BASE =
+    (process.env.EXPO_PUBLIC_API_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      'http://localhost:3000').replace(/\/$/, '');
+
   const takePicture = async (camera: Camera) => {
     if (camera) {
       const options = { quality: 0.5, base64: true };
@@ -21,6 +26,10 @@ export function ReceiptScanScreen() {
   };
 
   const uploadReceipt = async (uri: string) => {
+    if (!token) {
+      console.warn('Cannot upload receipt without authentication token');
+      return;
+    }
     const formData = new FormData();
     formData.append('file', {
       uri,
@@ -29,7 +38,7 @@ export function ReceiptScanScreen() {
     } as any);
 
     try {
-      const response = await fetch('/api/documents/upload', {
+      const response = await fetch(`${API_BASE}/api/documents/upload`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${token}`,

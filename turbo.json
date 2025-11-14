@@ -17,10 +17,10 @@
     "lint": {
       "outputs": []
     },
-    "type-check": {
-      "dependsOn": ["^build"],
-      "outputs": []
-    },
+      "type-check": {
+        "dependsOn": ["^type-check"],
+        "outputs": []
+      },
     "clean": {
       "cache": false
     }

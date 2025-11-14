@@ -1,7 +1,4 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { sendEmail } from './email';
-
-const logger = createLogger('notification-service');
 
 export interface EmailTemplate {
   id: string;

@@ -3,6 +3,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import { predictRevenue, detectTrends } from '../services/predictive';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { getDashboardStats } from '../services/dashboard';
 
 const router = Router();
 const logger = createLogger('analytics-service');
@@ -38,6 +39,28 @@ router.get('/trends', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Detect trends failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to detect trends' });
+  }
+});
+
+// Dashboard stats
+router.get('/dashboard', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { startDate, endDate } = req.query;
+
+    const stats = await getDashboardStats(req.user.tenantId, {
+      periodStart: startDate ? new Date(String(startDate)) : undefined,
+      periodEnd: endDate ? new Date(String(endDate)) : undefined,
+    });
+
+    res.json({ stats });
+  } catch (error) {
+    logger.error('Get dashboard stats failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to generate dashboard stats' });
   }
 });
 

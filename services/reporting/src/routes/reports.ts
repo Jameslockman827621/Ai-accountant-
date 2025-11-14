@@ -6,7 +6,6 @@ import {
   generateBalanceSheet,
   generateCashFlow,
 } from '../services/financialReports';
-import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
 const logger = createLogger('reporting-service');

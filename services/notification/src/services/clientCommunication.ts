@@ -1,7 +1,6 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { sendEmail } from './email';
 import { sendFilingReminder, sendDocumentReviewRequired, sendComplianceAlert } from './emailTemplates';
 
 const logger = createLogger('notification-service');
@@ -25,12 +24,13 @@ export async function sendAutomatedReminders(tenantId: TenantId): Promise<number
     [tenantId]
   );
 
-  if (tenant.rows.length === 0) {
+  const tenantRow = tenant.rows[0];
+  if (!tenantRow) {
     return 0;
   }
 
-  const tenantName = tenant.rows[0].name;
-  const email = tenant.rows[0].email;
+  const tenantName = tenantRow.name;
+  const email = tenantRow.email;
 
   let remindersSent = 0;
 
