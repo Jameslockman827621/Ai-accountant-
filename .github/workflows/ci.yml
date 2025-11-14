@@ -43,13 +43,19 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - run: npm run build
-      - run: npm test
+      - run: npm run test:ci
         env:
           DB_HOST: localhost
           DB_PORT: 5432
           DB_NAME: ai_accountant_test
           DB_USER: postgres
           DB_PASSWORD: postgres
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage
 
   build:
     runs-on: ubuntu-latest

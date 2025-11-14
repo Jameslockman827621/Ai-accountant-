@@ -11,8 +11,8 @@ export interface ConfidenceCheck {
   reason?: string;
 }
 
-const MIN_CONFIDENCE_THRESHOLD = 0.85;
-const CRITICAL_CONFIDENCE_THRESHOLD = 0.70;
+export const MIN_CONFIDENCE_THRESHOLD = 0.85;
+export const CRITICAL_CONFIDENCE_THRESHOLD = 0.70;
 
 export async function checkConfidenceThresholds(
   tenantId: TenantId

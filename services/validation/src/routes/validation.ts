@@ -6,6 +6,7 @@ import { checkDataAccuracy } from '../services/dataAccuracy';
 import { detectAnomalies } from '../services/anomalyDetector';
 import { checkConfidenceThresholds, enforceConfidenceThreshold } from '../services/confidenceThreshold';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { runValidationSuite } from '../services/validationSummary';
 
 const router = Router();
 const logger = createLogger('validation-service');
@@ -137,6 +138,54 @@ router.post('/confidence/enforce', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to enforce confidence threshold' });
+  }
+});
+
+const parseDate = (value: unknown, field: string): Date | undefined => {
+  if (!value) {
+    return undefined;
+  }
+
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    throw new ValidationError(`${field} must be a valid date string`);
+  }
+  return date;
+};
+
+// Run consolidated validation suite
+router.post('/summary', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { entityType, entityId, filingType, filingData, periodStart, periodEnd, includeConfidenceChecks } = req.body;
+
+    if (!entityType || !entityId) {
+      throw new ValidationError('entityType and entityId are required');
+    }
+
+    const summary = await runValidationSuite({
+      tenantId: req.user.tenantId,
+      entityType,
+      entityId,
+      filingType,
+      filingData,
+      periodStart: parseDate(periodStart, 'periodStart'),
+      periodEnd: parseDate(periodEnd, 'periodEnd'),
+      includeConfidenceChecks,
+    });
+
+    res.json(summary);
+  } catch (error) {
+    logger.error('Validation summary failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to execute validation summary' });
   }
 });
 

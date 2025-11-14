@@ -1,16 +1,27 @@
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  roots: ['<rootDir>/services', '<rootDir>/packages', '<rootDir>/__tests__'],
-  testMatch: ['**/__tests__/**/*.test.ts', '**/*.test.ts'],
+  globals: {
+    'ts-jest': {
+      tsconfig: '<rootDir>/tsconfig.json',
+      isolatedModules: true,
+      diagnostics: false,
+    },
+  },
+  roots: ['<rootDir>/services', '<rootDir>/packages', '<rootDir>/apps', '<rootDir>/__tests__'],
+  testMatch: ['**/__tests__/**/*.test.ts', '**/*.test.ts', '**/*.test.tsx'],
   collectCoverageFrom: [
     'services/**/*.ts',
     'packages/**/*.ts',
+    'apps/**/*.ts',
+    'apps/**/*.tsx',
     '!**/*.d.ts',
     '!**/__tests__/**',
     '!**/node_modules/**',
     '!**/dist/**',
+    '!**/.next/**',
   ],
+  coverageDirectory: '<rootDir>/coverage',
   coverageThreshold: {
     global: {
       branches: 80,
@@ -20,8 +31,15 @@ module.exports = {
     },
   },
   moduleNameMapper: {
-    '^@ai-accountant/(.*)$': '<rootDir>/$1/src',
+    '^@ai-accountant/shared-types(.*)$': '<rootDir>/packages/shared-types/src$1',
+    '^@ai-accountant/shared-utils(.*)$': '<rootDir>/packages/shared-utils/src$1',
+    '^@ai-accountant/database(.*)$': '<rootDir>/services/database/src$1',
+    '^@ai-accountant/web(.*)$': '<rootDir>/apps/web/src$1',
+    '^@ai-accountant/mobile(.*)$': '<rootDir>/apps/mobile/src$1',
+    '^@ai-accountant/([a-z0-9-]+)-service(?:/(.*))?$': '<rootDir>/services/$1/src/$2',
+    '^@ai-accountant/([a-z0-9-]+)(?:/(.*))?$': '<rootDir>/services/$1/src/$2',
   },
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'json'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],
   testTimeout: 30000,
 };

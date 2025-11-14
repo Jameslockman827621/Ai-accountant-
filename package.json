@@ -12,6 +12,9 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "test": "turbo run test",
+    "test:coverage": "jest --runInBand --coverage",
+    "test:ci": "jest --runInBand --coverage --ci",
+    "test:watch": "jest --watch",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
@@ -19,8 +22,11 @@
     "db:seed": "cd services/database && npm run seed"
   },
   "devDependencies": {
+    "@types/jest": "^30.0.0",
     "@types/node": "^20.10.5",
     "@types/uuid": "^10.0.0",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.5",
     "turbo": "^1.10.16",
     "typescript": "^5.3.3"
   },
