@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
+import crypto from 'crypto';
 
 const logger = createLogger('support-service');
 

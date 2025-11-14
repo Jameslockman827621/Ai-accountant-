@@ -15,6 +15,7 @@
     "@react-navigation/native": "^6.1.0",
     "@react-navigation/stack": "^6.3.0",
     "react-native-camera": "^4.2.1",
-    "axios": "^1.6.0"
+    "axios": "^1.6.0",
+    "@react-native-async-storage/async-storage": "^1.22.0"
   }
 }
