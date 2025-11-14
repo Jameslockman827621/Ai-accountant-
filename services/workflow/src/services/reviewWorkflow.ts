@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
+import crypto from 'crypto';
 
 const logger = createLogger('workflow-service');
 
@@ -129,11 +130,10 @@ export async function getReviewTask(taskId: string): Promise<ReviewTask | null> 
     [taskId]
   );
 
-  if (result.rows.length === 0) {
+  const row = result.rows[0];
+  if (!row) {
     return null;
   }
-
-  const row = result.rows[0];
   return {
     id: row.id,
     tenantId: row.tenant_id,

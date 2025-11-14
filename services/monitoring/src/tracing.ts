@@ -26,11 +26,11 @@ export class OpenTelemetryTracer {
     logger.debug('OpenTelemetry span ended', { name });
   }
 
-  addEvent(context: TraceContext, name: string, attributes?: Record<string, unknown>): void {
+  addEvent(_context: TraceContext, name: string, attributes?: Record<string, unknown>): void {
     logger.debug('Event added to span', { name, attributes });
   }
 
-  setAttribute(context: TraceContext, key: string, value: string): void {
+  setAttribute(_context: TraceContext, key: string, value: string): void {
     logger.debug('Attribute set on span', { key, value });
   }
 }
@@ -55,9 +55,9 @@ export function extractTraceContext(headers: Record<string, string>): TraceConte
     return null;
   }
 
-  return {
-    traceId,
-    spanId,
-    parentSpanId,
-  };
+  const context: TraceContext = { traceId, spanId };
+  if (parentSpanId) {
+    context.parentSpanId = parentSpanId;
+  }
+  return context;
 }

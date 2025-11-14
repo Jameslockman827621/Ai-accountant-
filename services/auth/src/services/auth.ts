@@ -1,7 +1,6 @@
 import { db } from '@ai-accountant/database';
-import { hashPassword, verifyPassword } from '@ai-accountant/shared-utils';
 import { TenantId, UserId, UserRole } from '@ai-accountant/shared-types';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
 
 export interface CreateUserInput {
   tenantId: TenantId;
@@ -20,6 +19,16 @@ export interface AuthResult {
     tenantId: TenantId;
   };
   token: string;
+}
+
+function hashPassword(password: string): Promise<string> {
+  const hash = createHash('sha256').update(password).digest('hex');
+  return Promise.resolve(hash);
+}
+
+function verifyPassword(password: string, hash: string): Promise<boolean> {
+  const candidate = createHash('sha256').update(password).digest('hex');
+  return Promise.resolve(candidate === hash);
 }
 
 export async function createUser(input: CreateUserInput): Promise<UserId> {
@@ -53,6 +62,9 @@ export async function authenticateUser(email: string, password: string): Promise
   }
 
   const user = result.rows[0];
+  if (!user) {
+    throw new Error('Invalid credentials');
+  }
   const isValid = await verifyPassword(password, user.password_hash);
 
   if (!isValid) {

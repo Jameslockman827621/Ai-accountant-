@@ -113,7 +113,7 @@ function evaluateCondition(
 
 async function executeWorkflowAction(
   action: WorkflowAction,
-  context: Record<string, unknown>,
+  _context: Record<string, unknown>,
   tenantId: TenantId
 ): Promise<void> {
   switch (action.type) {
@@ -163,11 +163,10 @@ async function getWorkflow(workflowId: string): Promise<ConditionalWorkflow | nu
     [workflowId]
   );
 
-  if (result.rows.length === 0) {
+  const row = result.rows[0];
+  if (!row) {
     return null;
   }
-
-  const row = result.rows[0];
   return {
     id: row.id,
     tenantId: row.tenant_id,

@@ -150,6 +150,7 @@ export async function performBulkOperation(
   logger.info('Performing bulk operation', {
     tenantCount: tenantIds.length,
     operation,
+    parameters,
   });
 
   let success = 0;

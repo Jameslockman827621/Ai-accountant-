@@ -6,11 +6,24 @@ import {
   completeOnboardingStep,
   getOnboardingStepData,
   resetOnboarding,
+  OnboardingStep,
 } from '../services/onboarding';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
 const logger = createLogger('onboarding-service');
+const ONBOARDING_STEPS: ReadonlyArray<OnboardingStep> = [
+  'welcome',
+  'business_info',
+  'chart_of_accounts',
+  'bank_connection',
+  'first_document',
+  'complete',
+];
+
+function isOnboardingStep(value: unknown): value is OnboardingStep {
+  return typeof value === 'string' && ONBOARDING_STEPS.includes(value as OnboardingStep);
+}
 
 // Get onboarding progress
 router.get('/progress', async (req: AuthRequest, res: Response) => {
@@ -37,9 +50,12 @@ router.post('/steps/:stepName/complete', async (req: AuthRequest, res: Response)
     }
 
     const { stepName } = req.params;
+    if (!isOnboardingStep(stepName)) {
+      throw new ValidationError('Invalid step name');
+    }
     const { stepData } = req.body;
 
-    await completeOnboardingStep(req.user.tenantId, stepName as any, stepData);
+    await completeOnboardingStep(req.user.tenantId, stepName, stepData);
 
     res.json({ message: 'Step completed successfully' });
   } catch (error) {
@@ -57,8 +73,11 @@ router.get('/steps/:stepName', async (req: AuthRequest, res: Response) => {
     }
 
     const { stepName } = req.params;
+    if (!isOnboardingStep(stepName)) {
+      throw new ValidationError('Invalid step name');
+    }
 
-    const stepData = await getOnboardingStepData(req.user.tenantId, stepName as any);
+    const stepData = await getOnboardingStepData(req.user.tenantId, stepName);
 
     res.json({ stepData });
   } catch (error) {

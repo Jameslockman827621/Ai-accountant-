@@ -10,6 +10,13 @@ export class PagerDutyIntegration {
   constructor() {
     this.apiKey = process.env.PAGERDUTY_API_KEY || '';
     this.serviceKey = process.env.PAGERDUTY_SERVICE_KEY || '';
+
+    if (!this.apiKey || !this.serviceKey) {
+      logger.warn('PagerDuty credentials not fully configured', {
+        hasApiKey: Boolean(this.apiKey),
+        hasServiceKey: Boolean(this.serviceKey),
+      });
+    }
   }
 
   async triggerIncident(
@@ -28,7 +35,7 @@ export class PagerDutyIntegration {
     //   },
     // });
 
-    logger.error('PagerDuty incident triggered', { summary, severity, details });
+    logger.error('PagerDuty incident triggered', undefined, { summary, severity, details });
     return 'incident-id';
   }
 

@@ -34,7 +34,7 @@ export class APMIntegration {
   }
 
   recordError(error: Error, context?: Record<string, unknown>): void {
-    logger.error('Error recorded in APM', { error: error.message, context });
+    logger.error('Error recorded in APM', error, context ? { context } : undefined);
   }
 }
 

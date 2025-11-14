@@ -81,11 +81,12 @@ export async function getOnboardingStepData(
     [tenantId, stepName]
   );
 
-  if (result.rows.length === 0) {
-    return null;
-  }
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
 
-  return (result.rows[0].step_data as Record<string, unknown>) || null;
+    return (row.step_data as Record<string, unknown>) || null;
 }
 
 export async function resetOnboarding(tenantId: TenantId): Promise<void> {

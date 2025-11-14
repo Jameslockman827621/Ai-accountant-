@@ -6,14 +6,12 @@ import {
   assignReviewTask,
   approveTask,
   rejectTask,
-  getReviewTask,
   getPendingTasks,
 } from '../services/reviewWorkflow';
 import {
   createApprovalWorkflow,
   approveWorkflow,
   rejectWorkflow,
-  getApprovalWorkflow,
   getPendingApprovals,
 } from '../services/approvalWorkflow';
 import { ValidationError } from '@ai-accountant/shared-utils';
@@ -60,11 +58,11 @@ router.get('/review/pending', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { assignedTo } = req.query;
-    const tasks = await getPendingTasks(
-      req.user.tenantId,
-      assignedTo as string | undefined
-    );
+    const rawAssigned = Array.isArray(req.query.assignedTo)
+      ? req.query.assignedTo[0]
+      : req.query.assignedTo;
+    const assignedTo = typeof rawAssigned === 'string' ? rawAssigned : undefined;
+    const tasks = await getPendingTasks(req.user.tenantId, assignedTo);
 
     res.json({ tasks });
   } catch (error) {
@@ -81,6 +79,10 @@ router.post('/review/:taskId/assign', async (req: AuthRequest, res: Response) =>
     }
 
     const { taskId } = req.params;
+    if (!taskId) {
+      res.status(400).json({ error: 'taskId is required' });
+      return;
+    }
     const { assignedTo } = req.body;
 
     if (!assignedTo) {
@@ -107,6 +109,10 @@ router.post('/review/:taskId/approve', async (req: AuthRequest, res: Response) =
     }
 
     const { taskId } = req.params;
+    if (!taskId) {
+      res.status(400).json({ error: 'taskId is required' });
+      return;
+    }
     await approveTask(taskId, req.user.userId);
     res.json({ message: 'Task approved successfully' });
   } catch (error) {
@@ -123,6 +129,10 @@ router.post('/review/:taskId/reject', async (req: AuthRequest, res: Response) =>
     }
 
     const { taskId } = req.params;
+    if (!taskId) {
+      res.status(400).json({ error: 'taskId is required' });
+      return;
+    }
     const { reason } = req.body;
 
     if (!reason) {
@@ -197,6 +207,10 @@ router.post('/approval/:workflowId/approve', async (req: AuthRequest, res: Respo
     }
 
     const { workflowId } = req.params;
+    if (!workflowId) {
+      res.status(400).json({ error: 'workflowId is required' });
+      return;
+    }
     const { comment } = req.body;
 
     const isComplete = await approveWorkflow(workflowId, req.user.userId, comment);
@@ -215,6 +229,10 @@ router.post('/approval/:workflowId/reject', async (req: AuthRequest, res: Respon
     }
 
     const { workflowId } = req.params;
+    if (!workflowId) {
+      res.status(400).json({ error: 'workflowId is required' });
+      return;
+    }
     const { reason } = req.body;
 
     if (!reason) {

@@ -18,13 +18,22 @@ export class LogAggregation {
     message: string,
     metadata?: Record<string, unknown>
   ): Promise<void> {
-    const logEntry = {
+    const logEntry: {
+      timestamp: Date;
+      level: string;
+      service: string;
+      message: string;
+      metadata?: Record<string, unknown>;
+    } = {
       timestamp: new Date(),
       level,
       service,
       message,
-      metadata,
     };
+
+    if (metadata) {
+      logEntry.metadata = metadata;
+    }
 
     this.logs.push(logEntry);
 

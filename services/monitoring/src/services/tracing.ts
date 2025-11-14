@@ -32,13 +32,16 @@ class TracingService {
     const span: TraceSpan = {
       traceId: finalTraceId,
       spanId,
-      parentSpanId,
       serviceName,
       operationName,
       startTime: new Date(),
       tags: {},
       logs: [],
     };
+
+    if (parentSpanId) {
+      span.parentSpanId = parentSpanId;
+    }
 
     this.activeSpans.set(spanId, span);
 
@@ -101,11 +104,12 @@ class TracingService {
     );
   }
 
-  getTrace(traceId: string): Promise<TraceSpan[]> {
-    return db.query<TraceSpan>(
+  async getTrace(traceId: string): Promise<TraceSpan[]> {
+    const result = await db.query(
       'SELECT * FROM traces WHERE trace_id = $1 ORDER BY start_time',
       [traceId]
-    ).then(result => result.rows);
+    );
+    return result.rows as unknown as TraceSpan[];
   }
 }
 

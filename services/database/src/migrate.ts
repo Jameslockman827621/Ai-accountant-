@@ -141,15 +141,6 @@ async function migrate(): Promise<void> {
           console.log('GDPR schema not found, skipping...');
         }
 
-        // Read integrations schema
-        const integrationsPath = join(baseDir, 'schema-integrations.sql');
-        try {
-          const integrationsSchema = readFileSync(integrationsPath, 'utf-8');
-          await db.query(integrationsSchema);
-        } catch (err) {
-          console.log('Integrations schema not found, skipping...');
-        }
-
         // Read MFA schema
         const mfaPath = join(baseDir, 'schema-mfa.sql');
         try {

@@ -57,11 +57,10 @@ export async function getTicket(ticketId: string, tenantId: TenantId): Promise<S
     [ticketId, tenantId]
   );
 
-  if (result.rows.length === 0) {
+  const row = result.rows[0];
+  if (!row) {
     return null;
   }
-
-  const row = result.rows[0];
   return {
     id: row.id,
     tenantId: row.tenant_id,

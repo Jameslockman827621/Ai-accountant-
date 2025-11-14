@@ -4,7 +4,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 const logger = createLogger('monitoring-service');
 
 // Instrument Express middleware
-export function instrumentExpress(app: unknown): void {
+export function instrumentExpress(_app: unknown): void {
   // In production, use actual APM SDK
   logger.info('Express app instrumented for monitoring');
 }
