@@ -161,19 +161,42 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const filing = filingResult.rows[0] as {
-      id: string;
-      status: string;
-    } | undefined;
+      const filing = filingResult.rows[0] as {
+        id: string;
+        status: string;
+      } | undefined;
 
     if (!filing) {
       res.status(404).json({ error: 'Filing not found' });
       return;
     }
 
-    if (filing.status !== FilingStatus.DRAFT && filing.status !== FilingStatus.PENDING_APPROVAL) {
-      throw new ValidationError('Filing can only be submitted from draft or pending approval status');
-    }
+      if (filing.status !== FilingStatus.PENDING_APPROVAL) {
+        throw new ValidationError('Filing must be reviewed and approved before submission');
+      }
+
+      const reviewResult = await db.query<{
+        review_status: string;
+        validation_results: { status?: string } | null;
+      }>(
+        `SELECT review_status, validation_results
+         FROM filing_reviews
+         WHERE filing_id = $1
+         ORDER BY updated_at DESC
+         LIMIT 1`,
+        [filingId]
+      );
+
+      if (
+        reviewResult.rows.length === 0 ||
+        reviewResult.rows[0].review_status !== 'approved'
+      ) {
+        throw new ValidationError('Filing must have an approved review before submission');
+      }
+
+      if (reviewResult.rows[0].validation_results?.status === 'fail') {
+        throw new ValidationError('Validation checks failed. Please resolve issues before submission.');
+      }
 
     // Get tenant VAT number
     const tenantResult = await db.query<{ vat_number: string | null }>(

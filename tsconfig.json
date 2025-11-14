@@ -3,11 +3,13 @@
     "target": "ES2022",
     "module": "commonjs",
     "lib": ["ES2022"],
+    "jsx": "react-jsx",
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./",
+    "baseUrl": ".",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -20,7 +22,23 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
-    "exactOptionalPropertyTypes": true
+    "exactOptionalPropertyTypes": true,
+    "paths": {
+      "@ai-accountant/shared-utils": ["packages/shared-utils/src"],
+      "@ai-accountant/shared-utils/*": ["packages/shared-utils/src/*"],
+      "@ai-accountant/shared-types": ["packages/shared-types/src"],
+      "@ai-accountant/shared-types/*": ["packages/shared-types/src/*"],
+      "@ai-accountant/database": ["services/database/src"],
+      "@ai-accountant/database/*": ["services/database/src/*"],
+      "@ai-accountant/web": ["apps/web/src"],
+      "@ai-accountant/web/*": ["apps/web/src/*"],
+      "@ai-accountant/mobile": ["apps/mobile/src"],
+      "@ai-accountant/mobile/*": ["apps/mobile/src/*"],
+      "@ai-accountant/*-service": ["services/*/src"],
+      "@ai-accountant/*-service/*": ["services/*/src/*"],
+      "@ai-accountant/*": ["services/*/src"],
+      "@ai-accountant/*/*": ["services/*/src/*"]
+    }
   },
   "exclude": ["node_modules", "dist", "build", ".next"]
 }
