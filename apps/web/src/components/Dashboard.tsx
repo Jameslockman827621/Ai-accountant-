@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import DocumentReviewPanel from './DocumentReviewPanel';
+import ProcessingStatus from './ProcessingStatus';
 
 interface DashboardStats {
   period: {
@@ -149,6 +150,8 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
               </p>
             </StatCard>
           </div>
+
+          <ProcessingStatus token={token} />
 
           <section className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">

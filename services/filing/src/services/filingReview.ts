@@ -67,6 +67,15 @@ export async function createFilingReview(
     throw new Error('Filing must be in draft status to create review');
   }
 
+  const attestationResult = await db.query<{ id: string }>(
+    'SELECT id FROM filing_attestations WHERE filing_id = $1 AND tenant_id = $2',
+    [filingId, tenantId]
+  );
+
+  if (attestationResult.rows.length === 0) {
+    throw new Error('Filing must be attested before requesting a review');
+  }
+
   const summary = await executeValidationSummary({
     tenantId,
     filingId,

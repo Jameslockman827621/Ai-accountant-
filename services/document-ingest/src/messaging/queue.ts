@@ -6,6 +6,7 @@ const logger = createLogger('document-ingest-service');
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5672';
 const OCR_QUEUE = 'ocr_processing';
 const CLASSIFICATION_QUEUE = 'document_classification';
+const LEDGER_QUEUE = 'ledger_posting';
 
 let connection: amqp.Connection | null = null;
 let channel: amqp.Channel | null = null;
@@ -29,6 +30,7 @@ export async function connectQueue(): Promise<void> {
 
       await ch.assertQueue(OCR_QUEUE, { durable: true });
       await ch.assertQueue(CLASSIFICATION_QUEUE, { durable: true });
+      await ch.assertQueue(LEDGER_QUEUE, { durable: true });
 
       logger.info('Connected to message queue');
     } catch (error) {
@@ -93,5 +95,23 @@ export async function closeQueue(): Promise<void> {
     }
   } catch (error) {
     logger.error('Error closing queue connection', error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
+export async function publishLedgerJob(
+  documentId: string,
+  metadata?: Record<string, unknown>
+): Promise<void> {
+  try {
+    const ch = await getChannel();
+    const message = JSON.stringify({
+      documentId,
+      metadata,
+    });
+    ch.sendToQueue(LEDGER_QUEUE, Buffer.from(message), { persistent: true });
+    logger.info('Ledger posting job published', { documentId });
+  } catch (error) {
+    logger.error('Failed to publish ledger posting job', error instanceof Error ? error : new Error(String(error)));
+    throw error;
   }
 }
