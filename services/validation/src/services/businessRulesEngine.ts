@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
+import crypto from 'crypto';
 
 const logger = createLogger('validation-service');
 
@@ -106,12 +107,12 @@ export async function evaluateBusinessRules(
           await executeRuleAction(rule.action, context, tenantId);
         }
       }
-    } catch (error) {
-      logger.error('Rule evaluation failed', {
-        ruleId: rule.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logger.error('Rule evaluation failed', err, {
+          ruleId: rule.id,
+        });
+      }
   }
 
   return results.sort((a, b) => {
@@ -166,11 +167,11 @@ function evaluateCondition(condition: string, context: Record<string, unknown>):
     }
 
     return false;
-  } catch (error) {
-    logger.error('Condition evaluation error', {
-      condition,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      logger.error('Condition evaluation error', err, {
+        condition,
+      });
     return false;
   }
 }
@@ -247,7 +248,7 @@ async function executeRuleAction(
     logger.warn('Business rule alert', { tenantId, message: alertMessage, context });
     // Would integrate with notification service
   } else if (action.startsWith('BLOCK:')) {
-    logger.error('Business rule blocked action', { tenantId, action, context });
+      logger.error('Business rule blocked action', undefined, { tenantId, action, context });
     throw new Error(`Action blocked by business rule: ${action}`);
   }
 }

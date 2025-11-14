@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
+import crypto from 'crypto';
 
 const logger = createLogger('validation-service');
 
@@ -34,7 +35,7 @@ export interface ValidationResult {
 export async function validateWithCustomRules(
   tenantId: TenantId,
   data: Record<string, unknown>,
-  context: 'transaction' | 'document' | 'ledger_entry' | 'filing'
+  _context: 'transaction' | 'document' | 'ledger_entry' | 'filing'
 ): Promise<ValidationResult[]> {
   const rules = await db.query<{
     id: string;
@@ -108,9 +109,9 @@ function evaluateCondition(
 }
 
 function generateCorrection(
-  data: Record<string, unknown>,
+  _data: Record<string, unknown>,
   condition: ValidationRule['condition'],
-  ruleType: string
+  _ruleType: string
 ): unknown {
   // Suggest corrections based on rule type
   if (condition.operator === 'greater_than' && typeof condition.value === 'number') {

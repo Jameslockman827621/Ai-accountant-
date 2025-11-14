@@ -6,9 +6,9 @@ const logger = createLogger('validation-service');
 
 export function errorHandler(
   err: Error,
-  req: Request,
+  _req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): void {
   logger.error('Request error', err);
 
