@@ -6,6 +6,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { documentRouter } from './routes/documents';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { connectQueue } from './messaging/queue';
 
 config();
 
@@ -30,8 +31,20 @@ app.use('/api/documents', authenticate, documentRouter);
 
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  logger.info(`Document ingest service listening on port ${PORT}`);
-});
+async function bootstrap(): Promise<void> {
+  try {
+    await connectQueue();
+    logger.info('Message queue ready');
+  } catch (error) {
+    logger.error('Unable to connect to message queue', error instanceof Error ? error : new Error(String(error)));
+    process.exit(1);
+  }
+
+  app.listen(PORT, () => {
+    logger.info(`Document ingest service listening on port ${PORT}`);
+  });
+}
+
+void bootstrap();
 
 export default app;
