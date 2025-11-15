@@ -6,6 +6,7 @@ import ProcessingStatus from './ProcessingStatus';
 import HMRCConnectionCard from './HMRCConnectionCard';
 import HMRCReceiptsPanel from './HMRCReceiptsPanel';
 import SubscriptionManagement from './SubscriptionManagement';
+import AutomationPlaybooksPanel from './AutomationPlaybooksPanel';
 import OnboardingWizard from './OnboardingWizard';
 import OnboardingProgressCard from './OnboardingProgressCard';
 import ReconciliationDashboard from './ReconciliationDashboard';
@@ -253,6 +254,7 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             </div>
             <HMRCReceiptsPanel token={token} />
             <SubscriptionManagement token={token} />
+            <AutomationPlaybooksPanel token={token} />
             <SupportCenterPanel token={token} />
         </div>
       </div>

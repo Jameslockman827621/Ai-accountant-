@@ -2,6 +2,7 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { ruleEngine } from './services/ruleEngine';
 import { AutomationRule } from './services/rules';
+import { runDuePlaybooks } from './services/playbooks';
 
 const logger = createLogger('automation-service');
 
@@ -47,6 +48,8 @@ export class RuleScheduler {
         });
       }
     }
+
+    await runDuePlaybooks();
   }
 
   startScheduler(intervalMs: number = 60000): void {
