@@ -7,6 +7,8 @@ import { documentRouter } from './routes/documents';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 import { connectQueue } from './messaging/queue';
+import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
+import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
 
 config();
 
@@ -14,6 +16,8 @@ const app: Express = express();
 const logger = createLogger('document-ingest-service');
 const PORT = process.env.PORT || 3002;
 
+app.use(tracingMiddleware('document-ingest-service'));
+app.use(metricsMiddleware('document-ingest-service'));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],

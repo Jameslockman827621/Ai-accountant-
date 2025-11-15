@@ -6,6 +6,8 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { integrationsRouter } from './routes/integrations';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
+import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
 
 config();
 
@@ -13,6 +15,8 @@ const app: Express = express();
 const logger = createLogger('integrations-service');
 const PORT = process.env.PORT || 3015;
 
+app.use(tracingMiddleware('integrations-service'));
+app.use(metricsMiddleware('integrations-service'));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],

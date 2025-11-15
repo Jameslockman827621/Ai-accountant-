@@ -175,6 +175,63 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.get('/receipts', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const limit = Math.min(
+      Math.max(parseInt(String(req.query.limit ?? '10'), 10) || 10, 1),
+      50
+    );
+
+    const result = await db.query<{
+      id: string;
+      filing_id: string;
+      submission_id: string;
+      payload: Record<string, unknown> | null;
+      received_at: Date;
+      filing_type: FilingType;
+      status: FilingStatus;
+    }>(
+      `SELECT r.id,
+              r.filing_id,
+              r.submission_id,
+              r.payload,
+              r.received_at,
+              f.filing_type,
+              f.status
+         FROM filing_receipts r
+         JOIN filings f ON f.id = r.filing_id
+        WHERE r.tenant_id = $1
+        ORDER BY r.received_at DESC
+        LIMIT $2`,
+      [req.user.tenantId, limit]
+    );
+
+    const receipts = result.rows.map((row) => ({
+      id: row.id,
+      filingId: row.filing_id,
+      submissionId: row.submission_id,
+      filingType: row.filing_type,
+      filingStatus: row.status,
+      receivedAt: row.received_at,
+      hmrcReference:
+        (row.payload?.['receiptId'] as string | undefined) ||
+        (row.payload?.['formBundleNumber'] as string | undefined) ||
+        row.submission_id,
+      payload: row.payload,
+    }));
+
+    res.json({ receipts });
+  } catch (error) {
+    logger.error('Get filing receipts failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch filing receipts' });
+  }
+});
+
 // Get filing by ID
 router.get('/:filingId', async (req: AuthRequest, res: Response) => {
   try {
