@@ -22,6 +22,7 @@ import {
   listFilingSubmissions,
 } from '../services/filingSubmissions';
 import { VATReturnPayload } from '@ai-accountant/hmrc';
+import { getReceiptDownloadUrl } from '../storage/receiptStorage';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -187,22 +188,24 @@ router.get('/receipts', async (req: AuthRequest, res: Response) => {
       50
     );
 
-    const result = await db.query<{
-      id: string;
-      filing_id: string;
-      submission_id: string;
-      payload: Record<string, unknown> | null;
-      received_at: Date;
-      filing_type: FilingType;
-      status: FilingStatus;
-    }>(
+  const result = await db.query<{
+        id: string;
+        filing_id: string;
+        submission_id: string;
+        payload: Record<string, unknown> | null;
+        received_at: Date;
+        filing_type: FilingType;
+        status: FilingStatus;
+        storage_key: string | null;
+      }>(
       `SELECT r.id,
               r.filing_id,
               r.submission_id,
               r.payload,
               r.received_at,
               f.filing_type,
-              f.status
+                f.status,
+                r.storage_key
          FROM filing_receipts r
          JOIN filings f ON f.id = r.filing_id
         WHERE r.tenant_id = $1
@@ -222,13 +225,56 @@ router.get('/receipts', async (req: AuthRequest, res: Response) => {
         (row.payload?.['receiptId'] as string | undefined) ||
         (row.payload?.['formBundleNumber'] as string | undefined) ||
         row.submission_id,
-      payload: row.payload,
+        payload: row.payload,
+        hasArtifact: Boolean(row.storage_key),
     }));
 
     res.json({ receipts });
   } catch (error) {
     logger.error('Get filing receipts failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to fetch filing receipts' });
+  }
+});
+
+router.get('/receipts/:receiptId/download', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { receiptId } = req.params;
+
+    const result = await db.query<{
+      storage_key: string | null;
+      payload: Record<string, unknown> | null;
+    }>(
+      `SELECT storage_key, payload
+         FROM filing_receipts
+        WHERE id = $1 AND tenant_id = $2`,
+      [receiptId, req.user.tenantId]
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: 'Receipt not found' });
+      return;
+    }
+
+    const receipt = result.rows[0];
+
+    if (!receipt.storage_key) {
+      res.json({
+        downloadUrl: null,
+        payload: receipt.payload,
+      });
+      return;
+    }
+
+    const url = getReceiptDownloadUrl(receipt.storage_key);
+    res.json({ downloadUrl: url });
+  } catch (error) {
+    logger.error('Download receipt failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to generate download link' });
   }
 });
 

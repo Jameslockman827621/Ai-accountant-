@@ -9,6 +9,7 @@ import { authenticate } from './middleware/auth';
 import { startFilingScheduler } from './scheduler';
 import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
 import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
+import { initializeReceiptBucket } from './storage/receiptStorage';
 
 config();
 
@@ -33,6 +34,10 @@ app.get('/health', (_req, res) => {
 app.use('/api/filings', authenticate, filingRouter);
 
 app.use(errorHandler);
+
+initializeReceiptBucket().catch(error => {
+  logger.warn('Receipt bucket initialization skipped', error instanceof Error ? error : new Error(String(error)));
+});
 
 app.listen(PORT, () => {
   logger.info(`Filing service listening on port ${PORT}`);

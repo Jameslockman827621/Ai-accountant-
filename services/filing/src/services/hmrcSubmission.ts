@@ -8,6 +8,7 @@ import {
   VATReturnPayload,
 } from '@ai-accountant/hmrc';
 import { getTenantHMRCAuth } from '@ai-accountant/integrations-service/services/hmrc';
+import { storeReceiptArtifact } from '../storage/receiptStorage';
 
 const logger = createLogger('filing-service');
 
@@ -87,6 +88,22 @@ async function persistSubmissionSuccess(args: SubmissionOptions & {
     args.hmrcResponse.formBundleNumber ||
     args.hmrcResponse.receiptId ||
     args.receiptId;
+  let storageKey: string | null = null;
+
+  try {
+    storageKey = await storeReceiptArtifact({
+      tenantId: args.tenantId,
+      filingId: args.filingId,
+      submissionId: hmrcSubmissionId,
+      payload: args.hmrcResponse,
+    });
+  } catch (error) {
+    logger.warn(
+      'Failed to archive receipt artifact',
+      error instanceof Error ? error : new Error(String(error)),
+      { filingId: args.filingId, submissionId: hmrcSubmissionId }
+    );
+  }
 
   let submissionRecordId = args.reuseSubmissionRecordId;
 
@@ -163,23 +180,29 @@ async function persistSubmissionSuccess(args: SubmissionOptions & {
     [FilingStatus.SUBMITTED, submissionRecordId, args.filingId]
   );
 
-  await db.query(
-    `INSERT INTO filing_receipts (
-       filing_id,
-       tenant_id,
-       submission_id,
-       payload,
-       submission_record_id
-     ) VALUES ($1, $2, $3, $4::jsonb, $5)
-     ON CONFLICT (filing_id, submission_id) DO NOTHING`,
-    [
-      args.filingId,
-      args.tenantId,
-      hmrcSubmissionId,
-      responseJson,
-      submissionRecordId,
-    ]
-  );
+    await db.query(
+      `INSERT INTO filing_receipts (
+         filing_id,
+         tenant_id,
+         submission_id,
+         payload,
+         storage_key,
+         submission_record_id
+       ) VALUES ($1, $2, $3, $4::jsonb, $5, $6)
+       ON CONFLICT (filing_id, submission_id) DO UPDATE
+       SET payload = EXCLUDED.payload,
+           storage_key = COALESCE(EXCLUDED.storage_key, filing_receipts.storage_key),
+           submission_record_id = EXCLUDED.submission_record_id,
+           updated_at = NOW()`,
+      [
+        args.filingId,
+        args.tenantId,
+        hmrcSubmissionId,
+        responseJson,
+        storageKey,
+        submissionRecordId,
+      ]
+    );
 
   return { submissionRecordId, hmrcSubmissionId };
 }
