@@ -1,4 +1,8 @@
+'use client';
+
 import React, { useState, useEffect } from 'react';
+import DocumentReviewPanel from './DocumentReviewPanel';
+import ProcessingStatus from './ProcessingStatus';
 
 interface DashboardStats {
   period: {
@@ -108,77 +112,80 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
     return <div className="flex items-center justify-center h-screen">No dashboard data available.</div>;
   }
 
-  return (
-    <div className="min-h-screen bg-gray-50 p-8">
-      <div className="max-w-7xl mx-auto space-y-8">
-        <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <p className="text-sm text-gray-500">Welcome back</p>
-            <h1 className="text-3xl font-bold text-gray-900">{user.name}</h1>
-            <p className="text-sm text-gray-500">
-              {new Date(stats.period.start).toLocaleDateString('en-GB')} –{' '}
-              {new Date(stats.period.end).toLocaleDateString('en-GB')}
-            </p>
-          </div>
-          <button
-            onClick={onLogout}
-            className="self-start px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
-          >
-            Sign out
-          </button>
-        </header>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard title="Revenue" value={stats.revenue} trend="up" color="green" />
-          <StatCard title="Expenses" value={stats.expenses} trend="down" color="red" />
-          <StatCard
-            title="Net Profit"
-            value={stats.profit}
-            trend={stats.profit >= 0 ? 'up' : 'down'}
-            color={stats.profit >= 0 ? 'green' : 'red'}
-          />
-          <StatCard title="VAT Due" value={stats.vat.net} trend="neutral" color="blue">
-            <p className="text-xs text-gray-500">
-              Output £{stats.vat.output.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-            </p>
-            <p className="text-xs text-gray-500">
-              Input £{stats.vat.input.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-            </p>
-          </StatCard>
-        </div>
-
-        <section className="bg-white rounded-lg shadow p-6">
-          <div className="flex items-center justify-between mb-4">
+    return (
+      <div className="min-h-screen bg-gray-50 p-8">
+        <div className="max-w-7xl mx-auto space-y-8">
+          <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
-              <h2 className="text-xl font-semibold">Upcoming Deadlines</h2>
-              <p className="text-sm text-gray-500">Next 120 days</p>
+              <p className="text-sm text-gray-500">Welcome back</p>
+              <h1 className="text-3xl font-bold text-gray-900">{user.name}</h1>
+              <p className="text-sm text-gray-500">
+                {new Date(stats.period.start).toLocaleDateString('en-GB')} –{' '}
+                {new Date(stats.period.end).toLocaleDateString('en-GB')}
+              </p>
             </div>
+            <button
+              onClick={onLogout}
+              className="self-start px-4 py-2 border border-gray-300 rounded hover:bg-gray-100"
+            >
+              Sign out
+            </button>
+          </header>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <StatCard title="Revenue" value={stats.revenue} trend="up" color="green" />
+            <StatCard title="Expenses" value={stats.expenses} trend="down" color="red" />
+            <StatCard
+              title="Net Profit"
+              value={stats.profit}
+              trend={stats.profit >= 0 ? 'up' : 'down'}
+              color={stats.profit >= 0 ? 'green' : 'red'}
+            />
+            <StatCard title="VAT Due" value={stats.vat.net} trend="neutral" color="blue">
+              <p className="text-xs text-gray-500">
+                Output £{stats.vat.output.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+              </p>
+              <p className="text-xs text-gray-500">
+                Input £{stats.vat.input.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+              </p>
+            </StatCard>
           </div>
-          {stats.upcomingDeadlines.length > 0 ? (
-            <div className="divide-y">
-              {stats.upcomingDeadlines.map(deadline => (
-                <div key={`${deadline.type}-${deadline.dueDate}`} className="py-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold capitalize">{deadline.description}</p>
-                    <p className="text-sm text-gray-500">
-                      Due {new Date(deadline.dueDate).toLocaleDateString('en-GB')} ·{' '}
-                      {deadline.daysUntilDue} days
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-semibold">£{deadline.amount.toFixed(2)}</p>
-                    <span className="text-xs uppercase tracking-wide text-gray-500">{deadline.type}</span>
-                  </div>
-                </div>
-              ))}
+
+          <ProcessingStatus token={token} />
+
+          <section className="bg-white rounded-lg shadow p-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="text-xl font-semibold">Upcoming Deadlines</h2>
+                <p className="text-sm text-gray-500">Next 120 days</p>
+              </div>
             </div>
-          ) : (
-            <p className="text-gray-500">No filing deadlines in the upcoming window.</p>
-          )}
-        </section>
+            {stats.upcomingDeadlines.length > 0 ? (
+              <div className="divide-y">
+                {stats.upcomingDeadlines.map(deadline => (
+                  <div key={`${deadline.type}-${deadline.dueDate}`} className="py-4 flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold capitalize">{deadline.description}</p>
+                      <p className="text-sm text-gray-500">
+                        Due {new Date(deadline.dueDate).toLocaleDateString('en-GB')} · {deadline.daysUntilDue} days
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="font-semibold">£{deadline.amount.toFixed(2)}</p>
+                      <span className="text-xs uppercase tracking-wide text-gray-500">{deadline.type}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500">No filing deadlines in the upcoming window.</p>
+            )}
+          </section>
+
+          <DocumentReviewPanel token={token} />
+        </div>
       </div>
-    </div>
-  );
+    );
 }
 
 function StatCard({

@@ -10,13 +10,19 @@ config();
 const logger = createLogger('classification-service');
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5672';
 const CLASSIFICATION_QUEUE = 'document_classification';
+const CLASSIFICATION_DLQ = 'document_classification_dlq';
+const LEDGER_QUEUE = 'ledger_posting';
+const LEDGER_DLQ = 'ledger_posting_dlq';
 
 async function startWorker(): Promise<void> {
   try {
     const connection = await amqp.connect(RABBITMQ_URL);
     const channel = await connection.createChannel();
 
-    await channel.assertQueue(CLASSIFICATION_QUEUE, { durable: true });
+      await channel.assertQueue(CLASSIFICATION_QUEUE, { durable: true });
+      await channel.assertQueue(CLASSIFICATION_DLQ, { durable: true });
+      await channel.assertQueue(LEDGER_QUEUE, { durable: true });
+      await channel.assertQueue(LEDGER_DLQ, { durable: true });
     channel.prefetch(1);
 
     logger.info('Classification worker started, waiting for jobs...');
@@ -56,18 +62,13 @@ async function startWorker(): Promise<void> {
         );
 
         // Publish to ledger processing queue if needed
-        if (result.documentType === DocumentType.INVOICE || result.documentType === DocumentType.RECEIPT) {
-          // Queue for ledger posting
-          const ledgerQueue = 'ledger_posting';
-          await channel.assertQueue(ledgerQueue, { durable: true });
-          if (channel) {
+          if (result.documentType === DocumentType.INVOICE || result.documentType === DocumentType.RECEIPT) {
             channel.sendToQueue(
-              ledgerQueue,
+              LEDGER_QUEUE,
               Buffer.from(JSON.stringify({ documentId, classification: result })),
               { persistent: true }
             );
             logger.info('Document queued for ledger posting', { documentId });
-          }
         }
 
         channel.ack(msg);
@@ -89,11 +90,21 @@ async function startWorker(): Promise<void> {
               documentId,
             ]
           );
-        } catch (updateError) {
+          } catch (updateError) {
           logger.error('Failed to update document status', updateError instanceof Error ? updateError : new Error(String(updateError)));
         }
-
-        channel.nack(msg, false, false);
+          channel.sendToQueue(
+            CLASSIFICATION_DLQ,
+            Buffer.from(
+              JSON.stringify({
+                documentId,
+                error: error instanceof Error ? error.message : 'Classification failed',
+                failedAt: new Date().toISOString(),
+              })
+            ),
+            { persistent: true }
+          );
+          channel.ack(msg);
       }
     });
   } catch (error) {

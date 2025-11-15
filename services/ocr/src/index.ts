@@ -11,6 +11,7 @@ config();
 const logger = createLogger('ocr-service');
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5672';
 const OCR_QUEUE = 'ocr_processing';
+const CLASSIFICATION_QUEUE = 'document_classification';
 
 async function startWorker(): Promise<void> {
   try {
@@ -18,6 +19,7 @@ async function startWorker(): Promise<void> {
     const channel = await connection.createChannel();
 
     await channel.assertQueue(OCR_QUEUE, { durable: true });
+    await channel.assertQueue(CLASSIFICATION_QUEUE, { durable: true });
     channel.prefetch(1); // Process one job at a time
 
     logger.info('OCR worker started, waiting for jobs...');
@@ -47,14 +49,15 @@ async function startWorker(): Promise<void> {
           [extractedText, DocumentStatus.EXTRACTED, documentId]
         );
 
-        // Publish classification job
-        // (This would be handled by classification service)
+        const classificationPayload = JSON.stringify({ documentId, extractedText });
+        channel.sendToQueue(CLASSIFICATION_QUEUE, Buffer.from(classificationPayload), { persistent: true });
+        logger.info('Classification job published', { documentId });
 
         channel.ack(msg);
         logger.info('OCR job completed', { documentId });
       } catch (error) {
         logger.error('OCR job failed', error instanceof Error ? error : new Error(String(error)));
-        
+
         // Update document status to error
         try {
           const { documentId } = JSON.parse(msg.content.toString());

@@ -1,9 +1,12 @@
 import { db } from '@ai-accountant/database';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
 import { createLedgerEntry, CreateLedgerEntryInput } from './ledger';
-import { ValidationError } from '@ai-accountant/shared-utils';
+import { enforceConfidenceThreshold } from '@ai-accountant/validation-service/services/confidenceThreshold';
+import {
+  validateDocumentForPosting,
+} from '@ai-accountant/validation-service/services/documentPostingValidator';
 
 const logger = createLogger('ledger-service');
 
@@ -119,12 +122,31 @@ export async function postDocumentToLedger(
     throw new ValidationError('Document already posted to ledger');
   }
 
-  const extractedData = document.extracted_data || {};
-  const total = typeof extractedData.total === 'number' ? extractedData.total : parseFloat(String(extractedData.total || '0'));
-  const tax = typeof extractedData.tax === 'number' ? extractedData.tax : parseFloat(String(extractedData.tax || '0'));
-  const date = extractedData.date ? (extractedData.date instanceof Date ? extractedData.date : new Date(String(extractedData.date))) : new Date();
-  const vendor = String(extractedData.vendor || 'Unknown Vendor');
-  const description = String(extractedData.description || `${document.document_type} from ${vendor}`);
+  const requiresManualReview = await enforceConfidenceThreshold(documentId, tenantId);
+  if (requiresManualReview) {
+    throw new ValidationError('Document requires manual review before posting');
+  }
+
+  const validationResult = await validateDocumentForPosting(tenantId, documentId);
+  if (!validationResult.isValid || !validationResult.normalizedData) {
+    throw new ValidationError(
+      validationResult.errors.join('; ') || 'Document failed validation checks'
+    );
+  }
+
+  if (validationResult.warnings.length > 0) {
+    logger.warn('Non-blocking validation warnings detected for document posting', {
+      documentId,
+      warnings: validationResult.warnings,
+    });
+  }
+
+  const normalized = validationResult.normalizedData;
+  const total = normalized.total;
+  const tax = normalized.tax;
+  const date = normalized.date;
+  const vendor = normalized.vendor;
+  const description = normalized.description;
 
   // Determine account codes based on document type
   let debitAccount = '5000'; // Default expense account
@@ -132,13 +154,14 @@ export async function postDocumentToLedger(
   let creditAccount = '2000'; // Default liability account
   let creditAccountName = 'Accounts Payable';
 
-  if (document.document_type === 'invoice' && total > 0) {
+  const docType = normalized.documentType || document.document_type;
+  if (docType === 'invoice' && total > 0) {
     // Sales invoice - credit revenue, debit receivables
     creditAccount = '4000';
     creditAccountName = 'Revenue';
     debitAccount = '1200';
     debitAccountName = 'Accounts Receivable';
-  } else if (document.document_type === 'receipt' || document.document_type === 'expense') {
+  } else if (docType === 'receipt' || docType === 'expense') {
     // Expense - debit expense, credit cash/payable
     debitAccount = '5000';
     debitAccountName = 'Expenses';
@@ -156,7 +179,7 @@ export async function postDocumentToLedger(
     accountName: debitAccountName,
     amount: amountExVAT,
     taxAmount: tax,
-    taxRate: tax > 0 ? (tax / amountExVAT) : undefined,
+    taxRate: normalized.taxRate || (tax > 0 ? tax / total : undefined),
   });
 
   // Credit entry

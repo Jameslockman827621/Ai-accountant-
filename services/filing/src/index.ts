@@ -6,6 +6,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { filingRouter } from './routes/filings';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { startFilingScheduler } from './scheduler';
 
 config();
 
@@ -31,6 +32,7 @@ app.use(errorHandler);
 
 app.listen(PORT, () => {
   logger.info(`Filing service listening on port ${PORT}`);
+  startFilingScheduler();
 });
 
 export default app;

@@ -78,6 +78,58 @@ router.post('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Attest filing
+router.post('/:filingId/attest', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const { attestedByName, attestedByRole, statement } = req.body;
+
+    if (!attestedByName || !statement) {
+      throw new ValidationError('attestedByName and statement are required');
+    }
+
+    const result = await db.query(
+      `INSERT INTO filing_attestations (
+         filing_id,
+         tenant_id,
+         attested_by,
+         attested_by_name,
+         attested_by_role,
+         statement
+       ) VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (filing_id) DO UPDATE
+       SET attested_by = EXCLUDED.attested_by,
+           attested_by_name = EXCLUDED.attested_by_name,
+           attested_by_role = EXCLUDED.attested_by_role,
+           statement = EXCLUDED.statement,
+           created_at = NOW()
+       RETURNING id, attested_by_name, attested_by_role, statement, created_at`,
+      [
+        filingId,
+        req.user.tenantId,
+        req.user.userId,
+        attestedByName,
+        attestedByRole || null,
+        statement,
+      ]
+    );
+
+    res.status(201).json({ attestation: result.rows[0] });
+  } catch (error) {
+    logger.error('Attest filing failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to attest filing' });
+  }
+});
+
 // Get filings
 router.get('/', async (req: AuthRequest, res: Response) => {
   try {
@@ -263,6 +315,17 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
           JSON.stringify(submissionResult.processingDate),
         ]
       );
+
+        await db.query(
+          `INSERT INTO filing_receipts (filing_id, tenant_id, submission_id, payload)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [
+            filingId,
+            req.user.tenantId,
+            submissionResult.submissionId,
+            JSON.stringify(submissionResult),
+          ]
+        );
 
       res.json({
         message: 'Filing submitted successfully',

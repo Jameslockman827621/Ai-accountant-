@@ -4,13 +4,54 @@ import { randomUUID } from 'crypto';
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { uploadFile, initializeBucket } from '../storage/s3';
-import { publishOCRJob } from '../messaging/queue';
+import { publishOCRJob, publishClassificationJob, publishLedgerJob } from '../messaging/queue';
 import { DocumentStatus } from '@ai-accountant/shared-types';
 import { AuthRequest } from '../middleware/auth';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
 const logger = createLogger('document-ingest-service');
+
+type DocumentStage = 'document' | 'ocr' | 'classification' | 'ledger_posting' | 'completed';
+
+const STATUS_STAGE_MAP: Record<DocumentStatus, DocumentStage> = {
+  [DocumentStatus.UPLOADED]: 'document',
+  [DocumentStatus.PROCESSING]: 'ocr',
+  [DocumentStatus.EXTRACTED]: 'classification',
+  [DocumentStatus.CLASSIFIED]: 'ledger_posting',
+  [DocumentStatus.POSTED]: 'completed',
+  [DocumentStatus.ERROR]: 'document',
+};
+
+function determineStageFromStatus(status: DocumentStatus): DocumentStage {
+  return STATUS_STAGE_MAP[status] || 'document';
+}
+
+function determineRetryStage(
+  status: DocumentStatus,
+  extractedData: Record<string, unknown> | null
+): DocumentStage {
+  if (status === DocumentStatus.UPLOADED || status === DocumentStatus.PROCESSING) {
+    return 'ocr';
+  }
+
+  if (status === DocumentStatus.EXTRACTED) {
+    return 'classification';
+  }
+
+  if (status === DocumentStatus.CLASSIFIED) {
+    return 'ledger_posting';
+  }
+
+  if (status === DocumentStatus.ERROR) {
+    if (extractedData?.['rawText']) {
+      return extractedData?.['classification'] ? 'ledger_posting' : 'classification';
+    }
+    return 'ocr';
+  }
+
+  throw new ValidationError('Document is not eligible for retry');
+}
 
 // Initialize storage on startup
 initializeBucket().catch((err) => {
@@ -167,6 +208,47 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.get('/status/jobs', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const limit = parseInt(String(req.query.limit || '10'), 10);
+    const result = await db.query<{
+      id: string;
+      file_name: string;
+      status: DocumentStatus;
+      confidence_score: number | null;
+      error_message: string | null;
+      updated_at: Date;
+    }>(
+      `SELECT id, file_name, status, confidence_score, error_message, updated_at
+       FROM documents
+       WHERE tenant_id = $1
+       ORDER BY updated_at DESC
+       LIMIT $2`,
+      [req.user.tenantId, Number.isNaN(limit) ? 10 : limit]
+    );
+
+    const jobs = result.rows.map((row) => ({
+      id: row.id,
+      fileName: row.file_name,
+      status: row.status,
+      stage: determineStageFromStatus(row.status),
+      confidenceScore: row.confidence_score,
+      errorMessage: row.error_message,
+      updatedAt: row.updated_at,
+    }));
+
+    res.json({ jobs });
+  } catch (error) {
+    logger.error('Get processing status failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch processing status' });
+  }
+});
+
 // Get document by ID
 router.get('/:documentId', async (req: AuthRequest, res: Response) => {
   try {
@@ -293,6 +375,90 @@ router.post('/:documentId/reject', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to reject document' });
+  }
+});
+
+// Retry document processing
+router.post('/:documentId/retry', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+
+    const docResult = await db.query<{
+      id: string;
+      status: DocumentStatus;
+      storage_key: string;
+      extracted_data: Record<string, unknown> | null;
+      document_type: string | null;
+    }>(
+      `SELECT id, status, storage_key, extracted_data, document_type
+       FROM documents
+       WHERE id = $1 AND tenant_id = $2`,
+      [documentId, req.user.tenantId]
+    );
+
+    if (docResult.rows.length === 0) {
+      res.status(404).json({ error: 'Document not found' });
+      return;
+    }
+
+    const document = docResult.rows[0];
+    const extractedData = document.extracted_data || null;
+    const targetStage = determineRetryStage(document.status, extractedData);
+
+    if (targetStage === 'ocr') {
+      if (!document.storage_key) {
+        throw new ValidationError('Document storage key missing; re-upload required');
+      }
+      await publishOCRJob(documentId, document.storage_key);
+      await db.query(
+        `UPDATE documents
+         SET status = $1,
+             error_message = NULL,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [DocumentStatus.PROCESSING, documentId]
+      );
+    } else if (targetStage === 'classification') {
+      const rawText = extractedData?.['rawText'];
+      if (typeof rawText !== 'string' || rawText.length === 0) {
+        throw new ValidationError('No extracted text available for classification retry');
+      }
+      await publishClassificationJob(documentId, rawText);
+      await db.query(
+        `UPDATE documents
+         SET status = $1,
+             error_message = NULL,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [DocumentStatus.EXTRACTED, documentId]
+      );
+    } else if (targetStage === 'ledger_posting') {
+      await publishLedgerJob(documentId, { reason: 'manual_retry' });
+      await db.query(
+        `UPDATE documents
+         SET status = $1,
+             error_message = NULL,
+             updated_at = NOW()
+         WHERE id = $2`,
+        [DocumentStatus.CLASSIFIED, documentId]
+      );
+    } else {
+      throw new ValidationError('Document is not eligible for retry');
+    }
+
+    res.json({ message: `Document re-queued for ${targetStage.replace('_', ' ')}` });
+  } catch (error) {
+    logger.error('Retry document failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to retry document' });
   }
 });
 
