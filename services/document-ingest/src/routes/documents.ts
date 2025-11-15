@@ -308,13 +308,38 @@ router.get('/review/queue', async (req: AuthRequest, res: Response) => {
     }
 
     const { limit } = req.query;
-    const { getReviewQueue } = await import('../services/documentReview');
+      const { getReviewQueue } = await import('../services/documentReview');
 
     const queue = await getReviewQueue(req.user.tenantId, limit ? parseInt(String(limit), 10) : 50);
     res.json({ queue });
   } catch (error) {
     logger.error('Get review queue failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get review queue' });
+  }
+});
+
+// Get document audit log
+router.get('/:documentId/audit-log', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const { limit } = req.query;
+    const { getDocumentAuditLog } = await import('../services/documentReview');
+
+    const auditLog = await getDocumentAuditLog(
+      documentId,
+      req.user.tenantId,
+      limit ? parseInt(String(limit), 10) : 25
+    );
+
+    res.json({ auditLog });
+  } catch (error) {
+    logger.error('Get document audit log failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get audit log' });
   }
 });
 
@@ -333,9 +358,9 @@ router.put('/:documentId/extracted-data', async (req: AuthRequest, res: Response
       throw new ValidationError('extractedData is required');
     }
 
-    const { updateExtractedData } = await import('../services/documentReview');
+      const { updateExtractedData } = await import('../services/documentReview');
 
-    await updateExtractedData(documentId, req.user.tenantId, extractedData);
+      await updateExtractedData(documentId, req.user.tenantId, req.user.userId, extractedData);
 
     res.json({ message: 'Extracted data updated' });
   } catch (error) {
@@ -357,9 +382,9 @@ router.post('/:documentId/approve', async (req: AuthRequest, res: Response) => {
     }
 
     const { documentId } = req.params;
-    const { approveDocument } = await import('../services/documentReview');
+      const { approveDocument } = await import('../services/documentReview');
 
-    await approveDocument(documentId, req.user.tenantId);
+      await approveDocument(documentId, req.user.tenantId, req.user.userId);
 
     res.json({ message: 'Document approved' });
   } catch (error) {
@@ -383,9 +408,9 @@ router.post('/:documentId/reject', async (req: AuthRequest, res: Response) => {
       throw new ValidationError('reason is required');
     }
 
-    const { rejectDocument } = await import('../services/documentReview');
+      const { rejectDocument } = await import('../services/documentReview');
 
-    await rejectDocument(documentId, req.user.tenantId, reason);
+      await rejectDocument(documentId, req.user.tenantId, req.user.userId, reason);
 
     res.json({ message: 'Document rejected' });
   } catch (error) {

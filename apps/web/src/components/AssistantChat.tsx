@@ -4,6 +4,7 @@ import { useState } from 'react';
 
 interface AssistantChatProps {
   token: string;
+  initialPrompt?: string;
 }
 
 interface Message {
@@ -12,10 +13,16 @@ interface Message {
   citations?: Array<{ type: string; id: string; reference: string }>;
 }
 
-export default function AssistantChat({ token }: AssistantChatProps) {
+export default function AssistantChat({ token, initialPrompt }: AssistantChatProps) {
   const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialPrompt ? `${initialPrompt} ` : '');
   const [loading, setLoading] = useState(false);
+
+  const useInitialPrompt = () => {
+    if (initialPrompt) {
+      setInput(initialPrompt);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,7 +68,18 @@ export default function AssistantChat({ token }: AssistantChatProps) {
 
   return (
     <div className="px-4 py-5 sm:p-6 h-[600px] flex flex-col">
-      <h2 className="text-lg font-medium text-gray-900 mb-4">AI Assistant</h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-medium text-gray-900">AI Assistant</h2>
+        {initialPrompt && (
+          <button
+            type="button"
+            onClick={useInitialPrompt}
+            className="text-xs text-blue-600 hover:text-blue-800"
+          >
+            Use suggested prompt
+          </button>
+        )}
+      </div>
       
       <div className="flex-1 overflow-y-auto mb-4 space-y-4">
         {messages.length === 0 && (

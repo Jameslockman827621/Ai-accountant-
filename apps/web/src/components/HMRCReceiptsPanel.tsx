@@ -12,12 +12,14 @@ interface FilingReceipt {
   filingStatus: string;
   receivedAt: string;
   hmrcReference?: string;
+  hasArtifact?: boolean;
 }
 
 interface ReceiptsResponse {
   receipts: Array<
     FilingReceipt & {
       payload?: Record<string, unknown>;
+      hasArtifact?: boolean;
     }
   >;
 }
@@ -30,6 +32,7 @@ export default function HMRCReceiptsPanel({ token }: HMRCReceiptsPanelProps) {
   const [receipts, setReceipts] = useState<FilingReceipt[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -49,17 +52,18 @@ export default function HMRCReceiptsPanel({ token }: HMRCReceiptsPanelProps) {
         }
 
         const data = (await response.json()) as ReceiptsResponse;
-        setReceipts(
-          data.receipts.map((receipt) => ({
-            id: receipt.id,
-            filingId: receipt.filingId,
-            submissionId: receipt.submissionId,
-            filingType: receipt.filingType,
-            filingStatus: receipt.filingStatus,
-            receivedAt: receipt.receivedAt,
-            hmrcReference: receipt.hmrcReference,
-          }))
-        );
+          setReceipts(
+            data.receipts.map((receipt) => ({
+              id: receipt.id,
+              filingId: receipt.filingId,
+              submissionId: receipt.submissionId,
+              filingType: receipt.filingType,
+              filingStatus: receipt.filingStatus,
+              receivedAt: receipt.receivedAt,
+              hmrcReference: receipt.hmrcReference,
+              hasArtifact: receipt.hasArtifact,
+            }))
+          );
         setError(null);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
@@ -75,7 +79,54 @@ export default function HMRCReceiptsPanel({ token }: HMRCReceiptsPanelProps) {
     fetchReceipts();
 
     return () => controller.abort();
-  }, [token]);
+    }, [token]);
+
+  const handleDownload = async (receiptId: string, submissionId: string) => {
+    try {
+      setDownloadingId(receiptId);
+      setError(null);
+      const response = await fetch(
+        `${API_BASE}/api/filings/receipts/${receiptId}/download`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Download failed (${response.status})`);
+      }
+
+      const data = await response.json() as {
+        downloadUrl?: string | null;
+        payload?: Record<string, unknown> | null;
+      };
+
+      if (data.downloadUrl) {
+        window.open(data.downloadUrl, '_blank', 'noopener');
+        return;
+      }
+
+      if (data.payload) {
+        const blob = new Blob([JSON.stringify(data.payload, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = `hmrc-receipt-${submissionId}.json`;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        return;
+      }
+
+      throw new Error('Receipt artifact not available yet');
+    } catch (err) {
+      console.error(err);
+      setError(err instanceof Error ? err.message : 'Failed to download receipt');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   return (
     <section className="bg-white rounded-lg shadow p-6">
@@ -101,7 +152,8 @@ export default function HMRCReceiptsPanel({ token }: HMRCReceiptsPanelProps) {
                 <th className="py-2 pr-4">Filing</th>
                 <th className="py-2 pr-4">Submission ID</th>
                 <th className="py-2 pr-4">Reference</th>
-                <th className="py-2 pr-4 text-right">Status</th>
+                  <th className="py-2 pr-4 text-right">Status</th>
+                  <th className="py-2 pr-4 text-right">Receipt</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -123,6 +175,16 @@ export default function HMRCReceiptsPanel({ token }: HMRCReceiptsPanelProps) {
                       {receipt.filingStatus}
                     </span>
                   </td>
+                    <td className="py-3 pr-4 text-right">
+                      <button
+                        type="button"
+                        onClick={() => handleDownload(receipt.id, receipt.submissionId)}
+                        disabled={!receipt.hasArtifact || downloadingId === receipt.id}
+                        className="text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400 disabled:cursor-not-allowed"
+                      >
+                        {downloadingId === receipt.id ? 'Preparing…' : 'Download'}
+                      </button>
+                    </td>
                 </tr>
               ))}
             </tbody>

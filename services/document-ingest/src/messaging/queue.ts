@@ -2,6 +2,7 @@ import amqp from 'amqplib';
 import { randomUUID } from 'crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { ProcessingQueues, ProcessingQueueConfig, ProcessingQueueName } from '@ai-accountant/shared-types';
+import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
 
 const logger = createLogger('document-ingest-service');
 
@@ -139,6 +140,16 @@ async function publishJob(queue: string, payload: JobPayload, metadata?: Publish
     queue,
     messageId: options.messageId,
     documentId: payload.documentId,
+  });
+
+  recordQueueEvent({
+    serviceName: 'document-ingest-service',
+    queueName: queue,
+    eventType: 'enqueue',
+    metadata: {
+      documentId: payload.documentId,
+      source: metadata?.source,
+    },
   });
 }
 

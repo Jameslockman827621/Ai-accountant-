@@ -16,6 +16,19 @@ export interface ClientSummary {
   pendingTasks: number;
 }
 
+export interface ClientTask {
+  id: string;
+  tenantId: TenantId;
+  entityType: 'document' | 'ledger_entry' | 'filing' | 'transaction';
+  entityId: string;
+  priority: 'low' | 'medium' | 'high';
+  status: 'pending' | 'approved' | 'rejected' | 'needs_revision';
+  createdAt: Date;
+  summary: string | null;
+}
+
+type TaskAction = 'approve' | 'reject' | 'needs_revision';
+
 export async function getAccountantClients(accountantUserId: UserId): Promise<ClientSummary[]> {
   logger.info('Getting accountant clients', { accountantUserId });
 
@@ -107,6 +120,27 @@ export async function getAccountantClients(accountantUserId: UserId): Promise<Cl
   return clients;
 }
 
+async function ensureAccountantAccess(
+  accountantUserId: UserId,
+  tenantId: TenantId
+): Promise<void> {
+  const accessResult = await db.query<{ count: string | number }>(
+    `SELECT COUNT(*) as count
+     FROM users
+     WHERE id = $1 AND tenant_id = $2 AND role = 'accountant'`,
+    [accountantUserId, tenantId]
+  );
+
+  const count =
+    typeof accessResult.rows[0]?.count === 'number'
+      ? accessResult.rows[0].count
+      : parseInt(String(accessResult.rows[0]?.count || '0'), 10);
+
+  if (count === 0) {
+    throw new Error('Accountant does not have access to this tenant');
+  }
+}
+
 export async function switchClientContext(
   accountantUserId: UserId,
   targetTenantId: TenantId
@@ -114,20 +148,7 @@ export async function switchClientContext(
   logger.info('Switching client context', { accountantUserId, targetTenantId });
 
   // Verify accountant has access to this tenant
-  const accessResult = await db.query<{ count: string | number }>(
-    `SELECT COUNT(*) as count
-     FROM users
-     WHERE id = $1 AND tenant_id = $2 AND role = 'accountant'`,
-    [accountantUserId, targetTenantId]
-  );
-
-  const count = typeof accessResult.rows[0]?.count === 'number'
-    ? accessResult.rows[0].count
-    : parseInt(String(accessResult.rows[0]?.count || '0'), 10);
-
-  if (count === 0) {
-    throw new Error('Accountant does not have access to this tenant');
-  }
+  await ensureAccountantAccess(accountantUserId, targetTenantId);
 
   // Store current context (in production, use session/Redis)
   await db.query(
@@ -207,4 +228,99 @@ export async function performBulkOperation(
   });
 
   return { success, failed, errors };
+}
+
+export async function getClientTasks(
+  accountantUserId: UserId,
+  tenantId: TenantId,
+  status: ClientTask['status'] = 'pending'
+): Promise<ClientTask[]> {
+  await ensureAccountantAccess(accountantUserId, tenantId);
+
+  const tasks = await db.query<{
+    id: string;
+    tenant_id: string;
+    type: ClientTask['entityType'];
+    entity_id: string;
+    priority: ClientTask['priority'];
+    status: ClientTask['status'];
+    created_at: Date;
+    summary: string | null;
+  }>(
+    `SELECT
+        rt.id,
+        rt.tenant_id,
+        rt.type,
+        rt.entity_id,
+        rt.priority,
+        rt.status,
+        rt.created_at,
+        COALESCE(d.file_name, le.description, f.filing_type) AS summary
+     FROM review_tasks rt
+     LEFT JOIN documents d ON d.id = rt.entity_id AND rt.type = 'document'
+     LEFT JOIN ledger_entries le ON le.id = rt.entity_id AND rt.type = 'ledger_entry'
+     LEFT JOIN filings f ON f.id = rt.entity_id AND rt.type = 'filing'
+     WHERE rt.tenant_id = $1
+       AND ($2::text IS NULL OR rt.status = $2::text)
+     ORDER BY rt.priority DESC, rt.created_at ASC
+     LIMIT 50`,
+    [tenantId, status || null]
+  );
+
+  return tasks.rows.map((row) => ({
+    id: row.id,
+    tenantId: row.tenant_id as TenantId,
+    entityType: row.type,
+    entityId: row.entity_id,
+    priority: row.priority,
+    status: row.status,
+    createdAt: row.created_at,
+    summary: row.summary,
+  }));
+}
+
+export async function resolveClientTask(
+  accountantUserId: UserId,
+  tenantId: TenantId,
+  taskId: string,
+  action: TaskAction,
+  comment?: string
+): Promise<void> {
+  await ensureAccountantAccess(accountantUserId, tenantId);
+  const statusMap: Record<TaskAction, ClientTask['status']> = {
+    approve: 'approved',
+    reject: 'rejected',
+    needs_revision: 'needs_revision',
+  };
+
+  const status = statusMap[action];
+  const message =
+    comment ||
+    (action === 'approve'
+      ? 'Approved by accountant portal'
+      : action === 'reject'
+      ? 'Rejected by accountant portal'
+      : 'Sent back for revision by accountant portal');
+
+  const result = await db.query(
+    `UPDATE review_tasks
+     SET status = $1,
+         comments = COALESCE(comments, '[]'::jsonb) || jsonb_build_array(
+           jsonb_build_object(
+             'userId', $4,
+             'comment', $5,
+             'action', $6,
+             'timestamp', NOW()
+           )
+         ),
+         updated_at = NOW()
+     WHERE id = $2 AND tenant_id = $3`,
+    [status, taskId, tenantId, accountantUserId, message, action]
+  );
+
+  if (result.rowCount === 0) {
+    throw new Error('Task not found or already updated');
+  }
+
+  logger.info('Task resolved', { tenantId, taskId, action, accountantUserId });
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import DocumentReview, { ReviewDocumentData } from './DocumentReview';
+import DocumentReview, { ReviewDocumentData, AssistantSuggestion, AuditLogEntry } from './DocumentReview';
 
 interface ReviewQueueItem {
   documentId: string;
@@ -52,10 +52,18 @@ export default function DocumentReviewPanel({ token }: DocumentReviewPanelProps)
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<AssistantSuggestion[]>([]);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState<string | null>(null);
+  const [auditLog, setAuditLog] = useState<AuditLogEntry[]>([]);
+  const [auditLogLoading, setAuditLogLoading] = useState(false);
+  const [auditLogError, setAuditLogError] = useState<string | null>(null);
 
   const fetchDocument = useCallback(async (documentId: string | null, queueOverride?: ReviewQueueItem[]) => {
     if (!documentId) {
       setSelectedDocument(null);
+      setSuggestions([]);
+      setAuditLog([]);
       return;
     }
 
@@ -212,6 +220,58 @@ export default function DocumentReviewPanel({ token }: DocumentReviewPanelProps)
     }
   };
 
+  const fetchSuggestions = useCallback(async (documentId: string) => {
+    setSuggestionsLoading(true);
+    setSuggestionsError(null);
+    try {
+      const data = await apiRequest<{ suggestions: AssistantSuggestion[] }>(
+        `/api/assistant/documents/${documentId}/suggestions`,
+        token
+      );
+      setSuggestions(data.suggestions);
+    } catch (err) {
+      console.error(err);
+      setSuggestions([]);
+      setSuggestionsError(err instanceof Error ? err.message : 'Unable to fetch assistant suggestions');
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  }, [token]);
+
+  const fetchAuditLog = useCallback(async (documentId: string) => {
+    setAuditLogLoading(true);
+    setAuditLogError(null);
+    try {
+      const data = await apiRequest<{ auditLog: AuditLogEntry[] }>(
+        `/api/documents/${documentId}/audit-log`,
+        token
+      );
+      setAuditLog(data.auditLog);
+    } catch (err) {
+      console.error(err);
+      setAuditLog([]);
+      setAuditLogError(err instanceof Error ? err.message : 'Unable to fetch audit history');
+    } finally {
+      setAuditLogLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (!selectedId) {
+      setSuggestions([]);
+      setAuditLog([]);
+      return;
+    }
+    setSuggestionsError(null);
+    setAuditLogError(null);
+    setSuggestions([]);
+    setAuditLog([]);
+    void fetchSuggestions(selectedId);
+    void fetchAuditLog(selectedId);
+  }, [selectedId, fetchAuditLog, fetchSuggestions]);
+
+  const insightsError = suggestionsError || auditLogError;
+
   return (
     <section className="bg-white rounded-lg shadow p-6 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -244,66 +304,77 @@ export default function DocumentReviewPanel({ token }: DocumentReviewPanelProps)
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="space-y-3">
-          <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Queue</h3>
-          <div className="border rounded-lg divide-y bg-gray-50 max-h-[420px] overflow-y-auto">
-            {queueLoading && queue.length === 0 && (
-              <div className="p-4 text-sm text-gray-500">Loading queue…</div>
-            )}
-            {!queueLoading && queue.length === 0 && (
-              <div className="p-4 text-sm text-gray-500">
-                All caught up! No documents need manual review right now.
-              </div>
-            )}
-            {queue.map(item => {
-              const isSelected = item.documentId === selectedId;
-              return (
-                <button
-                  key={item.documentId}
-                  type="button"
-                  onClick={() => handleSelect(item.documentId)}
-                  className={`w-full text-left p-4 space-y-2 focus:outline-none ${
-                    isSelected ? 'bg-white shadow-inner' : 'hover:bg-white'
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <p className="font-semibold text-sm">{item.fileName}</p>
-                    <span
-                      className={`text-xs font-semibold px-2 py-0.5 rounded ${
-                        (item.confidenceScore || 0) >= 0.85
-                          ? 'bg-green-100 text-green-800'
-                          : (item.confidenceScore || 0) >= 0.7
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {(item.confidenceScore ?? 0).toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-500 capitalize">{item.documentType || 'Unknown type'}</p>
-                  {item.reason && (
-                    <p className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-100 rounded px-2 py-1">
-                      {item.reason}
-                    </p>
-                  )}
-                </button>
-              );
-            })}
+        {insightsError && (
+          <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded text-sm">
+            {insightsError}
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Queue</h3>
+            <div className="border rounded-lg divide-y bg-gray-50 max-h-[420px] overflow-y-auto">
+              {queueLoading && queue.length === 0 && (
+                <div className="p-4 text-sm text-gray-500">Loading queue…</div>
+              )}
+              {!queueLoading && queue.length === 0 && (
+                <div className="p-4 text-sm text-gray-500">
+                  All caught up! No documents need manual review right now.
+                </div>
+              )}
+              {queue.map(item => {
+                const isSelected = item.documentId === selectedId;
+                return (
+                  <button
+                    key={item.documentId}
+                    type="button"
+                    onClick={() => handleSelect(item.documentId)}
+                    className={`w-full text-left p-4 space-y-2 focus:outline-none ${
+                      isSelected ? 'bg-white shadow-inner' : 'hover:bg-white'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="font-semibold text-sm">{item.fileName}</p>
+                      <span
+                        className={`text-xs font-semibold px-2 py-0.5 rounded ${
+                          (item.confidenceScore || 0) >= 0.85
+                            ? 'bg-green-100 text-green-800'
+                            : (item.confidenceScore || 0) >= 0.7
+                              ? 'bg-yellow-100 text-yellow-800'
+                              : 'bg-red-100 text-red-800'
+                        }`}
+                      >
+                        {(item.confidenceScore ?? 0).toFixed(2)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500 capitalize">{item.documentType || 'Unknown type'}</p>
+                    {item.reason && (
+                      <p className="text-xs text-yellow-700 bg-yellow-50 border border-yellow-100 rounded px-2 py-1">
+                        {item.reason}
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="lg:col-span-2">
+            <DocumentReview
+              document={selectedDocument}
+              isLoading={documentLoading && !selectedDocument}
+              actionLoading={actionLoading}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              onEdit={handleSave}
+              suggestions={suggestions}
+              suggestionsLoading={suggestionsLoading}
+              auditLog={auditLog}
+              auditLogLoading={auditLogLoading}
+              token={token}
+            />
           </div>
         </div>
-
-        <div className="lg:col-span-2">
-          <DocumentReview
-            document={selectedDocument}
-            isLoading={documentLoading && !selectedDocument}
-            actionLoading={actionLoading}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onEdit={handleSave}
-          />
-        </div>
-      </div>
     </section>
   );
 }

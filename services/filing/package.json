@@ -16,6 +16,7 @@
       "@ai-accountant/database": "*",
       "@ai-accountant/secure-store": "*",
       "@ai-accountant/hmrc": "*",
+      "aws-sdk": "^2.1509.0",
       "express": "^4.18.2",
       "axios": "^1.6.2",
       "dotenv": "^16.3.1",

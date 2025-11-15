@@ -1,6 +1,7 @@
 import express, { Express } from 'express';
 import crypto from 'crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { getQueueHealth } from './services/queueMetrics';
 
 const logger = createLogger('monitoring-service');
 
@@ -180,6 +181,10 @@ export function createMonitoringApp(): Express {
   app.get('/traces/:traceId', (req, res) => {
     const traces = tracer.getTrace(req.params.traceId);
     res.json({ traceId: req.params.traceId, spans: traces });
+  });
+
+  app.get('/queues/health', (_req, res) => {
+    res.json({ queues: getQueueHealth() });
   });
 
   return app;

@@ -71,6 +71,16 @@ async function handleOCRFailure(
   const nextAttempt = attempts + 1;
   const errorMessage = error instanceof Error ? error.message : 'OCR processing failed';
   const shouldRetry = nextAttempt <= MAX_RETRIES;
+  recordQueueEvent({
+    serviceName: 'ocr-service',
+    queueName: OCR_QUEUE,
+    eventType: 'failure',
+    metadata: {
+      documentId: payload.documentId,
+      attempts: nextAttempt,
+      error: errorMessage,
+    },
+  });
 
   try {
     await db.query(
@@ -105,6 +115,16 @@ async function handleOCRFailure(
         },
       }
     );
+    recordQueueEvent({
+      serviceName: 'ocr-service',
+      queueName: OCR_RETRY_QUEUE,
+      eventType: 'enqueue',
+      metadata: {
+        documentId: payload.documentId,
+        attempts: nextAttempt,
+        retry: true,
+      },
+    });
     logger.warn('OCR job scheduled for retry', {
       documentId: payload.documentId,
       attempt: nextAttempt,
@@ -189,6 +209,15 @@ async function startWorker(): Promise<void> {
 
       const attempts = getAttemptCount(msg);
       logger.info('Processing OCR job', { documentId: payload.documentId, storageKey: payload.storageKey, attempts });
+        recordQueueEvent({
+          serviceName: 'ocr-service',
+          queueName: OCR_QUEUE,
+          eventType: 'start',
+          metadata: {
+            documentId: payload.documentId,
+            attempts,
+          },
+        });
 
       try {
         const fileBuffer = await getFile(payload.storageKey);
@@ -230,6 +259,22 @@ async function startWorker(): Promise<void> {
             'x-previous-queue': OCR_QUEUE,
           })
         );
+          recordQueueEvent({
+            serviceName: 'ocr-service',
+            queueName: CLASSIFICATION_QUEUE,
+            eventType: 'enqueue',
+            metadata: {
+              documentId: payload.documentId,
+            },
+          });
+          recordQueueEvent({
+            serviceName: 'ocr-service',
+            queueName: OCR_QUEUE,
+            eventType: 'success',
+            metadata: {
+              documentId: payload.documentId,
+            },
+          });
         channel.ack(msg);
 
         logger.info('OCR job completed', { documentId: payload.documentId });

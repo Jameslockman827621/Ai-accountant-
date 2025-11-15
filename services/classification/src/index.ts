@@ -76,6 +76,16 @@ async function handleClassificationFailure(
   const errorMessage = error instanceof Error ? error.message : 'Classification failed';
   const shouldRetry = nextAttempt <= MAX_RETRIES;
   const statusOnFailure = shouldRetry ? DocumentStatus.EXTRACTED : DocumentStatus.ERROR;
+  recordQueueEvent({
+    serviceName: 'classification-service',
+    queueName: CLASSIFICATION_QUEUE,
+    eventType: 'failure',
+    metadata: {
+      documentId: payload.documentId,
+      attempts: nextAttempt,
+      error: errorMessage,
+    },
+  });
 
   try {
     await db.query(
@@ -110,6 +120,16 @@ async function handleClassificationFailure(
         },
       }
     );
+    recordQueueEvent({
+      serviceName: 'classification-service',
+      queueName: CLASSIFICATION_RETRY_QUEUE,
+      eventType: 'enqueue',
+      metadata: {
+        documentId: payload.documentId,
+        attempts: nextAttempt,
+        retry: true,
+      },
+    });
     logger.warn('Classification job scheduled for retry', {
       documentId: payload.documentId,
       attempt: nextAttempt,
@@ -194,9 +214,18 @@ async function startWorker(): Promise<void> {
         return;
       }
 
-      const attempts = getAttemptCount(msg);
-      logger.info('Processing classification job', { documentId: payload.documentId, attempts });
-      let tenantId: string | null = null;
+        const attempts = getAttemptCount(msg);
+        logger.info('Processing classification job', { documentId: payload.documentId, attempts });
+        let tenantId: string | null = null;
+        recordQueueEvent({
+          serviceName: 'classification-service',
+          queueName: CLASSIFICATION_QUEUE,
+          eventType: 'start',
+          metadata: {
+            documentId: payload.documentId,
+            attempts,
+          },
+        });
 
       try {
         const result = await processClassificationJob(payload.extractedText);
@@ -267,14 +296,30 @@ async function startWorker(): Promise<void> {
             ledgerHeaders['x-tenant-id'] = tenantId;
           }
 
-          channel.sendToQueue(
-            LEDGER_QUEUE,
-            Buffer.from(JSON.stringify({ documentId: payload.documentId, classification: result })),
-            buildForwardPublishOptions(msg, 'classification-service', ledgerHeaders)
-          );
+            channel.sendToQueue(
+              LEDGER_QUEUE,
+              Buffer.from(JSON.stringify({ documentId: payload.documentId, classification: result })),
+              buildForwardPublishOptions(msg, 'classification-service', ledgerHeaders)
+            );
+            recordQueueEvent({
+              serviceName: 'classification-service',
+              queueName: LEDGER_QUEUE,
+              eventType: 'enqueue',
+              metadata: {
+                documentId: payload.documentId,
+              },
+            });
           logger.info('Document queued for ledger posting', { documentId: payload.documentId });
         }
 
+        recordQueueEvent({
+          serviceName: 'classification-service',
+          queueName: CLASSIFICATION_QUEUE,
+          eventType: 'success',
+          metadata: {
+            documentId: payload.documentId,
+          },
+        });
         channel.ack(msg);
         logger.info('Classification job completed', {
           documentId: payload.documentId,
