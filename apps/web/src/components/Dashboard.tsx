@@ -13,6 +13,7 @@ import ReconciliationDashboard from './ReconciliationDashboard';
 import SupportCenterPanel from './SupportCenterPanel';
 import ScenarioPlanner from './ScenarioPlanner';
 import AccountantClientsPanel from './AccountantClientsPanel';
+import ExecutiveInsightsPanel from './ExecutiveInsightsPanel';
 import { useOnboarding } from '@/hooks/useOnboarding';
 
 interface DashboardStats {
@@ -220,6 +221,7 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             <ProcessingStatus token={token} />
             <ReconciliationDashboard token={token} />
             <ScenarioPlanner token={token} />
+            <ExecutiveInsightsPanel token={token} />
 
             <section className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">

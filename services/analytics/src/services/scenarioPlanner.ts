@@ -81,7 +81,7 @@ export async function runScenarioAnalysis(
   };
 }
 
-async function getBaselineMetrics(tenantId: TenantId): Promise<BaselineMetrics> {
+export async function getBaselineMetrics(tenantId: TenantId): Promise<BaselineMetrics> {
   const [revenueRow, expenseRow, cashRow] = await Promise.all([
     db.query<{ total: string | number | null }>(
       `SELECT COALESCE(SUM(amount), 0) AS total

@@ -5,6 +5,7 @@ import { predictRevenue, detectTrends } from '../services/predictive';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { getDashboardStats } from '../services/dashboard';
 import { runScenarioAnalysis } from '../services/scenarioPlanner';
+import { getExecutiveInsights } from '../services/insights';
 
 const router = Router();
 const logger = createLogger('analytics-service');
@@ -81,6 +82,20 @@ router.post('/scenarios', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to run scenario analysis' });
+  }
+});
+
+router.get('/insights', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+    const insights = await getExecutiveInsights(req.user.tenantId);
+    res.json({ insights });
+  } catch (error) {
+    logger.error('Get insights failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to load executive insights' });
   }
 });
 
