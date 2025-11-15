@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import AssistantChat from './AssistantChat';
 
 export interface ReviewDocumentData {
   id: string;
@@ -47,6 +48,7 @@ interface DocumentReviewProps {
   suggestionsLoading?: boolean;
   auditLog?: AuditLogEntry[];
   auditLogLoading?: boolean;
+  token: string;
 }
 
 export default function DocumentReview({
@@ -60,9 +62,11 @@ export default function DocumentReview({
   suggestionsLoading = false,
   auditLog = [],
   auditLogLoading = false,
+  token,
 }: DocumentReviewProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedData, setEditedData] = useState<ReviewDocumentData['extractedData']>({});
+  const [assistantOpen, setAssistantOpen] = useState(false);
 
   useEffect(() => {
     setIsEditing(false);
@@ -312,9 +316,28 @@ export default function DocumentReview({
             >
               Reject
             </button>
+            <button
+              onClick={() => setAssistantOpen((prev) => !prev)}
+              className="px-4 py-2 border border-blue-200 text-blue-700 rounded hover:bg-blue-50"
+            >
+              {assistantOpen ? 'Hide Assistant' : 'Ask Assistant'}
+            </button>
           </>
         )}
       </div>
+
+      {assistantOpen && (
+        <div className="mt-4 border rounded-lg">
+          <AssistantChat
+            token={token}
+            initialPrompt={
+              document
+                ? `Provide review guidance for document ${document.id} (${document.documentType || 'unknown type'})`
+                : undefined
+            }
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <section className="border rounded-lg p-4 bg-gray-50">

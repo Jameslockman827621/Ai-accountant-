@@ -8,6 +8,7 @@ import HMRCReceiptsPanel from './HMRCReceiptsPanel';
 import OnboardingWizard from './OnboardingWizard';
 import OnboardingProgressCard from './OnboardingProgressCard';
 import ReconciliationDashboard from './ReconciliationDashboard';
+import SupportCenterPanel from './SupportCenterPanel';
 import { useOnboarding } from '@/hooks/useOnboarding';
 
 interface DashboardStats {
@@ -250,6 +251,7 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
               <HMRCConnectionCard token={token} />
             </div>
             <HMRCReceiptsPanel token={token} />
+            <SupportCenterPanel token={token} />
         </div>
       </div>
     );

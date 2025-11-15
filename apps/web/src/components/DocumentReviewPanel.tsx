@@ -371,6 +371,7 @@ export default function DocumentReviewPanel({ token }: DocumentReviewPanelProps)
               suggestionsLoading={suggestionsLoading}
               auditLog={auditLog}
               auditLogLoading={auditLogLoading}
+              token={token}
             />
           </div>
         </div>
