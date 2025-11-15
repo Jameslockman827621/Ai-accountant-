@@ -3,6 +3,8 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { db } from '@ai-accountant/database';
 
+export type BillingTier = 'freelancer' | 'sme' | 'accountant' | 'enterprise';
+
 const logger = createLogger('billing-service');
 
 let stripe: Stripe | null = null;
@@ -44,6 +46,39 @@ export async function createCustomer(tenantId: TenantId, email: string, name: st
   return customer.id;
 }
 
+export async function ensureStripeCustomer(tenantId: TenantId): Promise<string> {
+  const tenant = await db.query<{
+    name: string;
+    metadata: unknown;
+  }>(
+    `SELECT name, metadata
+     FROM tenants
+     WHERE id = $1`,
+    [tenantId]
+  );
+
+  if (tenant.rows.length === 0) {
+    throw new Error('Tenant not found');
+  }
+
+  const metadata = tenant.rows[0].metadata as Record<string, unknown> | null;
+  const existingCustomerId = metadata?.stripeCustomerId as string | undefined;
+  if (existingCustomerId) {
+    return existingCustomerId;
+  }
+
+  const user = await db.query<{ email: string }>(
+    'SELECT email FROM users WHERE tenant_id = $1 ORDER BY created_at ASC LIMIT 1',
+    [tenantId]
+  );
+
+  if (user.rows.length === 0) {
+    throw new Error('No user found for tenant');
+  }
+
+  return createCustomer(tenantId, user.rows[0].email, tenant.rows[0].name);
+}
+
 export async function createSubscription(
   tenantId: TenantId,
   customerId: string,
@@ -57,6 +92,9 @@ export async function createSubscription(
     payment_behavior: 'default_incomplete',
     payment_settings: { save_default_payment_method: 'on_subscription' },
     expand: ['latest_invoice.payment_intent'],
+    metadata: {
+      tenantId,
+    },
   });
 
   // Update subscription in database
@@ -65,11 +103,13 @@ export async function createSubscription(
      SET status = 'active',
          current_period_start = $1,
          current_period_end = $2,
+         metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{stripeSubscriptionId}', $3::jsonb, true),
          updated_at = NOW()
-     WHERE tenant_id = $3`,
+     WHERE tenant_id = $4`,
     [
       new Date(subscription.current_period_start * 1000),
       new Date(subscription.current_period_end * 1000),
+      JSON.stringify(subscription.id),
       tenantId,
     ]
   );
@@ -129,43 +169,245 @@ export async function handleStripeWebhook(
   event: Stripe.Event
 ): Promise<void> {
   logger.info('Processing Stripe webhook', { type: event.type });
+  const client = getStripeClient();
 
   switch (event.type) {
-    case 'invoice.payment_succeeded':
-      // Handle successful payment
-      const invoice = event.data.object as Stripe.Invoice;
-      if (invoice.subscription) {
-        // Update subscription status
-        await db.query(
-          `UPDATE subscriptions
-           SET status = 'active',
-               updated_at = NOW()
-           WHERE metadata->>'stripeSubscriptionId' = $1`,
-          [invoice.subscription as string]
+    case 'checkout.session.completed': {
+      const session = event.data.object as Stripe.Checkout.Session;
+      if (session.subscription) {
+        const subscription = await client.subscriptions.retrieve(
+          session.subscription as string
         );
+        await syncSubscriptionFromStripe(subscription);
       }
       break;
-
-    case 'invoice.payment_failed':
-      // Handle failed payment
-      const failedInvoice = event.data.object as Stripe.Invoice;
-      logger.warn('Payment failed', { invoiceId: failedInvoice.id });
-      // Could send notification, update subscription status, etc.
+    }
+    case 'customer.subscription.created':
+    case 'customer.subscription.updated': {
+      const subscription = event.data.object as Stripe.Subscription;
+      await syncSubscriptionFromStripe(subscription);
       break;
-
-    case 'customer.subscription.deleted':
-      // Handle subscription cancellation
-      const deletedSubscription = event.data.object as Stripe.Subscription;
-      await db.query(
-        `UPDATE subscriptions
-         SET status = 'cancelled',
-             updated_at = NOW()
-         WHERE metadata->>'stripeSubscriptionId' = $1`,
-        [deletedSubscription.id]
-      );
+    }
+    case 'customer.subscription.deleted': {
+      const subscription = event.data.object as Stripe.Subscription;
+      await markSubscriptionCancelled(subscription);
       break;
-
+    }
+    case 'invoice.payment_succeeded': {
+      const invoice = event.data.object as Stripe.Invoice;
+      if (invoice.subscription) {
+        const subscription = await client.subscriptions.retrieve(
+          invoice.subscription as string
+        );
+        await syncSubscriptionFromStripe(subscription);
+      }
+      break;
+    }
+    case 'invoice.payment_failed': {
+      const invoice = event.data.object as Stripe.Invoice;
+      logger.warn('Stripe invoice payment failed', {
+        invoiceId: invoice.id,
+        subscriptionId: invoice.subscription,
+      });
+      break;
+    }
     default:
       logger.debug('Unhandled Stripe event', { type: event.type });
   }
+}
+
+function mapStripeStatus(status: Stripe.Subscription.Status): 'active' | 'cancelled' | 'expired' {
+  switch (status) {
+    case 'canceled':
+      return 'cancelled';
+    case 'unpaid':
+    case 'incomplete_expired':
+      return 'expired';
+    default:
+      return 'active';
+  }
+}
+
+async function syncSubscriptionFromStripe(subscription: Stripe.Subscription): Promise<void> {
+  const tenantId = subscription.metadata?.tenantId as string | undefined;
+  if (!tenantId) {
+    logger.warn('Stripe subscription missing tenant metadata', { subscriptionId: subscription.id });
+    return;
+  }
+
+  const tier =
+    (subscription.metadata?.tier as BillingTier | undefined) ??
+    (await getTenantTier(tenantId));
+  const status = mapStripeStatus(subscription.status);
+  const currentPeriodStart = new Date(subscription.current_period_start * 1000);
+  const currentPeriodEnd = new Date(subscription.current_period_end * 1000);
+  const cancelAtPeriodEnd = subscription.cancel_at_period_end ?? false;
+
+  await db.query(
+    `INSERT INTO subscriptions (
+       tenant_id,
+       tier,
+       status,
+       current_period_start,
+       current_period_end,
+       cancel_at_period_end,
+       metadata,
+       created_at,
+       updated_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, jsonb_build_object('stripeSubscriptionId', $7), NOW(), NOW())
+     ON CONFLICT (tenant_id) DO UPDATE SET
+       tier = EXCLUDED.tier,
+       status = EXCLUDED.status,
+       current_period_start = EXCLUDED.current_period_start,
+       current_period_end = EXCLUDED.current_period_end,
+       cancel_at_period_end = EXCLUDED.cancel_at_period_end,
+       metadata = jsonb_set(COALESCE(subscriptions.metadata, '{}'::jsonb), '{stripeSubscriptionId}', to_jsonb($7::text), true),
+       updated_at = NOW()`,
+    [
+      tenantId,
+      tier,
+      status,
+      currentPeriodStart,
+      currentPeriodEnd,
+      cancelAtPeriodEnd,
+      subscription.id,
+    ]
+  );
+
+  if (subscription.metadata?.tier) {
+    await db.query(
+      `UPDATE tenants
+       SET subscription_tier = $2,
+           updated_at = NOW()
+       WHERE id = $1`,
+      [tenantId, subscription.metadata.tier]
+    );
+  }
+
+  logger.info('Stripe subscription synced', {
+    tenantId,
+    subscriptionId: subscription.id,
+    status,
+  });
+}
+
+async function markSubscriptionCancelled(subscription: Stripe.Subscription): Promise<void> {
+  const tenantId = subscription.metadata?.tenantId as string | undefined;
+  if (!tenantId) {
+    logger.warn('Cannot cancel subscription without tenant metadata', {
+      subscriptionId: subscription.id,
+    });
+    return;
+  }
+
+  await db.query(
+    `UPDATE subscriptions
+     SET status = 'cancelled',
+         cancel_at_period_end = true,
+         metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{stripeSubscriptionId}', to_jsonb($1::text), true),
+         updated_at = NOW()
+     WHERE tenant_id = $2`,
+    [subscription.id, tenantId]
+  );
+
+  logger.info('Subscription cancelled via webhook', { tenantId, subscriptionId: subscription.id });
+}
+
+async function getTenantTier(tenantId: TenantId): Promise<BillingTier> {
+  const result = await db.query<{ subscription_tier: BillingTier }>(
+    'SELECT subscription_tier FROM tenants WHERE id = $1',
+    [tenantId]
+  );
+
+  if (result.rows.length === 0) {
+    return 'freelancer';
+  }
+
+  return result.rows[0].subscription_tier;
+}
+
+export async function createCheckoutSession(
+  tenantId: TenantId,
+  tier: BillingTier,
+  successUrl: string,
+  cancelUrl: string
+): Promise<Stripe.Checkout.Session> {
+  const priceId = process.env[`STRIPE_PRICE_${tier.toUpperCase()}`];
+  if (!priceId) {
+    throw new Error(`Stripe price for tier ${tier} is not configured`);
+  }
+
+  const customerId = await ensureStripeCustomer(tenantId);
+  const client = getStripeClient();
+
+  const session = await client.checkout.sessions.create({
+    mode: 'subscription',
+    customer: customerId,
+    line_items: [{ price: priceId, quantity: 1 }],
+    success_url: successUrl,
+    cancel_url: cancelUrl,
+    subscription_data: {
+      metadata: {
+        tenantId,
+        tier,
+      },
+    },
+    metadata: {
+      tenantId,
+      tier,
+    },
+  });
+
+  return session;
+}
+
+export async function createBillingPortalSession(
+  tenantId: TenantId,
+  returnUrl: string
+): Promise<Stripe.BillingPortal.Session> {
+  const customerId = await ensureStripeCustomer(tenantId);
+  const client = getStripeClient();
+
+  return client.billingPortal.sessions.create({
+    customer: customerId,
+    return_url: returnUrl,
+  });
+}
+
+export async function createOneTimePaymentIntent(
+  tenantId: TenantId,
+  amount: number,
+  currency: string,
+  metadata?: Record<string, unknown>
+): Promise<Stripe.PaymentIntent> {
+  const client = getStripeClient();
+  const customerId = await ensureStripeCustomer(tenantId);
+
+  const paymentIntent = await client.paymentIntents.create({
+    amount: Math.round(amount * 100),
+    currency: currency.toLowerCase(),
+    customer: customerId,
+    metadata: {
+      tenantId,
+      ...metadata,
+    },
+    automatic_payment_methods: { enabled: true },
+  });
+
+  return paymentIntent;
+}
+
+export function constructStripeEvent(payload: Buffer, signature?: string | string[]): Stripe.Event {
+  const secret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!secret) {
+    throw new Error('STRIPE_WEBHOOK_SECRET not configured');
+  }
+
+  if (!signature) {
+    throw new Error('Missing Stripe signature header');
+  }
+
+  const client = getStripeClient();
+  return client.webhooks.constructEvent(payload, signature as string, secret);
 }
