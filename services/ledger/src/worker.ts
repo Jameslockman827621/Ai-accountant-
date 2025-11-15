@@ -5,6 +5,7 @@ import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { DocumentStatus, ProcessingQueues } from '@ai-accountant/shared-types';
 import { postDocumentToLedger } from './services/posting';
+import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
 
 config();
 
@@ -208,6 +209,18 @@ async function handleLedgerFailure(
     } else {
       logger.error('Ledger posting moved to DLQ', { documentId: payload.documentId });
     }
+
+    recordQueueEvent({
+      serviceName: 'ledger-service',
+      queueName: LEDGER_DLQ,
+      eventType: 'dlq_enqueue',
+      metadata: {
+        documentId: payload.documentId,
+        attempts: nextAttempt,
+        error: errorMessage,
+        validationError: isValidationError,
+      },
+    });
   }
 
   channel.ack(msg);

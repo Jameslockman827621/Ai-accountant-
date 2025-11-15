@@ -5,6 +5,8 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { processClassificationJob } from './processor';
 import { db } from '@ai-accountant/database';
 import { DocumentStatus, DocumentType, ProcessingQueues } from '@ai-accountant/shared-types';
+import { validateDocumentForPosting } from '@ai-accountant/validation-service/services/documentPostingValidator';
+import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
 
 config();
 
@@ -133,6 +135,16 @@ async function handleClassificationFailure(
       }
     );
     logger.error('Classification job moved to DLQ', { documentId: payload.documentId });
+    recordQueueEvent({
+      serviceName: 'classification-service',
+      queueName: CLASSIFICATION_DLQ,
+      eventType: 'dlq_enqueue',
+      metadata: {
+        documentId: payload.documentId,
+        attempts: nextAttempt,
+        error: errorMessage,
+      },
+    });
   }
 
   channel.ack(msg);
@@ -184,17 +196,20 @@ async function startWorker(): Promise<void> {
 
       const attempts = getAttemptCount(msg);
       logger.info('Processing classification job', { documentId: payload.documentId, attempts });
+      let tenantId: string | null = null;
 
       try {
         const result = await processClassificationJob(payload.extractedText);
 
         await db.transaction(async (client) => {
-          const existing = await client.query('SELECT id FROM documents WHERE id = $1 FOR UPDATE', [
-            payload.documentId,
-          ]);
+          const existing = await client.query(
+            'SELECT id, tenant_id FROM documents WHERE id = $1 FOR UPDATE',
+            [payload.documentId]
+          );
           if (existing.rowCount === 0) {
             throw new Error('Document not found');
           }
+          tenantId = existing.rows[0].tenant_id;
 
           await client.query(
             `UPDATE documents
@@ -220,13 +235,42 @@ async function startWorker(): Promise<void> {
           );
         });
 
-        if (result.documentType === DocumentType.INVOICE || result.documentType === DocumentType.RECEIPT) {
+        const shouldPostToLedger =
+          result.documentType === DocumentType.INVOICE || result.documentType === DocumentType.RECEIPT;
+
+        if (shouldPostToLedger) {
+          if (!tenantId) {
+            throw new Error('Tenant not found for document');
+          }
+
+          const validationResult = await validateDocumentForPosting(tenantId, payload.documentId);
+          if (!validationResult.isValid) {
+            const validationMessage = validationResult.errors.join('; ') || 'Document failed validation checks';
+            await db.query(
+              `UPDATE documents
+               SET error_message = $1,
+                   updated_at = NOW()
+               WHERE id = $2`,
+              [validationMessage, payload.documentId]
+            );
+
+            logger.warn('Document held for manual review after validation', {
+              documentId: payload.documentId,
+              errors: validationResult.errors,
+            });
+            channel.ack(msg);
+            return;
+          }
+
+          const ledgerHeaders: Record<string, unknown> = { 'x-previous-queue': CLASSIFICATION_QUEUE };
+          if (tenantId) {
+            ledgerHeaders['x-tenant-id'] = tenantId;
+          }
+
           channel.sendToQueue(
             LEDGER_QUEUE,
             Buffer.from(JSON.stringify({ documentId: payload.documentId, classification: result })),
-            buildForwardPublishOptions(msg, 'classification-service', {
-              'x-previous-queue': CLASSIFICATION_QUEUE,
-            })
+            buildForwardPublishOptions(msg, 'classification-service', ledgerHeaders)
           );
           logger.info('Document queued for ledger posting', { documentId: payload.documentId });
         }

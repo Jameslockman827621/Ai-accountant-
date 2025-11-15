@@ -64,10 +64,12 @@ function determineRetryStage(
   throw new ValidationError('Document is not eligible for retry');
 }
 
-// Initialize storage on startup
-initializeBucket().catch((err) => {
-  logger.error('Failed to initialize storage', err);
-});
+// Initialize storage on startup (skip during tests)
+if (process.env.NODE_ENV !== 'test') {
+  initializeBucket().catch((err) => {
+    logger.error('Failed to initialize storage', err);
+  });
+}
 
 // Configure multer for file uploads
 const upload = multer({

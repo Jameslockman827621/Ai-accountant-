@@ -6,6 +6,7 @@ import { processOCRJob } from './processor';
 import { db } from '@ai-accountant/database';
 import { DocumentStatus, ProcessingQueues } from '@ai-accountant/shared-types';
 import { getFile } from './storage/s3';
+import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
 
 config();
 
@@ -128,6 +129,16 @@ async function handleOCRFailure(
       }
     );
     logger.error('OCR job moved to DLQ', { documentId: payload.documentId });
+    recordQueueEvent({
+      serviceName: 'ocr-service',
+      queueName: OCR_DLQ,
+      eventType: 'dlq_enqueue',
+      metadata: {
+        documentId: payload.documentId,
+        attempts: nextAttempt,
+        error: errorMessage,
+      },
+    });
   }
 
   channel.ack(msg);
