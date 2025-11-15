@@ -1,0 +1,20 @@
+[
+  {
+    "id": "vat-liability",
+    "question": "What is our latest VAT liability and when is it due?",
+    "requiredKeywords": ["vat", "due", "return"],
+    "minConfidence": 0.7
+  },
+  {
+    "id": "expense-policy",
+    "question": "Remind me of the rules for employee expense claims.",
+    "requiredKeywords": ["policy", "expense", "receipt"],
+    "minConfidence": 0.6
+  },
+  {
+    "id": "cash-runway",
+    "question": "How long is our current cash runway based on the latest ledger data?",
+    "requiredKeywords": ["runway", "cash", "months"],
+    "minConfidence": 0.6
+  }
+]

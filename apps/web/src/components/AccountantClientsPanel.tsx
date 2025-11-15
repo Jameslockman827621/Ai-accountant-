@@ -29,6 +29,19 @@ interface BulkOperationResult {
   errors: Array<{ tenantId: string; error: string }>;
 }
 
+type TaskAction = 'approve' | 'reject' | 'needs_revision';
+
+interface ClientTask {
+  id: string;
+  tenantId: string;
+  entityType: 'document' | 'ledger_entry' | 'filing' | 'transaction';
+  entityId: string;
+  priority: 'low' | 'medium' | 'high';
+  status: 'pending' | 'approved' | 'rejected' | 'needs_revision';
+  createdAt: string;
+  summary?: string | null;
+}
+
 const BULK_OPERATIONS: Array<{ value: BulkOperation; label: string }> = [
   { value: 'approve', label: 'Approve pending filings' },
   { value: 'reject', label: 'Reject pending filings' },
@@ -46,6 +59,11 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
   const [bulkOperation, setBulkOperation] = useState<BulkOperation>('approve');
   const [runningOperation, setRunningOperation] = useState(false);
   const [switchingTenantId, setSwitchingTenantId] = useState<string | null>(null);
+  const [expandedTenantId, setExpandedTenantId] = useState<string | null>(null);
+  const [clientTasks, setClientTasks] = useState<ClientTask[]>([]);
+  const [tasksLoading, setTasksLoading] = useState(false);
+  const [tasksError, setTasksError] = useState<string | null>(null);
+  const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
 
   const headers = useMemo<HeadersInit>(
     () => ({
@@ -159,6 +177,74 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
       setActionError(err instanceof Error ? err.message : 'Bulk operation failed');
     } finally {
       setRunningOperation(false);
+    }
+  };
+
+  const fetchTasksForTenant = useCallback(
+    async (tenantId: string) => {
+      try {
+        setTasksLoading(true);
+        setTasksError(null);
+        setClientTasks([]);
+        const response = await fetch(`${API_BASE}/api/accountant/clients/${tenantId}/tasks`, {
+          headers,
+        });
+        if (!response.ok) {
+          const body = await response.text();
+          throw new Error(body || 'Failed to load client tasks');
+        }
+        const data = (await response.json()) as { tasks: ClientTask[] };
+        setClientTasks(
+          (data.tasks || []).map(task => ({
+            ...task,
+            createdAt: task.createdAt,
+          }))
+        );
+      } catch (err) {
+        console.error(err);
+        setTasksError(err instanceof Error ? err.message : 'Unable to load client tasks');
+      } finally {
+        setTasksLoading(false);
+      }
+    },
+    [headers]
+  );
+
+  const toggleTasks = (tenantId: string) => {
+    if (expandedTenantId === tenantId) {
+      setExpandedTenantId(null);
+      setClientTasks([]);
+      setTasksError(null);
+      return;
+    }
+    setExpandedTenantId(tenantId);
+    void fetchTasksForTenant(tenantId);
+  };
+
+  const handleTaskAction = async (tenantId: string, taskId: string, action: TaskAction) => {
+    try {
+      setUpdatingTaskId(taskId);
+      setActionError(null);
+      const response = await fetch(
+        `${API_BASE}/api/accountant/clients/${tenantId}/tasks/${taskId}/resolve`,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ action }),
+        }
+      );
+      if (!response.ok) {
+        const body = await response.text();
+        throw new Error(body || 'Failed to update task');
+      }
+      setActionMessage(`Task ${action === 'approve' ? 'approved' : action === 'reject' ? 'rejected' : 'sent for revision'}.`);
+      await fetchClients();
+      await fetchTasksForTenant(tenantId);
+    } catch (err) {
+      console.error(err);
+      setActionError(err instanceof Error ? err.message : 'Unable to update task');
+    } finally {
+      setUpdatingTaskId(null);
     }
   };
 
@@ -303,12 +389,74 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
                   <button
                     onClick={() => handleSwitchContext(client.tenantId)}
                     disabled={switchingTenantId === client.tenantId}
-                    className="rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    className="mr-2 rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
                   >
                     {switchingTenantId === client.tenantId ? 'Switching…' : 'Switch context'}
                   </button>
+                  <button
+                    onClick={() => toggleTasks(client.tenantId)}
+                    className="rounded border border-blue-200 px-3 py-1 text-xs text-blue-700 hover:bg-blue-50"
+                  >
+                    {expandedTenantId === client.tenantId ? 'Hide tasks' : 'View tasks'}
+                  </button>
                 </td>
               </tr>
+              {expandedTenantId === client.tenantId && (
+                <tr className="bg-gray-50">
+                  <td colSpan={9} className="px-3 py-3">
+                    {tasksLoading ? (
+                      <p className="text-sm text-gray-500">Loading tasks…</p>
+                    ) : tasksError ? (
+                      <p className="text-sm text-red-600">{tasksError}</p>
+                    ) : clientTasks.length === 0 ? (
+                      <p className="text-sm text-gray-500">No pending tasks for this client.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {clientTasks.map(task => (
+                          <div
+                            key={task.id}
+                            className="flex flex-col gap-2 rounded border border-gray-200 bg-white p-3 md:flex-row md:items-center md:justify-between"
+                          >
+                            <div>
+                              <p className="text-sm font-semibold text-gray-900">
+                                {task.summary || `${task.entityType} task`}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Created {new Date(task.createdAt).toLocaleString('en-GB')} ·{' '}
+                                <span className="capitalize">{task.entityType}</span>
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <PriorityChip priority={task.priority} />
+                              <button
+                                onClick={() => handleTaskAction(client.tenantId, task.id, 'approve')}
+                                disabled={updatingTaskId === task.id}
+                                className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                              >
+                                {updatingTaskId === task.id ? 'Saving…' : 'Approve'}
+                              </button>
+                              <button
+                                onClick={() => handleTaskAction(client.tenantId, task.id, 'reject')}
+                                disabled={updatingTaskId === task.id}
+                                className="rounded border border-red-300 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
+                              >
+                                Reject
+                              </button>
+                              <button
+                                onClick={() => handleTaskAction(client.tenantId, task.id, 'needs_revision')}
+                                disabled={updatingTaskId === task.id}
+                                className="rounded border border-amber-300 px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+                              >
+                                Needs revision
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              )}
             ))}
           </tbody>
         </table>
@@ -349,5 +497,18 @@ function SummaryCard({
         </p>
       )}
     </div>
+  );
+}
+
+function PriorityChip({ priority }: { priority: 'low' | 'medium' | 'high' }) {
+  const styles: Record<'low' | 'medium' | 'high', string> = {
+    low: 'bg-gray-100 text-gray-700',
+    medium: 'bg-amber-100 text-amber-800',
+    high: 'bg-red-100 text-red-700',
+  };
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${styles[priority]}`}>
+      {priority} priority
+    </span>
   );
 }
