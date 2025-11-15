@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import DocumentReviewPanel from './DocumentReviewPanel';
 import ProcessingStatus from './ProcessingStatus';
+import HMRCConnectionCard from './HMRCConnectionCard';
+import HMRCReceiptsPanel from './HMRCReceiptsPanel';
 
 interface DashboardStats {
   period: {
@@ -114,7 +116,7 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
 
     return (
       <div className="min-h-screen bg-gray-50 p-8">
-        <div className="max-w-7xl mx-auto space-y-8">
+          <div className="max-w-7xl mx-auto space-y-8">
           <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <p className="text-sm text-gray-500">Welcome back</p>
@@ -182,7 +184,11 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             )}
           </section>
 
-          <DocumentReviewPanel token={token} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <DocumentReviewPanel token={token} />
+              <HMRCConnectionCard token={token} />
+            </div>
+            <HMRCReceiptsPanel token={token} />
         </div>
       </div>
     );

@@ -7,6 +7,7 @@ import { connectQuickBooks, syncQuickBooksAccounts, syncQuickBooksTransactions }
 import {
   connectHMRC,
   disconnectHMRC,
+  getHMRCAuthUrl,
   getHMRCObligations,
   getHMRCStatus,
   refreshHMRCToken,
@@ -239,6 +240,30 @@ router.post('/quickbooks/sync/transactions', async (req: AuthRequest, res: Respo
   }
 });
 
+router.get('/hmrc/authorize', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const redirectUri = typeof req.query.redirectUri === 'string' ? req.query.redirectUri : undefined;
+    if (!redirectUri) {
+      throw new ValidationError('redirectUri query parameter is required');
+    }
+
+    const data = getHMRCAuthUrl(req.user.tenantId, req.user.userId, redirectUri);
+    res.json(data);
+  } catch (error) {
+    logger.error('Generate HMRC authorize URL failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to generate HMRC authorization url' });
+  }
+});
+
 router.post('/hmrc/connect', async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -246,13 +271,20 @@ router.post('/hmrc/connect', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { authorizationCode, redirectUri, vrn } = req.body;
+    const { authorizationCode, redirectUri, vrn, state } = req.body;
 
-    if (!authorizationCode || !redirectUri) {
-      throw new ValidationError('authorizationCode and redirectUri are required');
+    if (!authorizationCode || !redirectUri || !state) {
+      throw new ValidationError('authorizationCode, redirectUri, and state are required');
     }
 
-    await connectHMRC(req.user.tenantId, authorizationCode, redirectUri, vrn);
+    await connectHMRC(
+      req.user.tenantId,
+      authorizationCode,
+      redirectUri,
+      req.user.userId,
+      vrn,
+      state
+    );
     res.json({ message: 'HMRC connected successfully' });
   } catch (error) {
     logger.error('Connect HMRC failed', error instanceof Error ? error : new Error(String(error)));

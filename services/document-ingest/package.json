@@ -6,7 +6,7 @@
     "build": "tsc",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "start": "node dist/index.js",
-    "test": "jest",
+    "test": "jest --config ./jest.config.js --runInBand",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

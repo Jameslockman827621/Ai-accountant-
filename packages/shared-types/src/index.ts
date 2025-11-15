@@ -267,3 +267,29 @@ export interface UsageMetrics {
   storageUsed: number;
   createdAt: Date;
 }
+
+export interface ProcessingQueueConfig {
+  primary: string;
+  retry: string;
+  dlq: string;
+}
+
+export const ProcessingQueues = {
+  OCR: {
+    primary: 'ocr_processing',
+    retry: 'ocr_processing_retry',
+    dlq: 'ocr_processing_dlq',
+  },
+  CLASSIFICATION: {
+    primary: 'document_classification',
+    retry: 'document_classification_retry',
+    dlq: 'document_classification_dlq',
+  },
+  LEDGER: {
+    primary: 'ledger_posting',
+    retry: 'ledger_posting_retry',
+    dlq: 'ledger_posting_dlq',
+  },
+} as const;
+
+export type ProcessingQueueName = keyof typeof ProcessingQueues;

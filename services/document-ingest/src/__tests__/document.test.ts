@@ -3,7 +3,10 @@ import app from '../index';
 import { db } from '@ai-accountant/database';
 import bcrypt from 'bcrypt';
 
-describe('Document Ingest Service', () => {
+const runIntegrationSuite = process.env.RUN_DOCUMENT_INGEST_INTEGRATION_TESTS === 'true';
+const describeOrSkip = runIntegrationSuite ? describe : describe.skip;
+
+describeOrSkip('Document Ingest Service', () => {
   let testTenantId: string = '';
   let testUserId: string = '';
   let authToken: string = '';

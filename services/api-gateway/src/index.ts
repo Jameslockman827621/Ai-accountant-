@@ -5,6 +5,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
+import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
 
 config();
 
@@ -39,6 +41,8 @@ const BACKUP_SERVICE = process.env.BACKUP_SERVICE_URL || 'http://localhost:3023'
 const ERROR_HANDLING_SERVICE = process.env.ERROR_HANDLING_SERVICE_URL || 'http://localhost:3024';
 
 // Security middleware
+app.use(tracingMiddleware('api-gateway'));
+app.use(metricsMiddleware('api-gateway'));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],

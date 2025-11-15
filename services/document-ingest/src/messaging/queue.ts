@@ -1,16 +1,55 @@
 import amqp from 'amqplib';
+import { randomUUID } from 'crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { ProcessingQueues, ProcessingQueueConfig, ProcessingQueueName } from '@ai-accountant/shared-types';
 
 const logger = createLogger('document-ingest-service');
 
 const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5672';
-const OCR_QUEUE = 'ocr_processing';
-const CLASSIFICATION_QUEUE = 'document_classification';
-const LEDGER_QUEUE = 'ledger_posting';
+const DEFAULT_RETRY_DELAY_MS = parseInt(process.env.QUEUE_RETRY_DELAY_MS || '15000', 10);
+
+const OCR_QUEUE = ProcessingQueues.OCR.primary;
+const CLASSIFICATION_QUEUE = ProcessingQueues.CLASSIFICATION.primary;
+const LEDGER_QUEUE = ProcessingQueues.LEDGER.primary;
+
+type QueueBinding = (typeof ProcessingQueues)[ProcessingQueueName];
+const QUEUE_BINDINGS: QueueBinding[] = Object.values(ProcessingQueues) as ProcessingQueueConfig[];
+type JobPayload = Record<string, unknown> & { documentId?: string };
 
 let connection: amqp.Connection | null = null;
 let channel: amqp.Channel | null = null;
 let connectingPromise: Promise<void> | null = null;
+
+export interface PublishMetadata {
+  traceId?: string;
+  tenantId?: string;
+  source?: string;
+  correlationId?: string;
+  headers?: Record<string, unknown>;
+}
+
+async function assertProcessingQueue(
+  ch: amqp.Channel,
+  config: QueueBinding,
+  retryDelayMs: number
+): Promise<void> {
+  await ch.assertQueue(config.dlq, { durable: true });
+  await ch.assertQueue(config.primary, {
+    durable: true,
+    arguments: {
+      'x-dead-letter-exchange': '',
+      'x-dead-letter-routing-key': config.dlq,
+    },
+  });
+  await ch.assertQueue(config.retry, {
+    durable: true,
+    arguments: {
+      'x-message-ttl': retryDelayMs,
+      'x-dead-letter-exchange': '',
+      'x-dead-letter-routing-key': config.primary,
+    },
+  });
+}
 
 export async function connectQueue(): Promise<void> {
   if (channel && connection) {
@@ -28,9 +67,19 @@ export async function connectQueue(): Promise<void> {
       const ch = await conn.createChannel();
       channel = ch;
 
-      await ch.assertQueue(OCR_QUEUE, { durable: true });
-      await ch.assertQueue(CLASSIFICATION_QUEUE, { durable: true });
-      await ch.assertQueue(LEDGER_QUEUE, { durable: true });
+      await Promise.all(
+        QUEUE_BINDINGS.map((binding) => assertProcessingQueue(ch, binding, DEFAULT_RETRY_DELAY_MS))
+      );
+
+      conn.on('close', (err) => {
+        logger.error('RabbitMQ connection closed', err instanceof Error ? err : new Error(String(err)));
+        connection = null;
+        channel = null;
+      });
+
+      conn.on('error', (err) => {
+        logger.error('RabbitMQ connection error', err instanceof Error ? err : new Error(String(err)));
+      });
 
       logger.info('Connected to message queue');
     } catch (error) {
@@ -58,26 +107,93 @@ async function getChannel(): Promise<amqp.Channel> {
   return channel;
 }
 
-export async function publishOCRJob(documentId: string, storageKey: string): Promise<void> {
+function buildPublishOptions(metadata?: PublishMetadata): amqp.Options.Publish {
+  const traceId = metadata?.traceId || randomUUID();
+  const messageId = randomUUID();
+  const headers: Record<string, unknown> = {
+    'x-trace-id': traceId,
+    'x-source-service': metadata?.source || 'document-ingest-service',
+    'x-attempts': metadata?.headers?.['x-attempts'] ?? 0,
+    'x-enqueued-at': new Date().toISOString(),
+    ...metadata?.headers,
+  };
+
+  if (metadata?.tenantId) {
+    headers['x-tenant-id'] = metadata.tenantId;
+  }
+
+  return {
+    persistent: true,
+    messageId,
+    correlationId: metadata?.correlationId || traceId,
+    headers,
+  };
+}
+
+async function publishJob(queue: string, payload: JobPayload, metadata?: PublishMetadata): Promise<void> {
+  const ch = await getChannel();
+  const options = buildPublishOptions(metadata);
+  const body = JSON.stringify(payload);
+  ch.sendToQueue(queue, Buffer.from(body), options);
+  logger.info('Job published', {
+    queue,
+    messageId: options.messageId,
+    documentId: payload.documentId,
+  });
+}
+
+export async function publishOCRJob(
+  documentId: string,
+  storageKey: string,
+  metadata?: PublishMetadata
+): Promise<void> {
   try {
-    const ch = await getChannel();
-    const message = JSON.stringify({ documentId, storageKey });
-    ch.sendToQueue(OCR_QUEUE, Buffer.from(message), { persistent: true });
-    logger.info('OCR job published', { documentId, storageKey });
+    await publishJob(
+      OCR_QUEUE,
+      { documentId, storageKey },
+      { source: 'document-ingest.ocr', ...metadata }
+    );
   } catch (error) {
     logger.error('Failed to publish OCR job', error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
 }
 
-export async function publishClassificationJob(documentId: string, extractedText: string): Promise<void> {
+export async function publishClassificationJob(
+  documentId: string,
+  extractedText: string,
+  metadata?: PublishMetadata
+): Promise<void> {
   try {
-    const ch = await getChannel();
-    const message = JSON.stringify({ documentId, extractedText });
-    ch.sendToQueue(CLASSIFICATION_QUEUE, Buffer.from(message), { persistent: true });
+    await publishJob(
+      CLASSIFICATION_QUEUE,
+      { documentId, extractedText },
+      { source: 'document-ingest.classification', ...metadata }
+    );
     logger.info('Classification job published', { documentId });
   } catch (error) {
     logger.error('Failed to publish classification job', error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
+}
+
+export async function publishLedgerJob(
+  documentId: string,
+  metadata?: Record<string, unknown>,
+  queueMetadata?: PublishMetadata
+): Promise<void> {
+  try {
+    await publishJob(
+      LEDGER_QUEUE,
+      {
+        documentId,
+        metadata,
+      },
+      { source: 'document-ingest.ledger', ...queueMetadata }
+    );
+    logger.info('Ledger posting job published', { documentId });
+  } catch (error) {
+    logger.error('Failed to publish ledger posting job', error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
 }
@@ -89,29 +205,10 @@ export async function closeQueue(): Promise<void> {
       channel = null;
     }
     if (connection) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (connection as any).close();
+      await connection.close();
       connection = null;
     }
   } catch (error) {
     logger.error('Error closing queue connection', error instanceof Error ? error : new Error(String(error)));
-  }
-}
-
-export async function publishLedgerJob(
-  documentId: string,
-  metadata?: Record<string, unknown>
-): Promise<void> {
-  try {
-    const ch = await getChannel();
-    const message = JSON.stringify({
-      documentId,
-      metadata,
-    });
-    ch.sendToQueue(LEDGER_QUEUE, Buffer.from(message), { persistent: true });
-    logger.info('Ledger posting job published', { documentId });
-  } catch (error) {
-    logger.error('Failed to publish ledger posting job', error instanceof Error ? error : new Error(String(error)));
-    throw error;
   }
 }

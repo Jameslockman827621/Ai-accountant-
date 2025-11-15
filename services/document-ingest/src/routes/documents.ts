@@ -27,6 +27,17 @@ function determineStageFromStatus(status: DocumentStatus): DocumentStage {
   return STATUS_STAGE_MAP[status] || 'document';
 }
 
+function getTraceId(req: AuthRequest): string | undefined {
+  const header = req.headers['x-request-id'];
+  if (Array.isArray(header)) {
+    return header[0];
+  }
+  if (typeof header === 'string') {
+    return header;
+  }
+  return undefined;
+}
+
 function determineRetryStage(
   status: DocumentStatus,
   extractedData: Record<string, unknown> | null
@@ -53,10 +64,12 @@ function determineRetryStage(
   throw new ValidationError('Document is not eligible for retry');
 }
 
-// Initialize storage on startup
-initializeBucket().catch((err) => {
-  logger.error('Failed to initialize storage', err);
-});
+// Initialize storage on startup (skip during tests)
+if (process.env.NODE_ENV !== 'test') {
+  initializeBucket().catch((err) => {
+    logger.error('Failed to initialize storage', err);
+  });
+}
 
 // Configure multer for file uploads
 const upload = multer({
@@ -87,6 +100,7 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
     }
 
     const { file } = req;
+    const traceId = getTraceId(req);
     const documentId = randomUUID();
     const storageKey = `${req.user.tenantId}/${documentId}/${file.originalname}`;
 
@@ -120,7 +134,13 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
 
     // Publish OCR job
     try {
-      await publishOCRJob(documentId, storageKey);
+      await publishOCRJob(documentId, storageKey, {
+        tenantId: req.user.tenantId,
+        traceId,
+        headers: {
+          'x-trigger': 'upload',
+        },
+      });
       await db.query(
         'UPDATE documents SET status = $1 WHERE id = $2',
         [DocumentStatus.PROCESSING, documentId]
@@ -408,13 +428,19 @@ router.post('/:documentId/retry', async (req: AuthRequest, res: Response) => {
 
     const document = docResult.rows[0];
     const extractedData = document.extracted_data || null;
+    const traceId = getTraceId(req);
     const targetStage = determineRetryStage(document.status, extractedData);
+    const retryHeaders = { 'x-trigger': 'retry' as const };
 
     if (targetStage === 'ocr') {
       if (!document.storage_key) {
         throw new ValidationError('Document storage key missing; re-upload required');
       }
-      await publishOCRJob(documentId, document.storage_key);
+      await publishOCRJob(documentId, document.storage_key, {
+        tenantId: req.user.tenantId,
+        traceId,
+        headers: retryHeaders,
+      });
       await db.query(
         `UPDATE documents
          SET status = $1,
@@ -428,7 +454,11 @@ router.post('/:documentId/retry', async (req: AuthRequest, res: Response) => {
       if (typeof rawText !== 'string' || rawText.length === 0) {
         throw new ValidationError('No extracted text available for classification retry');
       }
-      await publishClassificationJob(documentId, rawText);
+      await publishClassificationJob(documentId, rawText, {
+        tenantId: req.user.tenantId,
+        traceId,
+        headers: retryHeaders,
+      });
       await db.query(
         `UPDATE documents
          SET status = $1,
@@ -438,7 +468,15 @@ router.post('/:documentId/retry', async (req: AuthRequest, res: Response) => {
         [DocumentStatus.EXTRACTED, documentId]
       );
     } else if (targetStage === 'ledger_posting') {
-      await publishLedgerJob(documentId, { reason: 'manual_retry' });
+      await publishLedgerJob(
+        documentId,
+        { reason: 'manual_retry' },
+        {
+          tenantId: req.user.tenantId,
+          traceId,
+          headers: retryHeaders,
+        }
+      );
       await db.query(
         `UPDATE documents
          SET status = $1,

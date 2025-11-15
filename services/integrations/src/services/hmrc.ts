@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
 import { ValidationError, createLogger } from '@ai-accountant/shared-utils';
+import { randomUUID, createHmac } from 'crypto';
 import {
   HMRCClient,
   HMRCAuthTokens,
@@ -22,6 +23,18 @@ const HMRC_CLIENT_ID = process.env.HMRC_CLIENT_ID || '';
 const HMRC_CLIENT_SECRET = process.env.HMRC_CLIENT_SECRET || '';
 const HMRC_SCOPE =
   process.env.HMRC_SCOPE || 'read:vat write:vat read:vrn-summary';
+const HMRC_AUTH_BASE =
+  process.env.HMRC_AUTH_BASE_URL ||
+  HMRC_BASE_URL ||
+  (HMRC_ENV === 'production'
+    ? 'https://api.service.hmrc.gov.uk'
+    : 'https://test-api.service.hmrc.gov.uk');
+const HMRC_STATE_SECRET =
+  process.env.HMRC_STATE_SECRET || HMRC_CLIENT_SECRET || '';
+const HMRC_STATE_TTL_MS = parseInt(
+  process.env.HMRC_STATE_TTL_MS || '900000',
+  10
+);
 
 interface HMRCConnectionRow extends Record<string, unknown> {
   tenant_id: string;
@@ -61,6 +74,9 @@ function requireCredentials(): void {
   if (!HMRC_CLIENT_ID || !HMRC_CLIENT_SECRET) {
     throw new Error('HMRC client credentials are not configured');
   }
+  if (!HMRC_STATE_SECRET) {
+    throw new Error('HMRC state secret is not configured');
+  }
 }
 
 function scopeStringToArray(
@@ -81,6 +97,68 @@ function scopeStringToArray(
 
 function serializeSecret(secret: SecretPayload): string {
   return JSON.stringify(secret);
+}
+
+function buildHMRCAuthUrl(redirectUri: string, state: string): string {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: HMRC_CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: HMRC_SCOPE,
+    state,
+  });
+  const base = HMRC_AUTH_BASE?.replace(/\/+$/, '') || '';
+  return `${base}/oauth/authorize?${params.toString()}`;
+}
+
+function createStateToken(tenantId: TenantId, userId: string): string {
+  const issuedAt = Date.now();
+  const nonce = randomUUID();
+  const base = `${tenantId}:${userId}:${issuedAt}:${nonce}`;
+  const signature = createHmac('sha256', HMRC_STATE_SECRET).update(base).digest('hex');
+  return `${base}:${signature}`;
+}
+
+function verifyStateToken(stateToken: string, tenantId: TenantId, userId: string): void {
+  const segments = stateToken.split(':');
+  if (segments.length !== 5) {
+    throw new ValidationError('Invalid HMRC authorization state token');
+  }
+
+  const [tokenTenantId, tokenUserId, issuedAtRaw, nonce, signature] = segments;
+  if (tokenTenantId !== tenantId || tokenUserId !== userId) {
+    throw new ValidationError('HMRC authorization state mismatch');
+  }
+
+  const base = `${tokenTenantId}:${tokenUserId}:${issuedAtRaw}:${nonce}`;
+  const expectedSignature = createHmac('sha256', HMRC_STATE_SECRET)
+    .update(base)
+    .digest('hex');
+
+  if (expectedSignature !== signature) {
+    throw new ValidationError('Invalid HMRC authorization state signature');
+  }
+
+  const issuedAt = Number(issuedAtRaw);
+  if (!Number.isFinite(issuedAt) || Date.now() - issuedAt > HMRC_STATE_TTL_MS) {
+    throw new ValidationError('HMRC authorization attempt expired, please restart');
+  }
+}
+
+export function getHMRCAuthUrl(
+  tenantId: TenantId,
+  userId: string,
+  redirectUri: string
+): { authorizeUrl: string; state: string } {
+  requireCredentials();
+  if (!redirectUri) {
+    throw new ValidationError('redirectUri is required');
+  }
+  const state = createStateToken(tenantId, userId);
+  return {
+    authorizeUrl: buildHMRCAuthUrl(redirectUri, state),
+    state,
+  };
 }
 
 async function persistTokens(
@@ -209,9 +287,17 @@ export async function connectHMRC(
   tenantId: TenantId,
   authorizationCode: string,
   redirectUri: string,
-  providedVRN?: string
+  userId: string,
+  providedVRN?: string,
+  stateToken?: string
 ): Promise<void> {
   requireCredentials();
+
+  if (!stateToken) {
+    throw new ValidationError('state token is required for HMRC authorization');
+  }
+
+  verifyStateToken(stateToken, tenantId, userId);
 
   const tenantVRN = providedVRN || (await getTenantVatNumber(tenantId));
   if (!tenantVRN) {
