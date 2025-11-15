@@ -1,6 +1,6 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId, DocumentId } from '@ai-accountant/shared-types';
+import { TenantId, DocumentId, UserId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('document-ingest-service');
 
@@ -12,6 +12,35 @@ export interface DocumentReviewItem {
   extractedData: Record<string, unknown> | null;
   requiresReview: boolean;
   reason?: string;
+}
+
+export interface DocumentAuditEntry {
+  id: string;
+  action: string;
+  message: string;
+  changes?: Record<string, unknown> | null;
+  userId: UserId | null;
+  userName: string | null;
+  userEmail: string | null;
+  createdAt: string;
+}
+
+async function logDocumentAudit(
+  tenantId: TenantId,
+  userId: UserId,
+  documentId: DocumentId,
+  action: string,
+  changes?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await db.query(
+      `INSERT INTO audit_logs (tenant_id, user_id, action, resource_type, resource_id, changes, created_at)
+       VALUES ($1, $2, $3, 'document', $4, $5::jsonb, NOW())`,
+      [tenantId, userId, action, documentId, JSON.stringify(changes || {})]
+    );
+  } catch (error) {
+    logger.warn('Failed to log document audit entry', error instanceof Error ? error : new Error(String(error)));
+  }
 }
 
 export async function getReviewQueue(
@@ -83,8 +112,14 @@ export async function getReviewQueue(
 export async function updateExtractedData(
   documentId: DocumentId,
   tenantId: TenantId,
+  userId: UserId,
   extractedData: Record<string, unknown>
 ): Promise<void> {
+  const previous = await db.query<{ extracted_data: unknown }>(
+    'SELECT extracted_data FROM documents WHERE id = $1 AND tenant_id = $2',
+    [documentId, tenantId]
+  );
+
   await db.query(
     `UPDATE documents
      SET extracted_data = $1::jsonb,
@@ -93,12 +128,18 @@ export async function updateExtractedData(
     [JSON.stringify(extractedData), documentId, tenantId]
   );
 
+  await logDocumentAudit(tenantId, userId, documentId, 'document_update', {
+    before: previous.rows[0]?.extracted_data ?? null,
+    after: extractedData,
+  });
+
   logger.info('Extracted data updated', { documentId, tenantId });
 }
 
 export async function approveDocument(
   documentId: DocumentId,
-  tenantId: TenantId
+  tenantId: TenantId,
+  userId: UserId
 ): Promise<void> {
   await db.query(
     `UPDATE documents
@@ -108,12 +149,17 @@ export async function approveDocument(
     [documentId, tenantId]
   );
 
+  await logDocumentAudit(tenantId, userId, documentId, 'document_approved', {
+    status: 'classified',
+  });
+
   logger.info('Document approved', { documentId, tenantId });
 }
 
 export async function rejectDocument(
   documentId: DocumentId,
   tenantId: TenantId,
+  userId: UserId,
   reason: string
 ): Promise<void> {
   await db.query(
@@ -122,8 +168,69 @@ export async function rejectDocument(
          error_message = $1,
          updated_at = NOW()
      WHERE id = $2 AND tenant_id = $3`,
-    [reason, documentId, tenantId]
+      [reason, documentId, tenantId]
   );
 
+  await logDocumentAudit(tenantId, userId, documentId, 'document_rejected', {
+    status: 'error',
+    reason,
+  });
+
   logger.info('Document rejected', { documentId, tenantId, reason });
+}
+
+export async function getDocumentAuditLog(
+  documentId: DocumentId,
+  tenantId: TenantId,
+  limit: number = 25
+): Promise<DocumentAuditEntry[]> {
+  const result = await db.query<{
+    id: string;
+    action: string;
+    changes: unknown;
+    created_at: Date;
+    user_id: string | null;
+    user_name: string | null;
+    user_email: string | null;
+  }>(
+    `SELECT a.id,
+            a.action,
+            a.changes,
+            a.created_at,
+            a.user_id,
+            u.name as user_name,
+            u.email as user_email
+     FROM audit_logs a
+     LEFT JOIN users u ON a.user_id = u.id
+     WHERE a.tenant_id = $1
+       AND a.resource_type = 'document'
+       AND a.resource_id = $2
+     ORDER BY a.created_at DESC
+     LIMIT $3`,
+    [tenantId, documentId, limit]
+  );
+
+  return result.rows.map(row => ({
+    id: row.id,
+    action: row.action,
+    message: buildAuditMessage(row.action),
+    changes: (row.changes as Record<string, unknown> | null) || null,
+    userId: (row.user_id as UserId | null) ?? null,
+    userName: row.user_name,
+    userEmail: row.user_email,
+    createdAt: row.created_at.toISOString(),
+  }));
+}
+
+function buildAuditMessage(action: string): string {
+  switch (action) {
+    case 'document_update':
+      return 'Document data updated';
+    case 'document_approved':
+      return 'Document approved for posting';
+    case 'document_rejected':
+      return 'Document rejected';
+    default:
+      return action.replace(/_/g, ' ');
+  }
 }
