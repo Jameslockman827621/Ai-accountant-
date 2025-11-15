@@ -1,209 +1,413 @@
-import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId } from '@ai-accountant/shared-types';
 import { db } from '@ai-accountant/database';
-import axios from 'axios';
+import { TenantId } from '@ai-accountant/shared-types';
+import { ValidationError, createLogger } from '@ai-accountant/shared-utils';
+import {
+  HMRCClient,
+  HMRCAuthTokens,
+  VATObligation,
+  exchangeAuthorizationCode,
+  refreshAccessToken,
+} from '@ai-accountant/hmrc';
+import {
+  SecretPayload,
+  decryptSecret,
+  encryptSecret,
+} from '@ai-accountant/secure-store';
 
 const logger = createLogger('integrations-service');
 
-const HMRC_BASE_URL = process.env.HMRC_BASE_URL || 'https://api.service.hmrc.gov.uk';
-const HMRC_CLIENT_ID = process.env.HMRC_CLIENT_ID;
-const HMRC_CLIENT_SECRET = process.env.HMRC_CLIENT_SECRET;
+const HMRC_ENV = process.env.HMRC_ENV === 'production' ? 'production' : 'sandbox';
+const HMRC_BASE_URL = process.env.HMRC_BASE_URL;
+const HMRC_CLIENT_ID = process.env.HMRC_CLIENT_ID || '';
+const HMRC_CLIENT_SECRET = process.env.HMRC_CLIENT_SECRET || '';
+const HMRC_SCOPE =
+  process.env.HMRC_SCOPE || 'read:vat write:vat read:vrn-summary';
 
-export interface HMRCConnection {
+interface HMRCConnectionRow extends Record<string, unknown> {
+  tenant_id: string;
+  access_token_encrypted: SecretPayload | string | null;
+  refresh_token_encrypted: SecretPayload | string | null;
+  access_token: string | null;
+  refresh_token: string | null;
+  expires_at: Date | null;
+  refresh_expires_at: Date | null;
+  scopes: string[] | null;
+  vrn: string | null;
+  consent_expires_at: Date | null;
+  connection_status: string | null;
+}
+
+export interface TenantHMRCAuth {
   tenantId: TenantId;
   accessToken: string;
   refreshToken: string;
+  vrn: string;
+  scopes: string[];
   expiresAt: Date;
+  refreshExpiresAt?: Date | null;
 }
 
-let tokenCache: Map<string, { token: string; expiresAt: Date }> = new Map();
-
-export async function getHMRCAccessToken(tenantId: TenantId): Promise<string> {
-  // Check cache
-  const cached = tokenCache.get(tenantId);
-  if (cached && cached.expiresAt > new Date()) {
-    return cached.token;
+const tokenCache = new Map<
+  string,
+  {
+    token: string;
+    expiresAt: Date;
+    vrn: string;
+    scopes: string[];
   }
+>();
 
-  // Get stored refresh token
-  const connection = await db.query<{
-    access_token: string;
-    refresh_token: string;
-    expires_at: Date;
-  }>(
-    'SELECT access_token, refresh_token, expires_at FROM hmrc_connections WHERE tenant_id = $1',
-    [tenantId]
-  );
-
-  if (connection.rows.length === 0) {
-    throw new Error('HMRC not connected');
+function requireCredentials(): void {
+  if (!HMRC_CLIENT_ID || !HMRC_CLIENT_SECRET) {
+    throw new Error('HMRC client credentials are not configured');
   }
-
-  const { refresh_token, expires_at } = connection.rows[0];
-
-  // Refresh if expired
-  if (new Date(expires_at) < new Date()) {
-    await refreshHMRCToken(tenantId);
-    const refreshed = await db.query<{ access_token: string; expires_at: Date }>(
-      'SELECT access_token, expires_at FROM hmrc_connections WHERE tenant_id = $1',
-      [tenantId]
-    );
-    const newToken = refreshed.rows[0].access_token;
-    const newExpiresAt = refreshed.rows[0].expires_at;
-    tokenCache.set(tenantId, { token: newToken, expiresAt: newExpiresAt });
-    return newToken;
-  }
-
-  const accessToken = connection.rows[0].access_token;
-  tokenCache.set(tenantId, { token: accessToken, expiresAt: new Date(expires_at) });
-  return accessToken;
 }
 
-export async function refreshHMRCToken(tenantId: TenantId): Promise<void> {
-  logger.info('Refreshing HMRC token', { tenantId });
+function scopeStringToArray(
+  scope?: string | null,
+  scopes?: string[] | null
+): string[] {
+  if (Array.isArray(scopes) && scopes.length > 0) {
+    return scopes;
+  }
+  if (!scope) {
+    return HMRC_SCOPE.split(/\s+/).filter(Boolean);
+  }
+  return scope
+    .split(/\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
-  const connection = await db.query<{
-    refresh_token: string;
-  }>(
-    'SELECT refresh_token FROM hmrc_connections WHERE tenant_id = $1',
-    [tenantId]
+function serializeSecret(secret: SecretPayload): string {
+  return JSON.stringify(secret);
+}
+
+async function persistTokens(
+  tenantId: TenantId,
+  tokens: HMRCAuthTokens,
+  vrn: string
+): Promise<void> {
+  const expiresAt = new Date(Date.now() + tokens.expiresIn * 1000);
+  const refreshExpiresAt = tokens.refreshTokenExpiresIn
+    ? new Date(Date.now() + tokens.refreshTokenExpiresIn * 1000)
+    : null;
+
+  const scopes = scopeStringToArray(tokens.scope);
+
+  await db.query(
+    `INSERT INTO hmrc_connections (
+      tenant_id,
+      access_token_encrypted,
+      refresh_token_encrypted,
+      expires_at,
+      refresh_expires_at,
+      scopes,
+      vrn,
+      consent_expires_at,
+      connection_status,
+      last_connected_at,
+      access_token,
+      refresh_token
+    )
+    VALUES ($1, $2::jsonb, $3::jsonb, $4, $5, $6, $7, $8, 'active', NOW(), NULL, NULL)
+    ON CONFLICT (tenant_id)
+    DO UPDATE SET
+      access_token_encrypted = EXCLUDED.access_token_encrypted,
+      refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,
+      expires_at = EXCLUDED.expires_at,
+      refresh_expires_at = EXCLUDED.refresh_expires_at,
+      scopes = EXCLUDED.scopes,
+      vrn = EXCLUDED.vrn,
+      consent_expires_at = EXCLUDED.consent_expires_at,
+      connection_status = EXCLUDED.connection_status,
+      last_connected_at = NOW(),
+      access_token = NULL,
+      refresh_token = NULL,
+      updated_at = NOW()`,
+    [
+      tenantId,
+      serializeSecret(encryptSecret(tokens.accessToken)),
+      serializeSecret(encryptSecret(tokens.refreshToken)),
+      expiresAt,
+      refreshExpiresAt,
+      scopes,
+      vrn,
+      refreshExpiresAt,
+    ]
   );
 
-  if (connection.rows.length === 0) {
-    throw new Error('HMRC not connected');
+  tokenCache.set(String(tenantId), {
+    token: tokens.accessToken,
+    expiresAt,
+    vrn,
+    scopes,
+  });
+}
+
+async function fetchTenantConnection(
+  tenantId: TenantId
+): Promise<HMRCConnectionRow | null> {
+  const result = await db.query<HMRCConnectionRow>(
+    `SELECT
+        tenant_id,
+        access_token_encrypted,
+        refresh_token_encrypted,
+        access_token,
+        refresh_token,
+        expires_at,
+        refresh_expires_at,
+        scopes,
+        vrn,
+        consent_expires_at,
+        connection_status
+     FROM hmrc_connections
+     WHERE tenant_id = $1`,
+    [tenantId]
+  );
+  return result.rows[0] || null;
+}
+
+async function ensureSecretPayload(
+  tenantId: TenantId,
+  encrypted: SecretPayload | string | null,
+  legacyValue: string | null,
+  encryptedColumn: 'access_token_encrypted' | 'refresh_token_encrypted',
+  legacyColumn: 'access_token' | 'refresh_token'
+): Promise<SecretPayload> {
+  if (encrypted) {
+    if (typeof encrypted === 'string') {
+      return JSON.parse(encrypted) as SecretPayload;
+    }
+    return encrypted;
   }
 
-  const { refresh_token } = connection.rows[0];
-
-  try {
-    const response = await axios.post(
-      `${HMRC_BASE_URL}/oauth/token`,
-      new URLSearchParams({
-        grant_type: 'refresh_token',
-        client_id: HMRC_CLIENT_ID!,
-        client_secret: HMRC_CLIENT_SECRET!,
-        refresh_token: refresh_token,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
-
-    const { access_token, refresh_token: new_refresh_token, expires_in } = response.data;
-    const expiresAt = new Date(Date.now() + expires_in * 1000);
-
-    // Update stored tokens
+  if (legacyValue) {
+    const payload = encryptSecret(legacyValue);
     await db.query(
       `UPDATE hmrc_connections
-       SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
-       WHERE tenant_id = $4`,
-      [access_token, new_refresh_token, expiresAt, tenantId]
+       SET ${legacyColumn} = NULL,
+           ${encryptedColumn} = $2::jsonb
+       WHERE tenant_id = $1`,
+      [tenantId, serializeSecret(payload)]
     );
-
-    tokenCache.set(tenantId, { token: access_token, expiresAt });
-    logger.info('HMRC token refreshed', { tenantId });
-  } catch (error) {
-    logger.error('HMRC token refresh failed', error instanceof Error ? error : new Error(String(error)));
-    throw error;
+    return payload;
   }
+
+  throw new Error(`HMRC ${legacyColumn} missing for tenant ${tenantId}`);
+}
+
+async function getTenantVatNumber(tenantId: TenantId): Promise<string | null> {
+  const result = await db.query<{ vat_number: string | null }>(
+    'SELECT vat_number FROM tenants WHERE id = $1',
+    [tenantId]
+  );
+  return result.rows[0]?.vat_number || null;
 }
 
 export async function connectHMRC(
   tenantId: TenantId,
   authorizationCode: string,
-  redirectUri: string
+  redirectUri: string,
+  providedVRN?: string
 ): Promise<void> {
-  logger.info('Connecting HMRC', { tenantId });
+  requireCredentials();
 
-  if (!HMRC_CLIENT_ID || !HMRC_CLIENT_SECRET) {
-    throw new Error('HMRC credentials not configured');
+  const tenantVRN = providedVRN || (await getTenantVatNumber(tenantId));
+  if (!tenantVRN) {
+    throw new ValidationError('Tenant VAT number (VRN) is required to connect HMRC');
   }
 
-  try {
-    // Exchange authorization code for tokens
-    const response = await axios.post(
-      `${HMRC_BASE_URL}/oauth/token`,
-      new URLSearchParams({
-        grant_type: 'authorization_code',
-        client_id: HMRC_CLIENT_ID,
-        client_secret: HMRC_CLIENT_SECRET,
-        code: authorizationCode,
-        redirect_uri: redirectUri,
-      }),
-      {
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-      }
-    );
+  const tokenSet = await exchangeAuthorizationCode({
+    clientId: HMRC_CLIENT_ID,
+    clientSecret: HMRC_CLIENT_SECRET,
+    authorizationCode,
+    redirectUri,
+    env: HMRC_ENV,
+    scope: HMRC_SCOPE,
+    ...(HMRC_BASE_URL ? { baseUrl: HMRC_BASE_URL } : {}),
+  });
 
-    const { access_token, refresh_token, expires_in } = response.data;
-    const expiresAt = new Date(Date.now() + expires_in * 1000);
-
-    // Store connection (would need hmrc_connections table)
-    await db.query(
-      `INSERT INTO hmrc_connections (
-        tenant_id, access_token, refresh_token, expires_at, created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, NOW(), NOW())
-      ON CONFLICT (tenant_id) DO UPDATE
-      SET access_token = $2, refresh_token = $3, expires_at = $4, updated_at = NOW()`,
-      [tenantId, access_token, refresh_token, expiresAt]
-    );
-
-    tokenCache.set(tenantId, { token: access_token, expiresAt });
-    logger.info('HMRC connected', { tenantId });
-  } catch (error) {
-    logger.error('HMRC connection failed', error instanceof Error ? error : new Error(String(error)));
-    throw error;
-  }
+  await persistTokens(tenantId, tokenSet, tenantVRN);
+  logger.info('HMRC connected', { tenantId });
 }
 
-export async function getHMRCVATReturns(tenantId: TenantId, vrn: string): Promise<unknown[]> {
-  const accessToken = await getHMRCAccessToken(tenantId);
-
-  try {
-    const response = await axios.get(
-      `${HMRC_BASE_URL}/organisations/vat/${vrn}/returns`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.hmrc.1.0+json',
-        },
-      }
-    );
-
-    return response.data;
-  } catch (error) {
-    logger.error('Failed to get HMRC VAT returns', error instanceof Error ? error : new Error(String(error)));
-    throw error;
-  }
+export async function disconnectHMRC(tenantId: TenantId): Promise<void> {
+  await db.query('DELETE FROM hmrc_connections WHERE tenant_id = $1', [
+    tenantId,
+  ]);
+  tokenCache.delete(String(tenantId));
+  logger.info('HMRC connection removed', { tenantId });
 }
 
-export async function submitHMRCVATReturn(
+export async function getHMRCStatus(
+  tenantId: TenantId
+): Promise<{
+  connected: boolean;
+  vrn?: string | null;
+  scopes?: string[];
+  expiresAt?: Date | null;
+  consentExpiresAt?: Date | null;
+}> {
+  const row = await fetchTenantConnection(tenantId);
+  if (!row) {
+    return { connected: false };
+  }
+
+  return {
+    connected: row.connection_status !== 'revoked',
+    vrn: row.vrn,
+    scopes: row.scopes || scopeStringToArray(),
+    expiresAt: row.expires_at ? new Date(row.expires_at) : null,
+    consentExpiresAt: row.consent_expires_at
+      ? new Date(row.consent_expires_at)
+      : null,
+  };
+}
+
+async function refreshTenantToken(
   tenantId: TenantId,
-  vrn: string,
-  returnData: Record<string, unknown>
-): Promise<void> {
-  const accessToken = await getHMRCAccessToken(tenantId);
-
-  try {
-    await axios.put(
-      `${HMRC_BASE_URL}/organisations/vat/${vrn}/returns/${returnData.periodKey}`,
-      returnData,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'application/vnd.hmrc.1.0+json',
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-
-    logger.info('HMRC VAT return submitted', { tenantId, vrn, periodKey: returnData.periodKey });
-  } catch (error) {
-    logger.error('Failed to submit HMRC VAT return', error instanceof Error ? error : new Error(String(error)));
-    throw error;
+  row: HMRCConnectionRow
+): Promise<TenantHMRCAuth> {
+  if (!row.vrn) {
+    throw new Error('Tenant VRN missing; reconnect HMRC');
   }
+
+  requireCredentials();
+
+  const refreshPayload = await ensureSecretPayload(
+    tenantId,
+    row.refresh_token_encrypted,
+    row.refresh_token,
+    'refresh_token_encrypted',
+    'refresh_token'
+  );
+
+  const refreshToken = decryptSecret(refreshPayload);
+  const scopes = row.scopes || scopeStringToArray();
+
+  const tokenSet = await refreshAccessToken({
+    clientId: HMRC_CLIENT_ID,
+    clientSecret: HMRC_CLIENT_SECRET,
+    refreshToken,
+    env: HMRC_ENV,
+    scope: scopes.join(' '),
+    ...(HMRC_BASE_URL ? { baseUrl: HMRC_BASE_URL } : {}),
+  });
+
+  await persistTokens(tenantId, tokenSet, row.vrn);
+
+  return {
+    tenantId,
+    accessToken: tokenSet.accessToken,
+    refreshToken: tokenSet.refreshToken,
+    vrn: row.vrn,
+    scopes,
+    expiresAt: new Date(Date.now() + tokenSet.expiresIn * 1000),
+    refreshExpiresAt: tokenSet.refreshTokenExpiresIn
+      ? new Date(Date.now() + tokenSet.refreshTokenExpiresIn * 1000)
+      : null,
+  };
+}
+
+export async function getTenantHMRCAuth(
+  tenantId: TenantId
+): Promise<TenantHMRCAuth> {
+  const cacheEntry = tokenCache.get(String(tenantId));
+  if (cacheEntry && cacheEntry.expiresAt.getTime() - Date.now() > 60_000) {
+    return {
+      tenantId,
+      accessToken: cacheEntry.token,
+      refreshToken: '',
+      vrn: cacheEntry.vrn,
+      scopes: cacheEntry.scopes,
+      expiresAt: cacheEntry.expiresAt,
+    };
+  }
+
+  const row = await fetchTenantConnection(tenantId);
+  if (!row) {
+    throw new Error('HMRC is not connected for this tenant');
+  }
+
+  const expiresAt = row.expires_at
+    ? new Date(row.expires_at)
+    : new Date(Date.now() - 1000);
+  const scopes = row.scopes || scopeStringToArray();
+
+  if (expiresAt.getTime() - Date.now() <= 60_000) {
+    return refreshTenantToken(tenantId, row);
+  }
+
+  const accessPayload = await ensureSecretPayload(
+    tenantId,
+    row.access_token_encrypted,
+    row.access_token,
+    'access_token_encrypted',
+    'access_token'
+  );
+  const refreshPayload = await ensureSecretPayload(
+    tenantId,
+    row.refresh_token_encrypted,
+    row.refresh_token,
+    'refresh_token_encrypted',
+    'refresh_token'
+  );
+
+  if (!row.vrn) {
+    throw new Error('Tenant VRN is not configured for HMRC');
+  }
+
+  const accessToken = decryptSecret(accessPayload);
+  const refreshToken = decryptSecret(refreshPayload);
+
+  tokenCache.set(String(tenantId), {
+    token: accessToken,
+    expiresAt,
+    vrn: row.vrn,
+    scopes,
+  });
+
+  return {
+    tenantId,
+    accessToken,
+    refreshToken,
+    vrn: row.vrn,
+    scopes,
+    expiresAt,
+    refreshExpiresAt: row.refresh_expires_at
+      ? new Date(row.refresh_expires_at)
+      : null,
+  };
+}
+
+export async function getHMRCAccessToken(
+  tenantId: TenantId
+): Promise<string> {
+  const auth = await getTenantHMRCAuth(tenantId);
+  return auth.accessToken;
+}
+
+export async function refreshHMRCToken(tenantId: TenantId): Promise<void> {
+  const row = await fetchTenantConnection(tenantId);
+  if (!row) {
+    throw new Error('HMRC is not connected for this tenant');
+  }
+  await refreshTenantToken(tenantId, row);
+  logger.info('HMRC token refreshed', { tenantId });
+}
+
+export async function getHMRCObligations(
+  tenantId: TenantId,
+  options?: { status?: string; from?: string; to?: string }
+): Promise<VATObligation[]> {
+  const auth = await getTenantHMRCAuth(tenantId);
+
+  const client = new HMRCClient({
+    env: HMRC_ENV,
+    ...(HMRC_BASE_URL ? { baseUrl: HMRC_BASE_URL } : {}),
+    accessToken: auth.accessToken,
+  });
+
+  return client.getVatObligations(auth.vrn, options);
 }

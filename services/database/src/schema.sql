@@ -89,7 +89,7 @@ CREATE TABLE filings (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     filing_type VARCHAR(30) NOT NULL CHECK (filing_type IN ('vat', 'paye', 'corporation_tax', 'income_tax')),
-    status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending_approval', 'submitted', 'accepted', 'rejected')),
+    status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending_approval', 'submitted', 'accepted', 'rejected', 'error')),
     period_start DATE NOT NULL,
     period_end DATE NOT NULL,
     submitted_at TIMESTAMP WITH TIME ZONE,
