@@ -36,7 +36,7 @@ export async function checkConnectionHealth(
     throw new Error('Connection not found');
   }
 
-  const conn = result.rows[0];
+  const conn = result.rows[0]!;
   const now = new Date();
 
   let status: ConnectionHealth['status'] = 'healthy';

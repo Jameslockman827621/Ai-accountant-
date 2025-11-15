@@ -1,7 +1,11 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { findFuzzyMatches } from '../../reconciliation/src/services/advancedMatching';
+import { findFuzzyMatches } from '../../../reconciliation/src/services/advancedMatching';
+import {
+  logReconciliationException,
+  resolveExceptionsForTransaction,
+} from '../../../reconciliation/src/services/exceptions';
 
 const logger = createLogger('bank-feed-service');
 
@@ -39,48 +43,70 @@ export async function autoReconcileBankTransactions(
   let pending = 0;
   let unmatched = 0;
 
-  for (const transaction of transactions.rows) {
-    // Find matches
-    const matches = await findFuzzyMatches(tenantId, transaction.id, threshold);
+    for (const transaction of transactions.rows) {
+      // Find matches
+      const matches = await findFuzzyMatches(tenantId, transaction.id, threshold);
 
-    if (matches.length > 0 && matches[0].similarity >= threshold) {
-      // Auto-reconcile with best match
-      const bestMatch = matches[0];
-      
-      if (bestMatch.type === 'ledger_entry') {
-        await db.query(
-          `UPDATE bank_transactions
-           SET reconciled = true, reconciled_at = NOW(), ledger_entry_id = $1
-           WHERE id = $2 AND tenant_id = $3`,
-          [bestMatch.id, transaction.id, tenantId]
+      if (matches.length > 0 && matches[0].similarity >= threshold) {
+        // Auto-reconcile with best match
+        const bestMatch = matches[0];
+
+        if (bestMatch.type === 'ledger_entry') {
+          await db.query(
+            `UPDATE bank_transactions
+             SET reconciled = true, reconciled_at = NOW(), ledger_entry_id = $1
+             WHERE id = $2 AND tenant_id = $3`,
+            [bestMatch.id, transaction.id, tenantId]
+          );
+
+          await db.query(
+            `UPDATE ledger_entries
+             SET reconciled = true, reconciled_at = NOW()
+             WHERE id = $1 AND tenant_id = $2`,
+            [bestMatch.id, tenantId]
+          );
+
+          reconciled++;
+        } else if (bestMatch.type === 'document') {
+          await db.query(
+            `UPDATE bank_transactions
+             SET reconciled = true, reconciled_at = NOW(), document_id = $1
+             WHERE id = $2 AND tenant_id = $3`,
+            [bestMatch.id, transaction.id, tenantId]
+          );
+
+          reconciled++;
+        }
+
+        await resolveExceptionsForTransaction(tenantId, transaction.id);
+      } else if (matches.length > 0) {
+        // Has matches but below threshold - needs review
+        pending++;
+        await logReconciliationException(
+          tenantId,
+          transaction.id,
+          'pending_match_review',
+          'medium',
+          'Matches found below confidence threshold',
+          { threshold, bestSimilarity: matches[0]?.similarity }
         );
-
-        await db.query(
-          `UPDATE ledger_entries
-           SET reconciled = true, reconciled_at = NOW()
-           WHERE id = $1 AND tenant_id = $2`,
-          [bestMatch.id, tenantId]
+      } else {
+        // No matches found
+        unmatched++;
+        await logReconciliationException(
+          tenantId,
+          transaction.id,
+          'unmatched_transaction',
+          'high',
+          'No candidate matches identified',
+          {
+            amount: transaction.amount,
+            description: transaction.description,
+            accountId,
+          }
         );
-
-        reconciled++;
-      } else if (bestMatch.type === 'document') {
-        await db.query(
-          `UPDATE bank_transactions
-           SET reconciled = true, reconciled_at = NOW(), document_id = $1
-           WHERE id = $2 AND tenant_id = $3`,
-          [bestMatch.id, transaction.id, tenantId]
-        );
-
-        reconciled++;
       }
-    } else if (matches.length > 0) {
-      // Has matches but below threshold - needs review
-      pending++;
-    } else {
-      // No matches found
-      unmatched++;
     }
-  }
 
   logger.info('Auto-reconciliation completed', { tenantId, reconciled, pending, unmatched });
   return { reconciled, pending, unmatched };

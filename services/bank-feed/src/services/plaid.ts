@@ -1,7 +1,20 @@
-import { Configuration, PlaidApi, PlaidEnvironments, CountryCode, Products } from 'plaid';
+import {
+  Configuration,
+  PlaidApi,
+  PlaidEnvironments,
+  CountryCode,
+  Products,
+  LinkTokenCreateRequest,
+} from 'plaid';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
+import {
+  getConnectionByProviderAccount,
+  getConnectionSecrets,
+  markConnectionRefreshed,
+  persistConnectionTokens,
+} from './connectionStore';
 
 const logger = createLogger('bank-feed-service');
 
@@ -9,9 +22,10 @@ const PLAID_CLIENT_ID = process.env.PLAID_CLIENT_ID || '';
 const PLAID_SECRET = process.env.PLAID_SECRET || '';
 const PLAID_ENV = process.env.PLAID_ENV || 'sandbox';
 
-const basePath = (PLAID_ENV === 'production' 
-  ? PlaidEnvironments.production 
-  : PlaidEnvironments.sandbox) as string;
+const basePath =
+  PLAID_ENV === 'production'
+    ? PlaidEnvironments.production
+    : PlaidEnvironments.sandbox;
 
 const configuration = new Configuration({
   basePath: basePath as string,
@@ -27,7 +41,7 @@ export const plaidClient = new PlaidApi(configuration);
 
 export async function createLinkToken(userId: string): Promise<string> {
   try {
-    const response = await plaidClient.linkTokenCreate({
+    const request: LinkTokenCreateRequest = {
       user: {
         client_user_id: userId,
       },
@@ -35,11 +49,20 @@ export async function createLinkToken(userId: string): Promise<string> {
       products: [Products.Transactions],
       country_codes: [CountryCode.Gb],
       language: 'en',
-    });
+    };
+
+    if (process.env.PLAID_WEBHOOK_URL) {
+      request.webhook = process.env.PLAID_WEBHOOK_URL;
+    }
+
+    const response = await plaidClient.linkTokenCreate(request);
 
     return response.data.link_token;
   } catch (error) {
-    logger.error('Failed to create Plaid link token', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Failed to create Plaid link token',
+      error instanceof Error ? error : new Error(String(error))
+    );
     throw new Error('Failed to create Plaid link token');
   }
 }
@@ -47,54 +70,48 @@ export async function createLinkToken(userId: string): Promise<string> {
 export async function exchangePublicToken(
   publicToken: string,
   tenantId: TenantId
-): Promise<{ accessToken: string; itemId: string }> {
+): Promise<{ connectionId: string; itemId: string }> {
   try {
     const response = await plaidClient.itemPublicTokenExchange({
       public_token: publicToken,
     });
 
-    const accessToken = response.data.access_token;
-    const itemId = response.data.item_id;
+    const { access_token: accessToken, item_id: itemId } = response.data;
+    const connectionId = await persistConnectionTokens({
+      tenantId,
+      provider: 'plaid',
+      accessToken,
+      itemId,
+    });
 
-    // Store access token securely (in production, encrypt this)
-    await db.query(
-      `INSERT INTO bank_connections (tenant_id, provider, access_token, item_id, is_active)
-       VALUES ($1, 'plaid', $2, $3, true)
-       ON CONFLICT (tenant_id, item_id) DO UPDATE
-       SET access_token = $2, is_active = true, updated_at = NOW()`,
-      [tenantId, accessToken, itemId]
-    );
-
-    return { accessToken, itemId };
+    return { connectionId, itemId };
   } catch (error) {
-    logger.error('Failed to exchange public token', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Failed to exchange public token',
+      error instanceof Error ? error : new Error(String(error))
+    );
     throw new Error('Failed to exchange public token');
   }
 }
 
-export async function fetchTransactions(
-  accessToken: string,
+export async function syncPlaidTransactions(
   tenantId: TenantId,
+  connectionId: string,
   startDate: Date,
   endDate: Date
-): Promise<void> {
+): Promise<number> {
+  const secrets = await getConnectionSecrets(connectionId, tenantId);
   try {
-    const startDateStr = startDate.toISOString().split('T')[0];
-    const endDateStr = endDate.toISOString().split('T')[0];
-    
-    if (!startDateStr || !endDateStr) {
-      throw new Error('Invalid date format');
-    }
-    
     const response = await plaidClient.transactionsGet({
-      access_token: accessToken,
-      start_date: startDateStr,
-      end_date: endDateStr,
+      access_token: secrets.accessToken,
+      start_date: startDate.toISOString().split('T')[0],
+      end_date: endDate.toISOString().split('T')[0],
+      options: {
+        include_personal_finance_category: true,
+      },
     });
 
     const transactions = response.data.transactions;
-
-    // Store transactions in database
     for (const transaction of transactions) {
       await db.query(
         `INSERT INTO bank_transactions (
@@ -113,14 +130,59 @@ export async function fetchTransactions(
             category: transaction.category || [],
             merchantName: transaction.merchant_name || '',
             paymentChannel: transaction.payment_channel || '',
+            pending: transaction.pending,
           }),
         ]
       );
     }
 
-    logger.info('Transactions fetched and stored', { count: transactions.length, tenantId });
+    await markConnectionRefreshed(connectionId, {
+      accessToken: secrets.accessToken,
+    });
+
+    logger.info('Plaid transactions synced', {
+      tenantId,
+      connectionId,
+      count: transactions.length,
+    });
+
+    return transactions.length;
   } catch (error) {
-    logger.error('Failed to fetch transactions', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Failed to sync Plaid transactions',
+      error instanceof Error ? error : new Error(String(error)),
+      { tenantId, connectionId }
+    );
     throw new Error('Failed to fetch transactions');
   }
+}
+
+interface PlaidWebhookPayload {
+  webhook_type: string;
+  webhook_code: string;
+  item_id: string;
+  environment: string;
+}
+
+export async function handlePlaidWebhook(
+  payload: PlaidWebhookPayload
+): Promise<void> {
+  if (payload.webhook_type !== 'TRANSACTIONS') {
+    logger.debug('Ignoring non-transaction Plaid webhook', { payload });
+    return;
+  }
+
+  const connection = await getConnectionByProviderAccount('plaid', payload.item_id);
+  if (!connection) {
+    logger.warn('Received Plaid webhook for unknown item', {
+      itemId: payload.item_id,
+    });
+    return;
+  }
+
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - 5);
+
+  await syncPlaidTransactions(connection.tenantId, connection.connectionId, start, now);
 }

@@ -1,9 +1,17 @@
 import { Router, Response } from 'express';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { randomUUID } from 'crypto';
+import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
-import { createLinkToken, exchangePublicToken, fetchTransactions } from '../services/plaid';
-import { createTrueLayerAuthLink, exchangeTrueLayerCode, fetchTrueLayerTransactions } from '../services/truelayer';
-import { ValidationError } from '@ai-accountant/shared-utils';
+import {
+  createLinkToken,
+  exchangePublicToken,
+  syncPlaidTransactions,
+} from '../services/plaid';
+import {
+  createTrueLayerAuthLink,
+  exchangeTrueLayerCode,
+  fetchTrueLayerTransactions,
+} from '../services/truelayer';
 
 const router = Router();
 const logger = createLogger('bank-feed-service');
@@ -41,7 +49,7 @@ router.post('/plaid/exchange-token', async (req: AuthRequest, res: Response) => 
 
     const result = await exchangePublicToken(publicToken, req.user.tenantId);
 
-    res.json({ accessToken: result.accessToken, itemId: result.itemId });
+    res.json({ connectionId: result.connectionId, itemId: result.itemId });
   } catch (error) {
     logger.error('Exchange token failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {
@@ -60,15 +68,15 @@ router.post('/plaid/fetch-transactions', async (req: AuthRequest, res: Response)
       return;
     }
 
-    const { accessToken, startDate, endDate } = req.body;
+    const { connectionId, startDate, endDate } = req.body;
 
-    if (!accessToken || !startDate || !endDate) {
-      throw new ValidationError('Access token, start date, and end date are required');
+    if (!connectionId || !startDate || !endDate) {
+      throw new ValidationError('connectionId, startDate, and endDate are required');
     }
 
-    await fetchTransactions(
-      accessToken,
+    await syncPlaidTransactions(
       req.user.tenantId,
+      connectionId,
       new Date(startDate),
       new Date(endDate)
     );
@@ -98,8 +106,13 @@ router.post('/truelayer/auth-link', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const authUrl = await createTrueLayerAuthLink(req.user.userId, redirectUri);
-    res.json({ authUrl });
+    const state = randomUUID();
+    const authUrl = await createTrueLayerAuthLink(
+      req.user.userId,
+      redirectUri,
+      state
+    );
+    res.json({ authUrl, state });
   } catch (error) {
     logger.error('Create TrueLayer auth link failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to create auth link' });
@@ -134,14 +147,14 @@ router.post('/truelayer/fetch', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { accessToken, accountId, startDate, endDate } = req.body;
-    if (!accessToken || !accountId || !startDate || !endDate) {
+    const { connectionId, accountId, startDate, endDate } = req.body;
+    if (!connectionId || !accountId || !startDate || !endDate) {
       res.status(400).json({ error: 'Missing required fields' });
       return;
     }
 
     await fetchTrueLayerTransactions(
-      accessToken,
+      connectionId,
       req.user.tenantId,
       accountId,
       new Date(startDate),

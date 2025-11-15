@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
+import { resolveExceptionsForTransaction } from './exceptions';
 
 const logger = createLogger('reconciliation-service');
 
@@ -202,4 +203,6 @@ export async function reconcileTransaction(
 
     logger.info('Transaction reconciled', { bankTransactionId, documentId, ledgerEntryId, tenantId });
   });
+
+  await resolveExceptionsForTransaction(tenantId, bankTransactionId);
 }
