@@ -83,8 +83,17 @@ async function startWorker(): Promise<void> {
         return;
       }
 
-      const attempts = getAttemptCount(msg);
-      logger.info('Processing ledger posting job', { documentId: payload.documentId, attempts });
+        const attempts = getAttemptCount(msg);
+        logger.info('Processing ledger posting job', { documentId: payload.documentId, attempts });
+        recordQueueEvent({
+          serviceName: 'ledger-service',
+          queueName: LEDGER_QUEUE,
+          eventType: 'start',
+          metadata: {
+            documentId: payload.documentId,
+            attempts,
+          },
+        });
 
       try {
         const doc = await db.transaction(async (client) => {
@@ -109,9 +118,17 @@ async function startWorker(): Promise<void> {
           return result.rows[0];
         });
 
-        await postDocumentToLedger(doc.tenant_id, payload.documentId, doc.uploaded_by);
+          await postDocumentToLedger(doc.tenant_id, payload.documentId, doc.uploaded_by);
+          recordQueueEvent({
+            serviceName: 'ledger-service',
+            queueName: LEDGER_QUEUE,
+            eventType: 'success',
+            metadata: {
+              documentId: payload.documentId,
+            },
+          });
 
-        channel.ack(msg);
+          channel.ack(msg);
         logger.info('Ledger posting job completed', { documentId: payload.documentId });
       } catch (error) {
         logger.error('Ledger posting job failed', error instanceof Error ? error : new Error(String(error)));
@@ -140,6 +157,17 @@ async function handleLedgerFailure(
     : shouldRetry
       ? DocumentStatus.PROCESSING
       : DocumentStatus.ERROR;
+  recordQueueEvent({
+    serviceName: 'ledger-service',
+    queueName: LEDGER_QUEUE,
+    eventType: 'failure',
+    metadata: {
+      documentId: payload.documentId,
+      attempts: nextAttempt,
+      error: errorMessage,
+      validationError: isValidationError,
+    },
+  });
 
   try {
     await db.query(
@@ -174,6 +202,16 @@ async function handleLedgerFailure(
         },
       }
     );
+    recordQueueEvent({
+      serviceName: 'ledger-service',
+      queueName: LEDGER_RETRY_QUEUE,
+      eventType: 'enqueue',
+      metadata: {
+        documentId: payload.documentId,
+        attempts: nextAttempt,
+        retry: true,
+      },
+    });
     logger.warn('Ledger posting job scheduled for retry', {
       documentId: payload.documentId,
       attempt: nextAttempt,
