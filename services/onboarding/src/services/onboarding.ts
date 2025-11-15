@@ -1,16 +1,31 @@
-import { db } from '@ai-accountant/database';
-import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId } from '@ai-accountant/shared-types';
+ import { db } from '@ai-accountant/database';
+ import { createLogger } from '@ai-accountant/shared-utils';
+ import { TenantId, UserId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('onboarding-service');
 
 export type OnboardingStep =
   | 'welcome'
-  | 'business_info'
+  | 'business_profile'
+  | 'tax_scope'
   | 'chart_of_accounts'
   | 'bank_connection'
+  | 'historical_import'
+  | 'filing_preferences'
   | 'first_document'
   | 'complete';
+
+const ORDERED_STEPS: OnboardingStep[] = [
+  'welcome',
+  'business_profile',
+  'tax_scope',
+  'chart_of_accounts',
+  'bank_connection',
+  'historical_import',
+  'filing_preferences',
+  'first_document',
+  'complete',
+];
 
 export interface OnboardingProgress {
   tenantId: TenantId;
@@ -18,6 +33,14 @@ export interface OnboardingProgress {
   completedSteps: OnboardingStep[];
   progress: number; // 0-100
 }
+
+export type OnboardingEventType =
+  | 'wizard_opened'
+  | 'wizard_closed'
+  | 'step_viewed'
+  | 'step_completed'
+  | 'step_skipped'
+  | 'journey_reset';
 
 export async function getOnboardingProgress(tenantId: TenantId): Promise<OnboardingProgress> {
   const steps = await db.query<{
@@ -28,23 +51,14 @@ export async function getOnboardingProgress(tenantId: TenantId): Promise<Onboard
     [tenantId]
   );
 
-  const allSteps: OnboardingStep[] = [
-    'welcome',
-    'business_info',
-    'chart_of_accounts',
-    'bank_connection',
-    'first_document',
-    'complete',
-  ];
-
   const completedSteps = steps.rows
     .filter(s => s.completed)
     .map(s => s.step_name as OnboardingStep);
 
   // Find current step (first incomplete step)
-  const currentStep = allSteps.find(step => !completedSteps.includes(step)) || 'complete';
+  const currentStep = ORDERED_STEPS.find(step => !completedSteps.includes(step)) || 'complete';
 
-  const progress = Math.round((completedSteps.length / allSteps.length) * 100);
+  const progress = Math.round((completedSteps.length / ORDERED_STEPS.length) * 100);
 
   return {
     tenantId,
@@ -56,9 +70,12 @@ export async function getOnboardingProgress(tenantId: TenantId): Promise<Onboard
 
 export async function completeOnboardingStep(
   tenantId: TenantId,
+  userId: UserId,
   stepName: OnboardingStep,
   stepData?: Record<string, unknown>
 ): Promise<void> {
+  const skipped = Boolean(stepData && (stepData as { skipped?: boolean }).skipped);
+
   await db.query(
     `INSERT INTO onboarding_steps (id, tenant_id, step_name, step_data, completed, completed_at, created_at, updated_at)
      VALUES (gen_random_uuid(), $1, $2, $3::jsonb, true, NOW(), NOW(), NOW())
@@ -67,7 +84,17 @@ export async function completeOnboardingStep(
     [tenantId, stepName, JSON.stringify(stepData || {})]
   );
 
-  logger.info('Onboarding step completed', { tenantId, stepName });
+  logger.info('Onboarding step completed', { tenantId, stepName, skipped });
+
+  await recordOnboardingEvent(
+    tenantId,
+    userId,
+    skipped ? 'step_skipped' : 'step_completed',
+    stepName,
+    {
+      stepData: stepData || {},
+    }
+  );
 }
 
 export async function getOnboardingStepData(
@@ -81,19 +108,44 @@ export async function getOnboardingStepData(
     [tenantId, stepName]
   );
 
-    const row = result.rows[0];
-    if (!row) {
-      return null;
-    }
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
 
-    return (row.step_data as Record<string, unknown>) || null;
+  return (row.step_data as Record<string, unknown>) || null;
 }
 
-export async function resetOnboarding(tenantId: TenantId): Promise<void> {
+export async function resetOnboarding(tenantId: TenantId, userId: UserId): Promise<void> {
   await db.query(
     'DELETE FROM onboarding_steps WHERE tenant_id = $1',
     [tenantId]
   );
 
   logger.info('Onboarding reset', { tenantId });
+  await recordOnboardingEvent(tenantId, userId, 'journey_reset');
+}
+
+export async function recordOnboardingEvent(
+  tenantId: TenantId,
+  userId: UserId,
+  eventType: OnboardingEventType,
+  stepName?: OnboardingStep,
+  metadata?: Record<string, unknown>
+): Promise<void> {
+  try {
+    await db.query(
+      `INSERT INTO onboarding_events (id, tenant_id, user_id, step_name, event_type, metadata, created_at)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, $5::jsonb, NOW())`,
+      [
+        tenantId,
+        userId,
+        stepName ?? null,
+        eventType,
+        JSON.stringify(metadata || {}),
+      ]
+    );
+  } catch (error) {
+    logger.warn('Failed to record onboarding event', error instanceof Error ? error : new Error(String(error)));
+  }
 }

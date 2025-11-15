@@ -5,6 +5,9 @@ import DocumentReviewPanel from './DocumentReviewPanel';
 import ProcessingStatus from './ProcessingStatus';
 import HMRCConnectionCard from './HMRCConnectionCard';
 import HMRCReceiptsPanel from './HMRCReceiptsPanel';
+import OnboardingWizard from './OnboardingWizard';
+import OnboardingProgressCard from './OnboardingProgressCard';
+import { useOnboarding } from '@/hooks/useOnboarding';
 
 interface DashboardStats {
   period: {
@@ -46,6 +49,29 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+
+  const {
+    progress: onboardingProgress,
+    isLoading: onboardingLoading,
+    isSubmitting: onboardingSubmitting,
+    error: onboardingError,
+    completeStep,
+    recordEvent,
+    getStepData,
+  } = useOnboarding(token);
+
+  useEffect(() => {
+    if (!onboardingProgress) {
+      return;
+    }
+    if (onboardingProgress.currentStep !== 'complete' && !isOnboardingOpen) {
+      setIsOnboardingOpen(true);
+      recordEvent('wizard_opened', onboardingProgress.currentStep, {
+        progress: onboardingProgress.progress,
+      });
+    }
+  }, [onboardingProgress, isOnboardingOpen, recordEvent]);
 
   useEffect(() => {
     if (!token) {
@@ -114,9 +140,27 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
     return <div className="flex items-center justify-center h-screen">No dashboard data available.</div>;
   }
 
+  const shouldShowOnboardingCard = Boolean(onboardingProgress && onboardingProgress.progress < 100);
+
     return (
       <div className="min-h-screen bg-gray-50 p-8">
           <div className="max-w-7xl mx-auto space-y-8">
+          {onboardingProgress && isOnboardingOpen && (
+            <OnboardingWizard
+              token={token}
+              progress={onboardingProgress}
+              onStepComplete={completeStep}
+              onClose={() => {
+                setIsOnboardingOpen(false);
+                recordEvent('wizard_closed', onboardingProgress.currentStep, {
+                  progress: onboardingProgress.progress,
+                });
+              }}
+              trackEvent={recordEvent}
+              isSubmitting={onboardingSubmitting}
+              getStepData={getStepData}
+            />
+          )}
           <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <p className="text-sm text-gray-500">Welcome back</p>
@@ -133,6 +177,21 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
               Sign out
             </button>
           </header>
+
+            {shouldShowOnboardingCard && onboardingProgress && (
+              <OnboardingProgressCard
+                progress={onboardingProgress}
+                onResume={() => {
+                  setIsOnboardingOpen(true);
+                  recordEvent('wizard_opened', onboardingProgress.currentStep, {
+                    progress: onboardingProgress.progress,
+                    resume: true,
+                  });
+                }}
+                isLoading={onboardingLoading}
+                error={onboardingError}
+              />
+            )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard title="Revenue" value={stats.revenue} trend="up" color="green" />
