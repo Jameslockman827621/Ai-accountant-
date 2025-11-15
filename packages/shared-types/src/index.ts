@@ -50,6 +50,7 @@ export enum FilingStatus {
   SUBMITTED = 'submitted',
   ACCEPTED = 'accepted',
   REJECTED = 'rejected',
+  ERROR = 'error',
 }
 
 export interface Tenant {

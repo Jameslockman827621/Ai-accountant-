@@ -2,10 +2,10 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import {
-  createCustomer,
   createSubscription,
   cancelSubscription,
   updatePaymentMethod,
+  ensureStripeCustomer,
 } from './stripe';
 
 const logger = createLogger('billing-service');
@@ -44,22 +44,7 @@ export async function upgradeSubscription(
     throw new Error('Tenant not found');
   }
 
-  const tenantMetadata = tenant.rows[0].metadata as Record<string, unknown> | null;
-  let customerId = tenantMetadata?.stripeCustomerId as string | undefined;
-
-  // Create Stripe customer if doesn't exist
-  if (!customerId) {
-    const user = await db.query<{ email: string }>(
-      'SELECT email FROM users WHERE tenant_id = $1 LIMIT 1',
-      [tenantId]
-    );
-    
-    if (user.rows.length === 0) {
-      throw new Error('No user found for tenant');
-    }
-
-    customerId = await createCustomer(tenantId, user.rows[0].email, tenant.rows[0].name);
-  }
+  const customerId = await ensureStripeCustomer(tenantId);
 
   // In production, would get price ID from Stripe based on tier
   const priceId = process.env[`STRIPE_PRICE_${newTier.toUpperCase()}`] || '';

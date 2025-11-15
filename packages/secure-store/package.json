@@ -1,0 +1,17 @@
+{
+  "name": "@ai-accountant/secure-store",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ai-accountant/shared-utils": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

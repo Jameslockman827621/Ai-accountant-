@@ -4,7 +4,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import { db } from '@ai-accountant/database';
 import { FilingType, FilingStatus } from '@ai-accountant/shared-types';
-import { generateVATFiling, HMRCClient } from '../services/hmrc';
+import { generateVATFiling } from '../services/hmrc';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import {
   createFilingReview,
@@ -12,6 +12,16 @@ import {
   approveFilingReview,
   rejectFilingReview,
 } from '../services/filingReview';
+import {
+  submitTenantVatReturn,
+  SubmissionType,
+} from '../services/hmrcSubmission';
+import {
+  createAmendmentDraft,
+  getDraftAmendmentSubmission,
+  listFilingSubmissions,
+} from '../services/filingSubmissions';
+import { VATReturnPayload } from '@ai-accountant/hmrc';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -203,8 +213,15 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
     const { filingId } = req.params;
 
     // Get filing
-    const filingResult = await db.query(
-      'SELECT * FROM filings WHERE id = $1 AND tenant_id = $2',
+    const filingResult = await db.query<{
+      id: string;
+      status: FilingStatus;
+      filing_data: Record<string, unknown>;
+      last_submission_id: string | null;
+    }>(
+      `SELECT id, status, filing_data, last_submission_id
+       FROM filings
+       WHERE id = $1 AND tenant_id = $2`,
       [filingId, req.user.tenantId]
     );
 
@@ -213,11 +230,7 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-      const filing = filingResult.rows[0] as {
-        id: string;
-        status: string;
-      } | undefined;
-
+    const filing = filingResult.rows[0];
     if (!filing) {
       res.status(404).json({ error: 'Filing not found' });
       return;
@@ -250,107 +263,57 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
         throw new ValidationError('Validation checks failed. Please resolve issues before submission.');
       }
 
-    // Get tenant VAT number
-    const tenantResult = await db.query<{ vat_number: string | null }>(
-      'SELECT vat_number FROM tenants WHERE id = $1',
-      [req.user.tenantId]
+    const filingData = filing.filing_data as unknown as VATReturnPayload;
+
+    const amendmentDraft = await getDraftAmendmentSubmission(
+      req.user.tenantId,
+      filingId
     );
 
-    const tenant = tenantResult.rows[0];
-    if (!tenant || !tenant.vat_number) {
-      res.status(400).json({ error: 'Tenant VAT number not configured' });
-      return;
+    let submissionType: SubmissionType = 'initial';
+    let reuseSubmissionRecordId: string | undefined;
+    let parentSubmissionId: string | null = filing.last_submission_id;
+
+    if (amendmentDraft) {
+      submissionType = 'amendment';
+      reuseSubmissionRecordId = amendmentDraft.id;
+      parentSubmissionId =
+        amendmentDraft.parentSubmissionId || parentSubmissionId || null;
+    } else if (parentSubmissionId) {
+      submissionType = 'resubmission';
     }
 
-    // Get filing data
-    const filingDataResult = await db.query<{ filing_data: Record<string, unknown> }>(
-      'SELECT filing_data FROM filings WHERE id = $1',
-      [filingId]
+    const submissionResult = await submitTenantVatReturn({
+      filingId,
+      tenantId: req.user.tenantId,
+      userId: req.user.userId,
+      payload: filingData,
+      submissionType,
+      reuseSubmissionRecordId,
+      parentSubmissionId,
+    });
+
+    await db.query(
+      `UPDATE filings
+       SET filing_data = jsonb_set(
+             jsonb_set(filing_data, '{submissionId}', $2::jsonb),
+             '{processingDate}',
+             $3::jsonb
+           )
+       WHERE id = $1`,
+      [
+        filingId,
+        JSON.stringify(submissionResult.hmrcSubmissionId),
+        JSON.stringify(submissionResult.processingDate),
+      ]
     );
 
-    const filingDataRow = filingDataResult.rows[0];
-    if (!filingDataRow) {
-      res.status(404).json({ error: 'Filing not found' });
-      return;
-    }
-
-    const filingData = filingDataRow.filing_data;
-
-    // Submit to HMRC
-    try {
-      const hmrcClient = new HMRCClient({
-        clientId: process.env.HMRC_CLIENT_ID || '',
-        clientSecret: process.env.HMRC_CLIENT_SECRET || '',
-        serverToken: process.env.HMRC_SERVER_TOKEN || '',
-        isSandbox: process.env.HMRC_ENV !== 'production',
-      });
-
-      const submissionResult = await hmrcClient.submitVATReturn(
-        tenant.vat_number,
-        filingData.periodKey as string,
-        filingData.vatDueSales as number,
-        filingData.vatDueAcquisitions as number,
-        filingData.totalVatDue as number,
-        filingData.vatReclaimedCurrPeriod as number,
-        filingData.netVatDue as number,
-        filingData.totalValueSalesExVAT as number,
-        filingData.totalValuePurchasesExVAT as number,
-        filingData.totalValueGoodsSuppliedExVAT as number,
-        filingData.totalAcquisitionsExVAT as number
-      );
-
-      // Update status to submitted with submission details
-      await db.query(
-        `UPDATE filings
-         SET status = $1, 
-             submitted_at = NOW(), 
-             updated_at = NOW(),
-             filing_data = jsonb_set(filing_data, '{submissionId}', $3::jsonb),
-             filing_data = jsonb_set(filing_data, '{processingDate}', $4::jsonb)
-         WHERE id = $2`,
-        [
-          FilingStatus.SUBMITTED,
-          filingId,
-          JSON.stringify(submissionResult.submissionId),
-          JSON.stringify(submissionResult.processingDate),
-        ]
-      );
-
-        await db.query(
-          `INSERT INTO filing_receipts (filing_id, tenant_id, submission_id, payload)
-           VALUES ($1, $2, $3, $4::jsonb)`,
-          [
-            filingId,
-            req.user.tenantId,
-            submissionResult.submissionId,
-            JSON.stringify(submissionResult),
-          ]
-        );
-
-      res.json({
-        message: 'Filing submitted successfully',
-        submissionId: submissionResult.submissionId,
-        processingDate: submissionResult.processingDate,
-      });
-    } catch (error) {
-      logger.error('HMRC submission failed', error instanceof Error ? error : new Error(String(error)));
-      
-      // Update status to error
-      await db.query(
-        `UPDATE filings
-         SET status = 'error',
-             updated_at = NOW(),
-             rejection_reason = $2
-         WHERE id = $1`,
-        [filingId, error instanceof Error ? error.message : 'Submission failed']
-      );
-
-      res.status(500).json({
-        error: 'Failed to submit filing to HMRC',
-        details: error instanceof Error ? error.message : 'Unknown error',
-      });
-      return;
-    }
+    res.json({
+      message: 'Filing submitted successfully',
+      submissionId: submissionResult.hmrcSubmissionId,
+      receiptId: submissionResult.receiptId,
+      processingDate: submissionResult.processingDate,
+    });
   } catch (error) {
     logger.error('Submit filing failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {
@@ -358,6 +321,108 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to submit filing' });
+  }
+});
+
+router.post('/:filingId/amend', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const { adjustments, reason } = req.body;
+
+    if (!adjustments || typeof adjustments !== 'object') {
+      throw new ValidationError('adjustments object is required');
+    }
+
+    const filingResult = await db.query<{
+      id: string;
+      status: FilingStatus;
+      filing_data: Record<string, unknown>;
+      last_submission_id: string | null;
+    }>(
+      `SELECT id, status, filing_data, last_submission_id
+       FROM filings
+       WHERE id = $1 AND tenant_id = $2`,
+      [filingId, req.user.tenantId]
+    );
+
+    const filing = filingResult.rows[0];
+    if (!filing) {
+      res.status(404).json({ error: 'Filing not found' });
+      return;
+    }
+
+    if (
+      filing.status !== FilingStatus.SUBMITTED &&
+      filing.status !== FilingStatus.ACCEPTED
+    ) {
+      throw new ValidationError('Only submitted filings can be amended');
+    }
+
+    const updatedData = {
+      ...(filing.filing_data || {}),
+      ...(adjustments as Record<string, unknown>),
+    };
+
+    await db.query(
+      `UPDATE filings
+       SET filing_data = $1::jsonb,
+           status = $2,
+           updated_at = NOW()
+       WHERE id = $3 AND tenant_id = $4`,
+      [
+        JSON.stringify(updatedData),
+        FilingStatus.DRAFT,
+        filingId,
+        req.user.tenantId,
+      ]
+    );
+
+    const draftId = await createAmendmentDraft({
+      filingId,
+      tenantId: req.user.tenantId,
+      userId: req.user.userId,
+      adjustments,
+      reason,
+      parentSubmissionId: filing.last_submission_id,
+    });
+
+    res.json({
+      message: 'Amendment draft created',
+      draftSubmissionId: draftId,
+      filingData: updatedData,
+    });
+  } catch (error) {
+    logger.error('Create amendment draft failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to create amendment draft' });
+  }
+});
+
+router.get('/:filingId/submissions', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const submissions = await listFilingSubmissions(
+      req.user.tenantId,
+      filingId
+    );
+
+    res.json({ submissions });
+  } catch (error) {
+    logger.error('List filing submissions failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch submission history' });
   }
 });
 

@@ -1,8 +1,12 @@
 import { Router, Response } from 'express';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
-import { findMatches, reconcileTransaction } from '../services/matcher';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { findMatches, reconcileTransaction } from '../services/matcher';
+import {
+  listReconciliationExceptions,
+  resolveReconciliationException,
+} from '../services/exceptions';
 
 const router = Router();
 const logger = createLogger('reconciliation-service');
@@ -58,6 +62,60 @@ router.post('/reconcile', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to reconcile transaction' });
+  }
+});
+
+router.get('/exceptions', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const statusParam = (req.query.status as string | undefined)?.toLowerCase() as
+      | 'open'
+      | 'in_review'
+      | 'resolved'
+      | undefined;
+    const status = statusParam ?? 'open';
+
+    const exceptions = await listReconciliationExceptions(req.user.tenantId, status);
+    res.json({ exceptions });
+  } catch (error) {
+    logger.error('List exceptions failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch reconciliation exceptions' });
+  }
+});
+
+router.post('/exceptions/:exceptionId/resolve', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { exceptionId } = req.params;
+    const { resolution } = req.body;
+
+    if (!exceptionId) {
+      throw new ValidationError('exceptionId is required');
+    }
+
+    await resolveReconciliationException(
+      req.user.tenantId,
+      exceptionId,
+      req.user.userId,
+      resolution
+    );
+
+    res.json({ message: 'Exception resolved' });
+  } catch (error) {
+    logger.error('Resolve exception failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to resolve exception' });
   }
 });
 

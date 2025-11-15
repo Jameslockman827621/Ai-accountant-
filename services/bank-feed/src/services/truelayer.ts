@@ -1,6 +1,12 @@
 import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
+import {
+  getConnectionByProviderAccount,
+  getConnectionSecrets,
+  markConnectionRefreshed,
+  persistConnectionTokens,
+} from './connectionStore';
 
 const logger = createLogger('bank-feed-service');
 
@@ -8,9 +14,10 @@ const TRUELAYER_CLIENT_ID = process.env.TRUELAYER_CLIENT_ID || '';
 const TRUELAYER_CLIENT_SECRET = process.env.TRUELAYER_CLIENT_SECRET || '';
 const TRUELAYER_ENV = process.env.TRUELAYER_ENV || 'sandbox';
 
-const TRUELAYER_BASE_URL = TRUELAYER_ENV === 'production'
-  ? 'https://api.truelayer.com'
-  : 'https://api.truelayer-sandbox.com';
+const TRUELAYER_BASE_URL =
+  TRUELAYER_ENV === 'production'
+    ? 'https://api.truelayer.com'
+    : 'https://api.truelayer-sandbox.com';
 
 interface TrueLayerTokenResponse {
   access_token: string;
@@ -54,8 +61,9 @@ async function trueLayerRequest(
   if (accessToken) {
     headers['Authorization'] = `Bearer ${accessToken}`;
   } else {
-    // For token requests, use basic auth
-    const credentials = Buffer.from(`${TRUELAYER_CLIENT_ID}:${TRUELAYER_CLIENT_SECRET}`).toString('base64');
+    const credentials = Buffer.from(
+      `${TRUELAYER_CLIENT_ID}:${TRUELAYER_CLIENT_SECRET}`
+    ).toString('base64');
     headers['Authorization'] = `Basic ${credentials}`;
   }
 
@@ -63,11 +71,11 @@ async function trueLayerRequest(
     method,
     headers,
   };
-  
+
   if (body) {
     fetchOptions.body = JSON.stringify(body);
   }
-  
+
   const response = await fetch(`${TRUELAYER_BASE_URL}${endpoint}`, fetchOptions);
 
   if (!response.ok) {
@@ -77,36 +85,30 @@ async function trueLayerRequest(
   return response.json();
 }
 
-export async function createTrueLayerAuthLink(_userId: string, redirectUri: string): Promise<string> {
-  try {
-    const response = await trueLayerRequest(
-      '/connect/token',
-      'POST',
-      undefined,
-      {
-        grant_type: 'authorization_code',
-        client_id: TRUELAYER_CLIENT_ID,
-        redirect_uri: redirectUri,
-        response_type: 'code',
-        scope: 'accounts transactions',
-        nonce: crypto.randomUUID(),
-      }
-    ) as { auth_url: string };
+export async function createTrueLayerAuthLink(
+  _userId: string,
+  redirectUri: string,
+  state: string
+): Promise<string> {
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: TRUELAYER_CLIENT_ID,
+    redirect_uri: redirectUri,
+    scope: 'accounts transactions offline_access',
+    providers: 'uk-domestic-accounts',
+    state,
+  });
 
-    return response.auth_url;
-  } catch (error) {
-    logger.error('Failed to create TrueLayer auth link', error instanceof Error ? error : new Error(String(error)));
-    throw new Error('Failed to create TrueLayer auth link');
-  }
+  return `${TRUELAYER_BASE_URL.replace('api.', '')}/?${params.toString()}`;
 }
 
 export async function exchangeTrueLayerCode(
   code: string,
   redirectUri: string,
   tenantId: TenantId
-): Promise<{ accessToken: string; refreshToken: string; providerId: string }> {
+): Promise<{ connectionId: string; accounts: TrueLayerAccount[] }> {
   try {
-    const response = await trueLayerRequest(
+    const response = (await trueLayerRequest(
       '/connect/token',
       'POST',
       undefined,
@@ -117,62 +119,87 @@ export async function exchangeTrueLayerCode(
         code,
         redirect_uri: redirectUri,
       }
-    ) as TrueLayerTokenResponse;
+    )) as TrueLayerTokenResponse;
 
-    // Get provider info
-    const accountsResponse = await trueLayerRequest(
+    const accountsResponse = (await trueLayerRequest(
       '/data/v1/accounts',
       'GET',
       response.access_token
-    ) as { results: TrueLayerAccount[] };
+    )) as { results: TrueLayerAccount[] };
 
     const providerId = accountsResponse.results[0]?.account_id || 'unknown';
+    const tokenExpiresAt = new Date(Date.now() + response.expires_in * 1000);
 
-    // Store access token securely (in production, encrypt this)
-    await db.query(
-      `INSERT INTO bank_connections (tenant_id, provider, access_token, item_id, is_active, metadata)
-       VALUES ($1, 'truelayer', $2, $3, true, $4)
-       ON CONFLICT (tenant_id, provider, item_id) 
-       DO UPDATE SET access_token = $2, updated_at = NOW()`,
-      [
-        tenantId,
-        response.access_token,
-        providerId,
-        JSON.stringify({
-          refresh_token: response.refresh_token,
-          expires_in: response.expires_in,
-        }),
-      ]
-    );
-
-    return {
+    const connectionId = await persistConnectionTokens({
+      tenantId,
+      provider: 'truelayer',
       accessToken: response.access_token,
       refreshToken: response.refresh_token,
-      providerId,
+      providerAccountId: providerId,
+      metadata: { accounts: accountsResponse.results },
+      tokenExpiresAt,
+    });
+
+    return {
+      connectionId,
+      accounts: accountsResponse.results,
     };
   } catch (error) {
-    logger.error('Failed to exchange TrueLayer code', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Failed to exchange TrueLayer code',
+      error instanceof Error ? error : new Error(String(error))
+    );
     throw new Error('Failed to exchange TrueLayer code');
   }
 }
 
+export async function refreshTrueLayerConnection(
+  connectionId: string,
+  tenantId: TenantId
+): Promise<void> {
+  const secrets = await getConnectionSecrets(connectionId, tenantId);
+  if (!secrets.refreshToken) {
+    return;
+  }
+
+  const response = (await trueLayerRequest(
+    '/connect/token',
+    'POST',
+    undefined,
+    {
+      grant_type: 'refresh_token',
+      client_id: TRUELAYER_CLIENT_ID,
+      client_secret: TRUELAYER_CLIENT_SECRET,
+      refresh_token: secrets.refreshToken,
+    }
+  )) as TrueLayerTokenResponse;
+
+  const tokenExpiresAt = new Date(Date.now() + response.expires_in * 1000);
+  await markConnectionRefreshed(connectionId, {
+    accessToken: response.access_token,
+    refreshToken: response.refresh_token,
+    tokenExpiresAt,
+  });
+}
+
 export async function fetchTrueLayerTransactions(
-  accessToken: string,
+  connectionId: string,
   tenantId: TenantId,
   accountId: string,
   startDate: Date,
   endDate: Date
-): Promise<void> {
+): Promise<number> {
+  const secrets = await getConnectionSecrets(connectionId, tenantId);
   try {
-    const response = await trueLayerRequest(
-      `/data/v1/accounts/${accountId}/transactions?from=${startDate.toISOString().split('T')[0]}&to=${endDate.toISOString().split('T')[0]}`,
+    const response = (await trueLayerRequest(
+      `/data/v1/accounts/${accountId}/transactions?from=${
+        startDate.toISOString().split('T')[0]
+      }&to=${endDate.toISOString().split('T')[0]}`,
       'GET',
-      accessToken
-    ) as { results: TrueLayerTransaction[] };
+      secrets.accessToken
+    )) as { results: TrueLayerTransaction[] };
 
     const transactions = response.results;
-
-    // Store transactions in database
     for (const transaction of transactions) {
       await db.query(
         `INSERT INTO bank_transactions (
@@ -185,11 +212,11 @@ export async function fetchTrueLayerTransactions(
           accountId,
           transaction.transaction_id,
           transaction.timestamp.split('T')[0],
-          Math.abs(transaction.amount), // TrueLayer uses negative for debits
+          Math.abs(transaction.amount),
           transaction.currency || 'GBP',
           transaction.description,
+          transaction.transaction_category,
           JSON.stringify({
-            category: transaction.transaction_category,
             merchantName: transaction.merchant_name || '',
             transactionType: transaction.transaction_type,
           }),
@@ -197,9 +224,60 @@ export async function fetchTrueLayerTransactions(
       );
     }
 
-    logger.info('TrueLayer transactions fetched and stored', { count: transactions.length, tenantId });
+    await markConnectionRefreshed(connectionId, {
+      accessToken: secrets.accessToken,
+      refreshToken: secrets.refreshToken ?? null,
+      tokenExpiresAt: secrets.tokenExpiresAt || undefined,
+    });
+
+    logger.info('TrueLayer transactions fetched and stored', {
+      count: transactions.length,
+      tenantId,
+      connectionId,
+    });
+    return transactions.length;
   } catch (error) {
-    logger.error('Failed to fetch TrueLayer transactions', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Failed to fetch TrueLayer transactions',
+      error instanceof Error ? error : new Error(String(error)),
+      { tenantId, connectionId }
+    );
     throw error;
   }
+}
+
+interface TrueLayerWebhookPayload {
+  event_name: string;
+  resource_id: string;
+  resource_type: string;
+  account_id: string;
+}
+
+export async function handleTrueLayerWebhook(
+  payload: TrueLayerWebhookPayload
+): Promise<void> {
+  if (payload.resource_type !== 'transaction') {
+    return;
+  }
+
+  const connection = await getConnectionByProviderAccount(
+    'truelayer',
+    payload.account_id
+  );
+  if (!connection) {
+    logger.warn('TrueLayer webhook for unknown account', payload);
+    return;
+  }
+
+  const now = new Date();
+  const start = new Date(now);
+  start.setDate(start.getDate() - 5);
+
+  await fetchTrueLayerTransactions(
+    connection.connectionId,
+    connection.tenantId,
+    payload.account_id,
+    start,
+    now
+  );
 }

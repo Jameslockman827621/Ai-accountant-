@@ -4,6 +4,13 @@ import { AuthRequest } from '../middleware/auth';
 import { connectXero, syncXeroContacts, syncXeroTransactions } from '../services/xero';
 import { connectStripe, syncStripeTransactions, handleStripeWebhook } from '../services/stripe';
 import { connectQuickBooks, syncQuickBooksAccounts, syncQuickBooksTransactions } from '../services/quickbooks';
+import {
+  connectHMRC,
+  disconnectHMRC,
+  getHMRCObligations,
+  getHMRCStatus,
+  refreshHMRCToken,
+} from '../services/hmrc';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
@@ -229,6 +236,98 @@ router.post('/quickbooks/sync/transactions', async (req: AuthRequest, res: Respo
       return;
     }
     res.status(500).json({ error: 'Failed to sync QuickBooks transactions' });
+  }
+});
+
+router.post('/hmrc/connect', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { authorizationCode, redirectUri, vrn } = req.body;
+
+    if (!authorizationCode || !redirectUri) {
+      throw new ValidationError('authorizationCode and redirectUri are required');
+    }
+
+    await connectHMRC(req.user.tenantId, authorizationCode, redirectUri, vrn);
+    res.json({ message: 'HMRC connected successfully' });
+  } catch (error) {
+    logger.error('Connect HMRC failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to connect HMRC' });
+  }
+});
+
+router.get('/hmrc/status', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const status = await getHMRCStatus(req.user.tenantId);
+    res.json({ status });
+  } catch (error) {
+    logger.error('Get HMRC status failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get HMRC status' });
+  }
+});
+
+router.post('/hmrc/refresh', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    await refreshHMRCToken(req.user.tenantId);
+    res.json({ message: 'HMRC token refreshed' });
+  } catch (error) {
+    logger.error('Refresh HMRC token failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to refresh HMRC token' });
+  }
+});
+
+router.delete('/hmrc/disconnect', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    await disconnectHMRC(req.user.tenantId);
+    res.json({ message: 'HMRC disconnected' });
+  } catch (error) {
+    logger.error('Disconnect HMRC failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to disconnect HMRC' });
+  }
+});
+
+router.get('/hmrc/obligations', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { status, from, to } = req.query;
+
+    const obligations = await getHMRCObligations(req.user.tenantId, {
+      status: typeof status === 'string' ? status : undefined,
+      from: typeof from === 'string' ? from : undefined,
+      to: typeof to === 'string' ? to : undefined,
+    });
+
+    res.json({ obligations });
+  } catch (error) {
+    logger.error('Get HMRC obligations failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get HMRC obligations' });
   }
 });
 

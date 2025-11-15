@@ -1,11 +1,12 @@
 {
   "extends": "../../tsconfig.json",
-    "compilerOptions": {
-      "outDir": "./dist",
-      "rootDir": "../../",
-      "module": "commonjs",
-      "noUncheckedIndexedAccess": false,
-      "exactOptionalPropertyTypes": false
-    },
-  "include": ["src/**/*"]
+  "compilerOptions": {
+    "outDir": "./dist",
+    "module": "commonjs",
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false
+  },
+  "include": [
+    "src/**/*"
+  ]
 }
