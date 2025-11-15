@@ -12,6 +12,7 @@ import OnboardingProgressCard from './OnboardingProgressCard';
 import ReconciliationDashboard from './ReconciliationDashboard';
 import SupportCenterPanel from './SupportCenterPanel';
 import AccountSecurityPanel from './AccountSecurityPanel';
+import BankConnectionsPanel from './BankConnectionsPanel';
 import ScenarioPlanner from './ScenarioPlanner';
 import AssistantEvalPanel from './AssistantEvalPanel';
 import AccountantClientsPanel from './AccountantClientsPanel';
@@ -294,16 +295,17 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             <SubscriptionManagement token={token} />
             <AutomationPlaybooksPanel token={token} />
             {user.role === 'accountant' && <AccountantClientsPanel token={token} />}
-              {!securityLoading && securityState && (
-                <AccountSecurityPanel
-                  token={token}
-                  email={user.email}
-                  emailVerified={securityState.emailVerified}
-                  mfaEnabled={securityState.mfaEnabled}
-                  onRefresh={fetchSecurity}
-                />
-              )}
-              <SupportCenterPanel token={token} />
+            {!securityLoading && securityState && (
+              <AccountSecurityPanel
+                token={token}
+                email={user.email}
+                emailVerified={securityState.emailVerified}
+                mfaEnabled={securityState.mfaEnabled}
+                onRefresh={fetchSecurity}
+              />
+            )}
+            <BankConnectionsPanel token={token} />
+            <SupportCenterPanel token={token} />
           </div>
         </div>
       );

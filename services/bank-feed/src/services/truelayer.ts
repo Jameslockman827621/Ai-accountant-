@@ -7,6 +7,7 @@ import {
   markConnectionRefreshed,
   persistConnectionTokens,
 } from './connectionStore';
+import { recordSyncError, recordSyncSuccess } from './connectionHealth';
 
 const logger = createLogger('bank-feed-service');
 
@@ -229,6 +230,7 @@ export async function fetchTrueLayerTransactions(
       refreshToken: secrets.refreshToken ?? null,
       tokenExpiresAt: secrets.tokenExpiresAt || undefined,
     });
+    await recordSyncSuccess(tenantId, connectionId);
 
     logger.info('TrueLayer transactions fetched and stored', {
       count: transactions.length,
@@ -237,12 +239,13 @@ export async function fetchTrueLayerTransactions(
     });
     return transactions.length;
   } catch (error) {
-    logger.error(
-      'Failed to fetch TrueLayer transactions',
-      error instanceof Error ? error : new Error(String(error)),
-      { tenantId, connectionId }
-    );
-    throw error;
+    const errObj = error instanceof Error ? error : new Error(String(error));
+    await recordSyncError(tenantId, connectionId, errObj.message);
+    logger.error('Failed to fetch TrueLayer transactions', errObj, {
+      tenantId,
+      connectionId,
+    });
+    throw errObj;
   }
 }
 

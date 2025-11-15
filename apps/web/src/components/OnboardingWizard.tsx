@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DocumentUpload from './DocumentUpload';
+import BankConnectionsPanel from './BankConnectionsPanel';
 import type {
   OnboardingEventType,
   OnboardingProgress,
@@ -439,6 +440,19 @@ export default function OnboardingWizard({
               value={wizardState.bank_connection.notes}
               onChange={e => updateState('bank_connection', { notes: e.target.value })}
             />
+            <div className="rounded-2xl border border-dashed border-blue-200 bg-blue-50/40 p-4">
+              {token ? (
+                <BankConnectionsPanel token={token} variant="onboarding" />
+              ) : (
+                <p className="text-sm text-blue-900">
+                  Sign in again to link your bank feeds directly from onboarding.
+                </p>
+              )}
+              <p className="mt-2 text-xs text-blue-900">
+                We’ll auto-update this step once at least one connection is active. Prefer to finish later? mark the
+                status as “Will provide later.”
+              </p>
+            </div>
           </div>
         );
       case 'historical_import':
