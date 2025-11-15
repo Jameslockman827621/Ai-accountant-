@@ -11,6 +11,7 @@ import OnboardingWizard from './OnboardingWizard';
 import OnboardingProgressCard from './OnboardingProgressCard';
 import ReconciliationDashboard from './ReconciliationDashboard';
 import SupportCenterPanel from './SupportCenterPanel';
+import AccountantClientsPanel from './AccountantClientsPanel';
 import { useOnboarding } from '@/hooks/useOnboarding';
 
 interface DashboardStats {
@@ -252,10 +253,11 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
               <DocumentReviewPanel token={token} />
               <HMRCConnectionCard token={token} />
             </div>
-            <HMRCReceiptsPanel token={token} />
-            <SubscriptionManagement token={token} />
-            <AutomationPlaybooksPanel token={token} />
-            <SupportCenterPanel token={token} />
+              <HMRCReceiptsPanel token={token} />
+              <SubscriptionManagement token={token} />
+              <AutomationPlaybooksPanel token={token} />
+              {user.role === 'accountant' && <AccountantClientsPanel token={token} />}
+              <SupportCenterPanel token={token} />
         </div>
       </div>
     );

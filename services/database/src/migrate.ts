@@ -6,11 +6,11 @@ async function migrate(): Promise<void> {
   try {
     console.log('Running database migrations...');
     
-    // Schema files are in the src directory
-    // When running from dist, go up one level to find src
-    const baseDir = __dirname.includes('dist') 
-      ? join(__dirname, '..', 'src')
-      : __dirname;
+      // Always resolve relative to the service root so schema files are found
+      const serviceRoot = process.cwd().includes('services/database')
+        ? process.cwd()
+        : join(__dirname, '..', '..', '..');
+      const baseDir = join(serviceRoot, 'src');
     
     // Read main schema
     const schemaPath = join(baseDir, 'schema.sql');
