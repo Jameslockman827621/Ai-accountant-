@@ -20,8 +20,8 @@ describe('Auth Service - Comprehensive Tests', () => {
     // Create test user
     const passwordHash = await bcrypt.hash('testpass123', 10);
     const userResult = await db.query(
-      `INSERT INTO users (tenant_id, email, name, password_hash, role)
-       VALUES ($1, 'test@example.com', 'Test User', $2, 'client')
+      `INSERT INTO users (tenant_id, email, name, password_hash, role, email_verified, email_verified_at)
+       VALUES ($1, 'test@example.com', 'Test User', $2, 'client', true, NOW())
        RETURNING id`,
       [testTenantId, passwordHash]
     );
@@ -50,19 +50,19 @@ describe('Auth Service - Comprehensive Tests', () => {
           country: 'GB',
         });
 
-      expect(response.status).toBe(201);
-      expect(response.body).toHaveProperty('token');
-      expect(response.body).toHaveProperty('user');
-      expect(response.body).toHaveProperty('tenant');
-      expect(response.body.user.email).toBe('newuser@example.com');
+        expect(response.status).toBe(201);
+        expect(response.body).toHaveProperty('message');
+        expect(response.body).toHaveProperty('requiresEmailVerification', true);
 
-      // Cleanup
-      if (response.body.user?.id) {
-        await db.query('DELETE FROM users WHERE id = $1', [response.body.user.id]);
-      }
-      if (response.body.tenant?.id) {
-        await db.query('DELETE FROM tenants WHERE id = $1', [response.body.tenant.id]);
-      }
+        const createdUserResult = await db.query<{ id: string; tenant_id: string }>(
+          'SELECT id, tenant_id FROM users WHERE email = $1',
+          ['newuser@example.com']
+        );
+        const created = createdUserResult.rows[0];
+        if (created) {
+          await db.query('DELETE FROM users WHERE id = $1', [created.id]);
+          await db.query('DELETE FROM tenants WHERE id = $1', [created.tenant_id]);
+        }
     });
 
     it('should reject registration with invalid email', async () => {

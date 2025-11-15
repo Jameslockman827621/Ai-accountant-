@@ -5,10 +5,10 @@ import Dashboard from '@/components/Dashboard';
 import { useAuth } from '@/hooks/useAuth';
 
 export default function Home() {
-  const { user, token, login, logout } = useAuth();
+  const { user, token, logout } = useAuth();
 
   if (!user || !token) {
-    return <LoginForm onLogin={login} />;
+    return <LoginForm />;
   }
 
   return <Dashboard user={user} token={token} onLogout={logout} />;

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import DocumentReviewPanel from './DocumentReviewPanel';
 import ProcessingStatus from './ProcessingStatus';
 import HMRCConnectionCard from './HMRCConnectionCard';
@@ -11,6 +11,7 @@ import OnboardingWizard from './OnboardingWizard';
 import OnboardingProgressCard from './OnboardingProgressCard';
 import ReconciliationDashboard from './ReconciliationDashboard';
 import SupportCenterPanel from './SupportCenterPanel';
+import AccountSecurityPanel from './AccountSecurityPanel';
 import ScenarioPlanner from './ScenarioPlanner';
 import AssistantEvalPanel from './AssistantEvalPanel';
 import AccountantClientsPanel from './AccountantClientsPanel';
@@ -58,6 +59,8 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [securityState, setSecurityState] = useState<{ emailVerified: boolean; mfaEnabled: boolean } | null>(null);
+  const [securityLoading, setSecurityLoading] = useState(true);
 
   const {
     progress: onboardingProgress,
@@ -94,21 +97,18 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
       try {
         setLoading(true);
         setError(null);
-        const response = await fetch(
-          `${API_BASE}/api/analytics/dashboard`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-            signal: controller.signal,
-          }
-        );
+        const response = await fetch(`${API_BASE}/api/analytics/dashboard`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          signal: controller.signal,
+        });
 
         if (!response.ok) {
           throw new Error(`Dashboard request failed: ${response.status}`);
         }
 
-        const data = await response.json() as { stats: DashboardStats };
+        const data = (await response.json()) as { stats: DashboardStats };
         setStats(data.stats);
       } catch (err) {
         if (err instanceof DOMException && err.name === 'AbortError') {
@@ -125,6 +125,38 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
 
     return () => controller.abort();
   }, [token]);
+
+  const fetchSecurity = useCallback(async () => {
+    if (!token) {
+      return;
+    }
+    try {
+      setSecurityLoading(true);
+      const response = await fetch(`${API_BASE}/api/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        throw new Error('Failed to fetch security status');
+      }
+      const data = (await response.json()) as {
+        user: { emailVerified?: boolean; mfaEnabled?: boolean };
+      };
+      setSecurityState({
+        emailVerified: data.user.emailVerified ?? false,
+        mfaEnabled: data.user.mfaEnabled ?? false,
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSecurityLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchSecurity();
+  }, [fetchSecurity]);
 
   if (loading) {
     return <div className="flex items-center justify-center h-screen">Loading dashboard…</div>;
@@ -262,7 +294,16 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             <SubscriptionManagement token={token} />
             <AutomationPlaybooksPanel token={token} />
             {user.role === 'accountant' && <AccountantClientsPanel token={token} />}
-            <SupportCenterPanel token={token} />
+              {!securityLoading && securityState && (
+                <AccountSecurityPanel
+                  token={token}
+                  email={user.email}
+                  emailVerified={securityState.emailVerified}
+                  mfaEnabled={securityState.mfaEnabled}
+                  onRefresh={fetchSecurity}
+                />
+              )}
+              <SupportCenterPanel token={token} />
           </div>
         </div>
       );
