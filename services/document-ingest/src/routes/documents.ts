@@ -5,9 +5,10 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { uploadFile, initializeBucket } from '../storage/s3';
 import { publishOCRJob, publishClassificationJob, publishLedgerJob } from '../messaging/queue';
-import { DocumentStatus } from '@ai-accountant/shared-types';
+import { DocumentStatus, DocumentType, DocumentUploadSource } from '@ai-accountant/shared-types';
 import { AuthRequest } from '../middleware/auth';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { assessDocumentQuality } from '../services/qualityAssessment';
 
 const router = Router();
 const logger = createLogger('document-ingest-service');
@@ -23,8 +24,36 @@ const STATUS_STAGE_MAP: Record<DocumentStatus, DocumentStage> = {
   [DocumentStatus.ERROR]: 'document',
 };
 
+const UPLOAD_SOURCES: DocumentUploadSource[] = ['dashboard', 'onboarding', 'mobile', 'api', 'legacy'];
+
 function determineStageFromStatus(status: DocumentStatus): DocumentStage {
   return STATUS_STAGE_MAP[status] || 'document';
+}
+
+function parseDocumentTypeInput(value?: string): DocumentType | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const match = Object.values(DocumentType).find(type => type === value);
+  return match;
+}
+
+function parseUploadSource(value?: string): DocumentUploadSource {
+  if (!value) {
+    return 'dashboard';
+  }
+  return (UPLOAD_SOURCES.includes(value as DocumentUploadSource) ? value : 'dashboard') as DocumentUploadSource;
+}
+
+function sanitizeNotes(value?: string): string | null {
+  if (!value) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  return trimmed.slice(0, 2000);
 }
 
 function getTraceId(req: AuthRequest): string | undefined {
@@ -103,6 +132,10 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
     const traceId = getTraceId(req);
     const documentId = randomUUID();
     const storageKey = `${req.user.tenantId}/${documentId}/${file.originalname}`;
+    const declaredType = parseDocumentTypeInput(req.body?.documentType);
+    const uploadSource = parseUploadSource(req.body?.source);
+    const notes = sanitizeNotes(req.body?.notes);
+    const quality = await assessDocumentQuality(file, declaredType);
 
     // Upload to S3
     await uploadFile(storageKey, file.buffer, file.mimetype);
@@ -111,9 +144,12 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
     const result = await db.query(
       `INSERT INTO documents (
         id, tenant_id, uploaded_by, file_name, file_type, file_size,
-        storage_key, status
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING id, file_name, file_type, file_size, status, created_at`,
+        storage_key, status, document_type, quality_score, quality_issues,
+        upload_checklist, page_count, upload_source, upload_notes, suggested_document_type
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14, $15, $16)
+      RETURNING id, file_name, file_type, file_size, status, created_at,
+                document_type, quality_score, quality_issues, upload_checklist,
+                page_count, upload_source, upload_notes, suggested_document_type`,
       [
         documentId,
         req.user.tenantId,
@@ -123,6 +159,14 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
         file.size,
         storageKey,
         DocumentStatus.UPLOADED,
+        declaredType || null,
+        quality.score,
+        JSON.stringify(quality.issues),
+        JSON.stringify(quality.checklist),
+        quality.pageCount,
+        uploadSource,
+        notes,
+        quality.suggestedType,
       ]
     );
 
@@ -152,16 +196,25 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
 
     logger.info('Document uploaded', { documentId, tenantId: req.user.tenantId });
 
-    res.status(201).json({
-      document: {
-        id: document.id,
-        fileName: document.file_name,
-        fileType: document.file_type,
-        fileSize: document.file_size,
-        status: document.status,
-        createdAt: document.created_at,
-      },
-    });
+      res.status(201).json({
+        document: {
+          id: document.id,
+          fileName: document.file_name,
+          fileType: document.file_type,
+          fileSize: document.file_size,
+          status: document.status,
+          documentType: document.document_type,
+          createdAt: document.created_at,
+          qualityScore: document.quality_score,
+          qualityIssues: document.quality_issues,
+          uploadChecklist: document.upload_checklist,
+          pageCount: document.page_count,
+          uploadSource: document.upload_source,
+          uploadNotes: document.upload_notes,
+          suggestedDocumentType: document.suggested_document_type,
+        },
+        guidance: quality,
+      });
   } catch (error) {
     logger.error('Upload failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {
@@ -184,19 +237,27 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     const limit = parseInt(String(req.query.limit || '20'), 10);
     const offset = (page - 1) * limit;
 
-    const result = await db.query<{
-      id: string;
-      file_name: string;
-      file_type: string;
-      file_size: number;
-      document_type: string | null;
-      status: string;
-      confidence_score: number | null;
-      created_at: Date;
-      updated_at: Date;
-    }>(
-      `SELECT id, file_name, file_type, file_size, document_type, status,
-              confidence_score, created_at, updated_at
+      const result = await db.query<{
+        id: string;
+        file_name: string;
+        file_type: string;
+        file_size: number;
+        document_type: string | null;
+        status: string;
+        confidence_score: number | null;
+        quality_score: number | null;
+        quality_issues: unknown;
+        upload_checklist: unknown;
+        page_count: number | null;
+        upload_source: string | null;
+        suggested_document_type: string | null;
+        created_at: Date;
+        updated_at: Date;
+      }>(
+        `SELECT id, file_name, file_type, file_size, document_type, status,
+                confidence_score, quality_score, quality_issues, upload_checklist,
+                page_count, upload_source, suggested_document_type,
+                created_at, updated_at
        FROM documents
        WHERE tenant_id = $1
        ORDER BY created_at DESC
@@ -281,7 +342,10 @@ router.get('/:documentId', async (req: AuthRequest, res: Response) => {
 
     const result = await db.query(
       `SELECT id, file_name, file_type, file_size, document_type, status,
-              extracted_data, confidence_score, error_message, created_at, updated_at
+              extracted_data, confidence_score, error_message, quality_score,
+              quality_issues, upload_checklist, page_count, upload_source,
+              upload_notes, suggested_document_type,
+              created_at, updated_at
        FROM documents
        WHERE id = $1 AND tenant_id = $2`,
       [documentId, req.user.tenantId]

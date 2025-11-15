@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DocumentUpload from './DocumentUpload';
+import { DocumentType } from '@ai-accountant/shared-types';
 import BankConnectionsPanel from './BankConnectionsPanel';
 import type {
   OnboardingEventType,
@@ -485,61 +486,74 @@ export default function OnboardingWizard({
             />
           </div>
         );
-      case 'filing_preferences':
-        return (
-          <div className="space-y-4">
-            <SelectField
-              label="Filing frequency"
-              value={wizardState.filing_preferences.frequency}
-              onChange={value => updateState('filing_preferences', { frequency: value as WizardState['filing_preferences']['frequency'] })}
-              options={[
-                { value: 'monthly', label: 'Monthly' },
-                { value: 'quarterly', label: 'Quarterly' },
-                { value: 'annually', label: 'Annually' },
-              ]}
-            />
-            <SelectField
-              label="Review workflow"
-              value={wizardState.filing_preferences.reviewProcess}
-              onChange={value => updateState('filing_preferences', { reviewProcess: value as WizardState['filing_preferences']['reviewProcess'] })}
-              options={[
-                { value: 'single', label: 'Single approver (accountant)' },
-                { value: 'dual', label: 'Dual control (finance + director)' },
-              ]}
-            />
-            <ToggleField
-              label="Deadline reminders"
-              description="Send proactive notifications before every filing deadline."
-              value={wizardState.filing_preferences.remindersEnabled}
-              onChange={value => updateState('filing_preferences', { remindersEnabled: value })}
-            />
-            {wizardState.filing_preferences.remindersEnabled && (
-              <InputField
-                label="Days before due date"
-                type="number"
-                min={1}
-                max={30}
-                value={String(wizardState.filing_preferences.reminderLeadDays)}
-                onChange={value => updateState('filing_preferences', { reminderLeadDays: Number(value) || 5 })}
+        case 'filing_preferences':
+          return (
+            <div className="space-y-4">
+              <SelectField
+                label="Filing frequency"
+                value={wizardState.filing_preferences.frequency}
+                onChange={value =>
+                  updateState('filing_preferences', {
+                    frequency: value as WizardState['filing_preferences']['frequency'],
+                  })
+                }
+                options={[
+                  { value: 'monthly', label: 'Monthly' },
+                  { value: 'quarterly', label: 'Quarterly' },
+                  { value: 'annually', label: 'Annually' },
+                ]}
               />
-            )}
-          </div>
-        );
-      case 'first_document':
-        return (
-          <div className="space-y-4">
-            <p className="text-gray-600">
-              Upload a real receipt or invoice so you can see extraction, classification, validation, and posting in action.
-            </p>
-            <DocumentUpload
-              token={token}
-              onUpload={() => {
-                updateState('first_document', {
-                  uploaded: true,
-                  lastUploadedAt: new Date().toISOString(),
-                });
-              }}
-            />
+              <SelectField
+                label="Review workflow"
+                value={wizardState.filing_preferences.reviewProcess}
+                onChange={value =>
+                  updateState('filing_preferences', {
+                    reviewProcess: value as WizardState['filing_preferences']['reviewProcess'],
+                  })
+                }
+                options={[
+                  { value: 'single', label: 'Single approver (accountant)' },
+                  { value: 'dual', label: 'Dual control (finance + director)' },
+                ]}
+              />
+              <ToggleField
+                label="Deadline reminders"
+                description="Send proactive notifications before every filing deadline."
+                value={wizardState.filing_preferences.remindersEnabled}
+                onChange={value => updateState('filing_preferences', { remindersEnabled: value })}
+              />
+              {wizardState.filing_preferences.remindersEnabled && (
+                <InputField
+                  label="Days before due date"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={String(wizardState.filing_preferences.reminderLeadDays)}
+                  onChange={value =>
+                    updateState('filing_preferences', { reminderLeadDays: Number(value) || 5 })
+                  }
+                />
+              )}
+            </div>
+          );
+        case 'first_document':
+          return (
+            <div className="space-y-4">
+              <p className="text-gray-600">
+                Upload a real receipt or invoice so you can see extraction, classification, validation, and posting in action.
+              </p>
+              <DocumentUpload
+                token={token}
+                variant="compact"
+                source="onboarding"
+                defaultType={DocumentType.RECEIPT}
+                onUpload={() => {
+                  updateState('first_document', {
+                    uploaded: true,
+                    lastUploadedAt: new Date().toISOString(),
+                  });
+                }}
+              />
             {wizardState.first_document.uploaded && (
               <div className="rounded border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-800">
                 Document received {new Date(wizardState.first_document.lastUploadedAt || '').toLocaleString()}.

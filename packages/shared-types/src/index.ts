@@ -32,6 +32,24 @@ export enum DocumentStatus {
   ERROR = 'error',
 }
 
+export type DocumentUploadSource = 'dashboard' | 'onboarding' | 'mobile' | 'api' | 'legacy';
+
+export type DocumentQualitySeverity = 'info' | 'warning' | 'critical';
+
+export interface DocumentQualityIssue {
+  id: string;
+  severity: DocumentQualitySeverity;
+  message: string;
+  recommendation?: string;
+}
+
+export interface DocumentChecklistItem {
+  id: string;
+  label: string;
+  completed: boolean;
+  helpText?: string;
+}
+
 export enum LedgerEntryType {
   DEBIT = 'debit',
   CREDIT = 'credit',
@@ -89,6 +107,13 @@ export interface Document {
   extractedData?: ExtractedData;
   confidenceScore?: number;
   errorMessage?: string;
+  qualityScore?: number;
+  qualityIssues?: DocumentQualityIssue[];
+  uploadChecklist?: DocumentChecklistItem[];
+  pageCount?: number;
+  uploadSource?: DocumentUploadSource;
+  uploadNotes?: string;
+  suggestedDocumentType?: DocumentType;
   createdAt: Date;
   updatedAt: Date;
 }

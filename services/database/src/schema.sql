@@ -53,6 +53,13 @@ CREATE TABLE documents (
     extracted_data JSONB,
     confidence_score DECIMAL(5, 4),
     error_message TEXT,
+    quality_score DECIMAL(5, 2),
+    quality_issues JSONB,
+    upload_checklist JSONB,
+    page_count INTEGER,
+    upload_source VARCHAR(30),
+    upload_notes TEXT,
+    suggested_document_type VARCHAR(20) CHECK (suggested_document_type IN ('invoice', 'receipt', 'statement', 'payslip', 'tax_form', 'other')),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );

@@ -18,6 +18,7 @@ import AssistantEvalPanel from './AssistantEvalPanel';
 import AccountantClientsPanel from './AccountantClientsPanel';
 import ExecutiveInsightsPanel from './ExecutiveInsightsPanel';
 import { useOnboarding } from '@/hooks/useOnboarding';
+import DocumentIntakePanel from './DocumentIntakePanel';
 
 interface DashboardStats {
   period: {
@@ -251,8 +252,9 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
                 Input £{stats.vat.input.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
               </p>
             </StatCard>
-          </div>
+            </div>
             <ProcessingStatus token={token} />
+            <DocumentIntakePanel token={token} />
             <ReconciliationDashboard token={token} />
             <ScenarioPlanner token={token} />
             <ExecutiveInsightsPanel token={token} />
