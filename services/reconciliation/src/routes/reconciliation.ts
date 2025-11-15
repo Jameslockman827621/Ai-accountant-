@@ -7,6 +7,10 @@ import {
   listReconciliationExceptions,
   resolveReconciliationException,
 } from '../services/exceptions';
+import {
+  getReconciliationSummary,
+  getReconciliationTrends,
+} from '../services/summary';
 
 const router = Router();
 const logger = createLogger('reconciliation-service');
@@ -116,6 +120,39 @@ router.post('/exceptions/:exceptionId/resolve', async (req: AuthRequest, res: Re
       return;
     }
     res.status(500).json({ error: 'Failed to resolve exception' });
+  }
+});
+
+router.get('/summary', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const summary = await getReconciliationSummary(req.user.tenantId);
+    res.json({ summary });
+  } catch (error) {
+    logger.error('Get reconciliation summary failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch reconciliation summary' });
+  }
+});
+
+router.get('/summary/trend', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const daysParam = parseInt(String(req.query.days ?? '30'), 10);
+    const days = Number.isNaN(daysParam) ? 30 : Math.max(7, Math.min(daysParam, 90));
+
+    const trend = await getReconciliationTrends(req.user.tenantId, days);
+    res.json({ trend });
+  } catch (error) {
+    logger.error('Get reconciliation trends failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch reconciliation trends' });
   }
 });
 
