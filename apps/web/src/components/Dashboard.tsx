@@ -11,6 +11,7 @@ import OnboardingWizard from './OnboardingWizard';
 import OnboardingProgressCard from './OnboardingProgressCard';
 import ReconciliationDashboard from './ReconciliationDashboard';
 import SupportCenterPanel from './SupportCenterPanel';
+import ScenarioPlanner from './ScenarioPlanner';
 import AccountantClientsPanel from './AccountantClientsPanel';
 import { useOnboarding } from '@/hooks/useOnboarding';
 
@@ -198,7 +199,7 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
               />
             )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard title="Revenue" value={stats.revenue} trend="up" color="green" />
             <StatCard title="Expenses" value={stats.expenses} trend="down" color="red" />
             <StatCard
@@ -216,11 +217,11 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
               </p>
             </StatCard>
           </div>
-
-          <ProcessingStatus token={token} />
+            <ProcessingStatus token={token} />
             <ReconciliationDashboard token={token} />
+            <ScenarioPlanner token={token} />
 
-          <section className="bg-white rounded-lg shadow p-6">
+            <section className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h2 className="text-xl font-semibold">Upcoming Deadlines</h2>
@@ -247,20 +248,20 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             ) : (
               <p className="text-gray-500">No filing deadlines in the upcoming window.</p>
             )}
-          </section>
+            </section>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <DocumentReviewPanel token={token} />
               <HMRCConnectionCard token={token} />
             </div>
-              <HMRCReceiptsPanel token={token} />
-              <SubscriptionManagement token={token} />
-              <AutomationPlaybooksPanel token={token} />
-              {user.role === 'accountant' && <AccountantClientsPanel token={token} />}
-              <SupportCenterPanel token={token} />
+            <HMRCReceiptsPanel token={token} />
+            <SubscriptionManagement token={token} />
+            <AutomationPlaybooksPanel token={token} />
+            {user.role === 'accountant' && <AccountantClientsPanel token={token} />}
+            <SupportCenterPanel token={token} />
+          </div>
         </div>
-      </div>
-    );
+      );
 }
 
 function StatCard({
