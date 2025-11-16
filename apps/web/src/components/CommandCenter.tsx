@@ -1,6 +1,9 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import ExceptionQueue from './ExceptionQueue';
+import ReconciliationMatching from './ReconciliationMatching';
+import IngestionDashboard from './IngestionDashboard';
 
 interface CommandCenterProps {
   token: string;
@@ -258,28 +261,168 @@ function OverviewTab({ stats }: { stats: DashboardStats }) {
 }
 
 function InboxTab({ token }: { token: string }) {
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadDocuments();
+  }, []);
+
+  const loadDocuments = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/ingestion/log?status=pending&limit=20`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setDocuments(data.log || []);
+      }
+    } catch (error) {
+      console.error('Failed to load documents', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Document Inbox</h2>
-      <p className="text-gray-600">Documents awaiting processing will appear here.</p>
+      {documents.length === 0 ? (
+        <p className="text-gray-600">No documents awaiting processing.</p>
+      ) : (
+        <div className="space-y-3">
+          {documents.map((doc: any) => (
+            <div key={doc.id} className="p-3 bg-gray-50 rounded-lg">
+              <p className="text-sm font-medium text-gray-900 capitalize">{doc.source_type}</p>
+              <p className="text-xs text-gray-500 mt-1">
+                Ingested: {new Date(doc.ingested_at).toLocaleString()}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 function ReconciliationTab({ token }: { token: string }) {
+  const [summary, setSummary] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadSummary();
+  }, []);
+
+  const loadSummary = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/reconciliation/summary`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setSummary(data.summary);
+      }
+    } catch (error) {
+      console.error('Failed to load reconciliation summary', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Reconciliation Status</h2>
-      <p className="text-gray-600">Unmatched transactions and reconciliation status.</p>
+      {summary ? (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-gray-600">Unmatched</p>
+            <p className="text-2xl font-bold text-blue-600">{summary.unmatchedCount || 0}</p>
+          </div>
+          <div className="p-3 bg-green-50 rounded-lg">
+            <p className="text-sm text-gray-600">Matched</p>
+            <p className="text-2xl font-bold text-green-600">{summary.matchedCount || 0}</p>
+          </div>
+          <div className="p-3 bg-yellow-50 rounded-lg">
+            <p className="text-sm text-gray-600">Partial</p>
+            <p className="text-2xl font-bold text-yellow-600">{summary.partialCount || 0}</p>
+          </div>
+        </div>
+      ) : (
+        <p className="text-gray-600">No reconciliation data available.</p>
+      )}
     </div>
   );
 }
 
 function ExceptionsTab({ token }: { token: string }) {
+  const [exceptions, setExceptions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    loadExceptions();
+  }, []);
+
+  const loadExceptions = async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/reconciliation/exceptions?status=open`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setExceptions(data.exceptions || []);
+      }
+    } catch (error) {
+      console.error('Failed to load exceptions', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-white p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-4">Exception Queue</h2>
-      <p className="text-gray-600">Items requiring manual review.</p>
+      {exceptions.length === 0 ? (
+        <p className="text-gray-600">No exceptions requiring review.</p>
+      ) : (
+        <div className="space-y-3">
+          {exceptions.slice(0, 5).map((exc: any) => (
+            <div key={exc.id} className="p-3 bg-red-50 rounded-lg">
+              <p className="text-sm font-medium text-gray-900">{exc.title || 'Exception'}</p>
+              <p className="text-xs text-gray-600 mt-1">{exc.description}</p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
