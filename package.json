@@ -19,7 +19,8 @@
     "type-check": "turbo run type-check",
     "clean": "turbo run clean && rm -rf node_modules",
     "db:migrate": "cd services/database && npm run migrate",
-    "db:seed": "cd services/database && npm run seed"
+    "db:seed": "cd services/database && npm run seed",
+    "rulepacks:regress": "ts-node -r tsconfig-paths/register scripts/rulepacks/run-regression.ts"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
@@ -27,6 +28,8 @@
     "@types/uuid": "^10.0.0",
     "jest": "^30.2.0",
     "ts-jest": "^29.4.5",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
     "turbo": "^1.10.16",
     "typescript": "^5.9.3"
   },

@@ -209,13 +209,41 @@ CREATE TABLE audit_logs (
 CREATE TABLE tax_rulepacks (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     country VARCHAR(2) NOT NULL,
+    jurisdiction_code VARCHAR(20) NOT NULL,
+    region VARCHAR(20) NOT NULL,
+    year INTEGER NOT NULL,
     version VARCHAR(20) NOT NULL,
     rules JSONB NOT NULL,
+    filing_types TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+    status VARCHAR(20) NOT NULL DEFAULT 'draft',
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    checksum VARCHAR(64),
+    regression_summary JSONB,
     effective_from DATE NOT NULL,
     effective_to DATE,
+    activated_at TIMESTAMP WITH TIME ZONE,
+    deprecated_at TIMESTAMP WITH TIME ZONE,
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    UNIQUE(country, version)
+    UNIQUE(country, version),
+    UNIQUE(jurisdiction_code, year, version)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tax_rulepacks_jurisdiction_status ON tax_rulepacks(jurisdiction_code, status);
+
+CREATE TABLE rulepack_regressions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    rulepack_id UUID NOT NULL REFERENCES tax_rulepacks(id) ON DELETE CASCADE,
+    case_id VARCHAR(100) NOT NULL,
+    description TEXT NOT NULL,
+    input JSONB NOT NULL,
+    expected JSONB NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'pass', 'fail', 'skipped')),
+    last_run_at TIMESTAMP WITH TIME ZONE,
+    last_error TEXT,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(rulepack_id, case_id)
 );
 
 -- Validation results and runs
