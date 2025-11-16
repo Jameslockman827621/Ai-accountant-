@@ -1,7 +1,7 @@
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { db } from '@ai-accountant/database';
-import { quickBooksOAuth } from './quickbooksOAuth';
+import crypto from 'crypto';
 
 const logger = createLogger('integrations-service');
 
@@ -43,19 +43,48 @@ export class XeroOAuth {
     }
 
     // Exchange code for tokens
-    const accessToken = 'xero-access-token';
-    const refreshToken = 'xero-refresh-token';
+    const clientId = process.env.XERO_CLIENT_ID || '';
+    const clientSecret = process.env.XERO_CLIENT_SECRET || '';
+    const redirectUri = process.env.XERO_REDIRECT_URI || '';
 
+    const tokenResponse = await fetch('https://identity.xero.com/connect/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: redirectUri,
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      throw new Error(`Xero token exchange failed: ${tokenResponse.status} ${errorText}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+    const refreshToken = tokenData.refresh_token;
+    const tenantIdXero = tokenData.tenant_id || tokenData.tenantId; // Xero tenant ID
+
+    // Store tokens and tenant ID
+    const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+    
     await db.query(
-      `INSERT INTO integration_tokens (
-        tenant_id, provider, access_token, refresh_token, expires_at, updated_at
-      ) VALUES ($1, 'xero', $2, $3, NOW() + INTERVAL '30 minutes', NOW())
-      ON CONFLICT (tenant_id, provider) DO UPDATE
-      SET access_token = $2, refresh_token = $3, expires_at = NOW() + INTERVAL '30 minutes', updated_at = NOW()`,
-      [tenantId, accessToken, refreshToken]
+      `INSERT INTO xero_connections (
+        tenant_id, access_token, refresh_token, tenant_id_xero, expires_at, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      ON CONFLICT (tenant_id) DO UPDATE
+      SET access_token = $2, refresh_token = $3, tenant_id_xero = $4, expires_at = $5, updated_at = NOW()`,
+      [tenantId, accessToken, refreshToken, tenantIdXero, expiresAt]
     );
 
-    logger.info('Xero OAuth completed', { tenantId });
+    logger.info('Xero OAuth completed', { tenantId, tenantIdXero });
     return { accessToken, refreshToken };
   }
 }
