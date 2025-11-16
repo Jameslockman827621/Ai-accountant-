@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import ClientComparisonView from './ClientComparisonView';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
@@ -368,106 +368,108 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
               </tr>
             )}
             {clients.map(client => (
-              <tr key={client.tenantId} className="text-gray-700">
-                <td className="px-3 py-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(client.tenantId)}
-                    onChange={() => toggleSelection(client.tenantId)}
-                  />
-                </td>
-                <td className="px-3 py-2">
-                  <div className="font-medium text-gray-900">{client.name}</div>
-                  <div className="text-xs text-gray-500">{client.tenantId}</div>
-                </td>
-                <td className="px-3 py-2">
-                  <StatusBadge status={client.status} />
-                </td>
-                <td className="px-3 py-2 text-right">
-                  £{client.revenue.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  £{client.profit.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
-                </td>
-                <td className="px-3 py-2 text-center">{client.upcomingDeadlines}</td>
-                <td className="px-3 py-2 text-center">{client.pendingTasks}</td>
-                <td className="px-3 py-2">
-                  {client.lastActivity
-                    ? new Date(client.lastActivity).toLocaleString('en-GB')
-                    : 'No activity'}
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    onClick={() => handleSwitchContext(client.tenantId)}
-                    disabled={switchingTenantId === client.tenantId}
-                    className="mr-2 rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
-                  >
-                    {switchingTenantId === client.tenantId ? 'Switching…' : 'Switch context'}
-                  </button>
-                  <button
-                    onClick={() => toggleTasks(client.tenantId)}
-                    className="rounded border border-blue-200 px-3 py-1 text-xs text-blue-700 hover:bg-blue-50"
-                  >
-                    {expandedTenantId === client.tenantId ? 'Hide tasks' : 'View tasks'}
-                  </button>
-                </td>
-              </tr>
-              {expandedTenantId === client.tenantId && (
-                <tr className="bg-gray-50">
-                  <td colSpan={9} className="px-3 py-3">
-                    {tasksLoading ? (
-                      <p className="text-sm text-gray-500">Loading tasks…</p>
-                    ) : tasksError ? (
-                      <p className="text-sm text-red-600">{tasksError}</p>
-                    ) : clientTasks.length === 0 ? (
-                      <p className="text-sm text-gray-500">No pending tasks for this client.</p>
-                    ) : (
-                      <div className="space-y-2">
-                        {clientTasks.map(task => (
-                          <div
-                            key={task.id}
-                            className="flex flex-col gap-2 rounded border border-gray-200 bg-white p-3 md:flex-row md:items-center md:justify-between"
-                          >
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900">
-                                {task.summary || `${task.entityType} task`}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                Created {new Date(task.createdAt).toLocaleString('en-GB')} ·{' '}
-                                <span className="capitalize">{task.entityType}</span>
-                              </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <PriorityChip priority={task.priority} />
-                              <button
-                                onClick={() => handleTaskAction(client.tenantId, task.id, 'approve')}
-                                disabled={updatingTaskId === task.id}
-                                className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-60"
-                              >
-                                {updatingTaskId === task.id ? 'Saving…' : 'Approve'}
-                              </button>
-                              <button
-                                onClick={() => handleTaskAction(client.tenantId, task.id, 'reject')}
-                                disabled={updatingTaskId === task.id}
-                                className="rounded border border-red-300 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
-                              >
-                                Reject
-                              </button>
-                              <button
-                                onClick={() => handleTaskAction(client.tenantId, task.id, 'needs_revision')}
-                                disabled={updatingTaskId === task.id}
-                                className="rounded border border-amber-300 px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-60"
-                              >
-                                Needs revision
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+              <Fragment key={client.tenantId}>
+                <tr className="text-gray-700">
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      checked={selected.has(client.tenantId)}
+                      onChange={() => toggleSelection(client.tenantId)}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-gray-900">{client.name}</div>
+                    <div className="text-xs text-gray-500">{client.tenantId}</div>
+                  </td>
+                  <td className="px-3 py-2">
+                    <StatusBadge status={client.status} />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    £{client.revenue.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    £{client.profit.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td className="px-3 py-2 text-center">{client.upcomingDeadlines}</td>
+                  <td className="px-3 py-2 text-center">{client.pendingTasks}</td>
+                  <td className="px-3 py-2">
+                    {client.lastActivity
+                      ? new Date(client.lastActivity).toLocaleString('en-GB')
+                      : 'No activity'}
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      onClick={() => handleSwitchContext(client.tenantId)}
+                      disabled={switchingTenantId === client.tenantId}
+                      className="mr-2 rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                    >
+                      {switchingTenantId === client.tenantId ? 'Switching…' : 'Switch context'}
+                    </button>
+                    <button
+                      onClick={() => toggleTasks(client.tenantId)}
+                      className="rounded border border-blue-200 px-3 py-1 text-xs text-blue-700 hover:bg-blue-50"
+                    >
+                      {expandedTenantId === client.tenantId ? 'Hide tasks' : 'View tasks'}
+                    </button>
                   </td>
                 </tr>
-              )}
+                {expandedTenantId === client.tenantId && (
+                  <tr className="bg-gray-50">
+                    <td colSpan={9} className="px-3 py-3">
+                      {tasksLoading ? (
+                        <p className="text-sm text-gray-500">Loading tasks…</p>
+                      ) : tasksError ? (
+                        <p className="text-sm text-red-600">{tasksError}</p>
+                      ) : clientTasks.length === 0 ? (
+                        <p className="text-sm text-gray-500">No pending tasks for this client.</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {clientTasks.map(task => (
+                            <div
+                              key={task.id}
+                              className="flex flex-col gap-2 rounded border border-gray-200 bg-white p-3 md:flex-row md:items-center md:justify-between"
+                            >
+                              <div>
+                                <p className="text-sm font-semibold text-gray-900">
+                                  {task.summary || `${task.entityType} task`}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  Created {new Date(task.createdAt).toLocaleString('en-GB')} ·{' '}
+                                  <span className="capitalize">{task.entityType}</span>
+                                </p>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <PriorityChip priority={task.priority} />
+                                <button
+                                  onClick={() => handleTaskAction(client.tenantId, task.id, 'approve')}
+                                  disabled={updatingTaskId === task.id}
+                                  className="rounded bg-green-600 px-3 py-1 text-xs font-medium text-white hover:bg-green-700 disabled:opacity-60"
+                                >
+                                  {updatingTaskId === task.id ? 'Saving…' : 'Approve'}
+                                </button>
+                                <button
+                                  onClick={() => handleTaskAction(client.tenantId, task.id, 'reject')}
+                                  disabled={updatingTaskId === task.id}
+                                  className="rounded border border-red-300 px-3 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-60"
+                                >
+                                  Reject
+                                </button>
+                                <button
+                                  onClick={() => handleTaskAction(client.tenantId, task.id, 'needs_revision')}
+                                  disabled={updatingTaskId === task.id}
+                                  className="rounded border border-amber-300 px-3 py-1 text-xs text-amber-700 hover:bg-amber-50 disabled:opacity-60"
+                                >
+                                  Needs revision
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>

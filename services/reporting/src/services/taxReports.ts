@@ -1,9 +1,9 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { calculateVATFromLedger } from '../../filing/src/services/vatCalculation';
-import { calculatePAYE } from '../../rules-engine/src/services/payeCalculation';
-import { calculateCorporationTax } from '../../rules-engine/src/services/corporationTax';
+import { calculateVATFromLedger } from '@ai-accountant/filing-service/services/vatCalculation';
+import { calculatePAYE } from '@ai-accountant/rules-engine-service/services/payeCalculation';
+import { calculateCorporationTax } from '@ai-accountant/rules-engine-service/services/corporationTax';
 
 const logger = createLogger('reporting-service');
 

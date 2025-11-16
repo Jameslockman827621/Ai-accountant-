@@ -18,11 +18,14 @@ export default function VerifyEmailPage() {
       }
 
       try {
-        const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/auth/email/verify`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ token }),
-        });
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000'}/api/auth/email/verify`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token }),
+          }
+        );
         const data = await response.json();
         if (!response.ok) {
           setStatus('error');
@@ -37,7 +40,7 @@ export default function VerifyEmailPage() {
       }
     };
 
-    verify();
+    void verify();
   }, [token]);
 
   return (
