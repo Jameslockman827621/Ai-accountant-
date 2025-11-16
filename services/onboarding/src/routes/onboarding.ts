@@ -13,6 +13,8 @@ import {
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { generateSampleData } from '../services/sampleDataGenerator';
 import { tutorialEngine } from '../services/tutorialEngine';
+import { getOnboardingSchema, validateStepData, saveStepData } from '../services/onboardingSchema';
+import { emitOnboardingEvent } from '../services/onboardingEvents';
 
 const router = Router();
 const logger = createLogger('onboarding-service');
@@ -41,6 +43,37 @@ function isOnboardingStep(value: unknown): value is OnboardingStep {
   return typeof value === 'string' && ONBOARDING_STEPS.includes(value as OnboardingStep);
 }
 
+// Get onboarding schema (Chunk 1)
+router.get('/schema', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { jurisdiction, entityType, industry } = req.query;
+    
+    if (!jurisdiction || typeof jurisdiction !== 'string') {
+      throw new ValidationError('Jurisdiction is required');
+    }
+
+    const schema = await getOnboardingSchema(
+      jurisdiction,
+      entityType as string | undefined,
+      industry as string | undefined
+    );
+
+    res.json({ schema });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    logger.error('Get onboarding schema failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get onboarding schema' });
+  }
+});
+
 // Get onboarding progress
 router.get('/progress', async (req: AuthRequest, res: Response) => {
   try {
@@ -57,6 +90,58 @@ router.get('/progress', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Update step data (PATCH) - Chunk 1
+router.patch('/steps/:stepName', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { stepName } = req.params;
+    if (!isOnboardingStep(stepName)) {
+      throw new ValidationError('Invalid step name');
+    }
+
+    const { stepData, jurisdiction, entityType, industry } = req.body;
+
+    if (!stepData || typeof stepData !== 'object') {
+      throw new ValidationError('Step data is required');
+    }
+
+    // Get schema for validation
+    const jurisdictionCode = jurisdiction || 'GB';
+    const schemaResponse = await getOnboardingSchema(jurisdictionCode, entityType, industry);
+    const stepSchema = schemaResponse.steps.find(s => s.stepName === stepName);
+
+    if (!stepSchema) {
+      throw new ValidationError(`Step ${stepName} not found in schema`);
+    }
+
+    // Validate step data
+    const validation = await validateStepData(stepName, stepData, stepSchema);
+    if (!validation.valid) {
+      res.status(400).json({
+        error: 'Validation failed',
+        errors: validation.errors,
+      });
+      return;
+    }
+
+    // Save as draft
+    await saveStepData(req.user.tenantId, stepName, stepData);
+
+    res.json({ message: 'Step data saved successfully' });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    logger.error('Update step data failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to update step data' });
+  }
+});
+
 // Complete onboarding step
 router.post('/steps/:stepName/complete', async (req: AuthRequest, res: Response) => {
   try {
@@ -69,12 +154,53 @@ router.post('/steps/:stepName/complete', async (req: AuthRequest, res: Response)
     if (!isOnboardingStep(stepName)) {
       throw new ValidationError('Invalid step name');
     }
-    const { stepData } = req.body;
+    const { stepData, jurisdiction, entityType, industry } = req.body;
+
+    // Get schema for validation if provided
+    if (jurisdiction) {
+      const schemaResponse = await getOnboardingSchema(
+        jurisdiction as string,
+        entityType as string | undefined,
+        industry as string | undefined
+      );
+      const stepSchema = schemaResponse.steps.find(s => s.stepName === stepName);
+      if (stepSchema) {
+        const validation = await validateStepData(stepName, stepData || {}, stepSchema);
+        if (!validation.valid) {
+          res.status(400).json({
+            error: 'Validation failed',
+            errors: validation.errors,
+          });
+          return;
+        }
+      }
+    }
 
     await completeOnboardingStep(req.user.tenantId, req.user.userId, stepName, stepData);
 
+    // Emit event to RabbitMQ (Chunk 1)
+    await emitOnboardingEvent('onboarding.step.completed', {
+      tenantId: req.user.tenantId,
+      userId: req.user.userId,
+      stepName,
+      stepData,
+    });
+
+    // Check if onboarding is complete
+    const progress = await getOnboardingProgress(req.user.tenantId);
+    if (progress.currentStep === 'complete') {
+      await emitOnboardingEvent('onboarding.completed', {
+        tenantId: req.user.tenantId,
+        userId: req.user.userId,
+      });
+    }
+
     res.json({ message: 'Step completed successfully' });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     logger.error('Complete step failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to complete step' });
   }

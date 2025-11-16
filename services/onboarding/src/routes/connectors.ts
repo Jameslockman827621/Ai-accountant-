@@ -3,9 +3,90 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import { connectorService, ConnectorConfig } from '../services/connectors';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { getConnectorCatalog, getConnectorByProvider } from '../services/connectorCatalog';
 
 const router = Router();
 const logger = createLogger('onboarding-service');
+
+// Get connector catalog (Chunk 3)
+router.get('/catalog', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { jurisdiction, entityType, connectorType } = req.query;
+    const catalog = await getConnectorCatalog(
+      jurisdiction as string | undefined,
+      entityType as string | undefined,
+      connectorType as string | undefined
+    );
+
+    res.json({ catalog });
+  } catch (error) {
+    logger.error('Get connector catalog failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get connector catalog' });
+  }
+});
+
+// Get link token for provider (Chunk 3)
+router.post('/:provider/link-token', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { provider } = req.params;
+    const catalogEntry = await getConnectorByProvider(provider);
+
+    if (!catalogEntry) {
+      res.status(404).json({ error: 'Provider not found in catalog' });
+      return;
+    }
+
+    // Generate link token based on auth type
+    let linkToken: string;
+    let authorizationUrl: string | undefined;
+
+    switch (catalogEntry.authType) {
+      case 'link_token':
+        // For Plaid-style link tokens
+        linkToken = `link_token_${provider}_${req.user.tenantId}_${Date.now()}`;
+        break;
+      case 'oauth2':
+        // For OAuth2, generate state and return authorization URL
+        const state = `state_${req.user.tenantId}_${Date.now()}`;
+        linkToken = state;
+        authorizationUrl = `${catalogEntry.authConfig.baseUrl as string}/oauth/authorize?client_id=${catalogEntry.authConfig.clientId}&redirect_uri=${catalogEntry.authConfig.redirectUri}&state=${state}&scope=${catalogEntry.requiredScopes.join(' ')}`;
+        break;
+      case 'api_key':
+        // For API key-based, return instructions
+        linkToken = `api_key_${provider}_${req.user.tenantId}`;
+        break;
+      default:
+        throw new ValidationError(`Unsupported auth type: ${catalogEntry.authType}`);
+    }
+
+    res.json({
+      linkToken,
+      authorizationUrl,
+      provider: catalogEntry.provider,
+      providerName: catalogEntry.providerName,
+      authType: catalogEntry.authType,
+      instructions: catalogEntry.description,
+      documentationUrl: catalogEntry.documentationUrl,
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    logger.error('Get link token failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get link token' });
+  }
+});
 
 // Get all connectors for tenant
 router.get('/', async (req: AuthRequest, res: Response) => {
