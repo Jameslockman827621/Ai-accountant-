@@ -1,214 +1,171 @@
 import { Router, Response } from 'express';
-import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
+import { ValidationError } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import {
   generateProfitAndLoss,
   generateBalanceSheet,
   generateCashFlow,
 } from '../services/financialReports';
+import { exportReportToPDF, exportReportToExcel, scheduleReport } from '../services/export';
+import { ReportType, ScheduleFrequency } from '../types/reportTypes';
+import { asyncHandler } from '../utils/asyncHandler';
 
 const router = Router();
-const logger = createLogger('reporting-service');
-
 // Generate Profit & Loss
-router.get('/profit-loss', async (req: AuthRequest, res: Response) => {
-  try {
+router.get(
+  '/profit-loss',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    const { startDate, endDate } = req.query;
+    const startDate = parseDateQuery(req.query.startDate, 'startDate');
+    const endDate = parseDateQuery(req.query.endDate, 'endDate');
 
-    if (!startDate || !endDate) {
-      throw new ValidationError('Start date and end date are required');
-    }
-
-    const report = await generateProfitAndLoss(
-      req.user.tenantId,
-      new Date(startDate as string),
-      new Date(endDate as string)
-    );
-
+    const report = await generateProfitAndLoss(req.user.tenantId, startDate, endDate);
     res.json({ report });
-  } catch (error) {
-    logger.error('Generate P&L failed', error instanceof Error ? error : new Error(String(error)));
-    if (error instanceof ValidationError) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: 'Failed to generate P&L' });
-  }
-});
+  })
+);
 
 // Generate Balance Sheet
-router.get('/balance-sheet', async (req: AuthRequest, res: Response) => {
-  try {
+router.get(
+  '/balance-sheet',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    const { asOfDate } = req.query;
+    const asOfDate = parseDateQuery(req.query.asOfDate, 'asOfDate');
 
-    if (!asOfDate) {
-      throw new ValidationError('As of date is required');
-    }
-
-    const report = await generateBalanceSheet(
-      req.user.tenantId,
-      new Date(asOfDate as string)
-    );
-
+    const report = await generateBalanceSheet(req.user.tenantId, asOfDate);
     res.json({ report });
-  } catch (error) {
-    logger.error('Generate Balance Sheet failed', error instanceof Error ? error : new Error(String(error)));
-    if (error instanceof ValidationError) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: 'Failed to generate Balance Sheet' });
-  }
-});
+  })
+);
 
 // Generate Cash Flow
-router.get('/cash-flow', async (req: AuthRequest, res: Response) => {
-  try {
+router.get(
+  '/cash-flow',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    const { startDate, endDate } = req.query;
+    const startDate = parseDateQuery(req.query.startDate, 'startDate');
+    const endDate = parseDateQuery(req.query.endDate, 'endDate');
 
-    if (!startDate || !endDate) {
-      throw new ValidationError('Start date and end date are required');
-    }
-
-    const report = await generateCashFlow(
-      req.user.tenantId,
-      new Date(startDate as string),
-      new Date(endDate as string)
-    );
-
+    const report = await generateCashFlow(req.user.tenantId, startDate, endDate);
     res.json({ report });
-  } catch (error) {
-    logger.error('Generate Cash Flow failed', error instanceof Error ? error : new Error(String(error)));
-    if (error instanceof ValidationError) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: 'Failed to generate Cash Flow' });
-  }
-});
+  })
+);
 
 // Export report to PDF
-router.get('/:reportType/export/pdf', async (req: AuthRequest, res: Response) => {
-  try {
+router.get(
+  '/:reportType/export/pdf',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    const { reportType } = req.params;
-    const { periodStart, periodEnd } = req.query;
+    const reportType = parseReportType(req.params.reportType);
+    const periodStart = parseDateQuery(req.query.periodStart, 'periodStart');
+    const periodEnd = parseDateQuery(req.query.periodEnd, 'periodEnd');
 
-    if (!periodStart || !periodEnd) {
-      throw new ValidationError('periodStart and periodEnd are required');
-    }
-
-    const { exportReportToPDF } = await import('../services/export');
-
-    const pdfData = await exportReportToPDF(
-      req.user.tenantId,
-      reportType as any,
-      new Date(periodStart as string),
-      new Date(periodEnd as string)
-    );
-
+    const pdfData = await exportReportToPDF(req.user.tenantId, reportType, periodStart, periodEnd);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${reportType}-${periodStart}-${periodEnd}.pdf"`);
-    res.send(Buffer.from(pdfData.split(',')[1], 'base64'));
-  } catch (error) {
-    logger.error('Export PDF failed', error instanceof Error ? error : new Error(String(error)));
-    if (error instanceof ValidationError) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: 'Failed to export PDF' });
-  }
-});
+    const filename = `${reportType}-${formatDateSlug(periodStart)}-${formatDateSlug(periodEnd)}.pdf`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(Buffer.from(pdfData.split(',')[1] ?? '', 'base64'));
+  })
+);
 
 // Export report to Excel
-router.get('/:reportType/export/excel', async (req: AuthRequest, res: Response) => {
-  try {
+router.get(
+  '/:reportType/export/excel',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    const { reportType } = req.params;
-    const { periodStart, periodEnd } = req.query;
+    const reportType = parseReportType(req.params.reportType);
+    const periodStart = parseDateQuery(req.query.periodStart, 'periodStart');
+    const periodEnd = parseDateQuery(req.query.periodEnd, 'periodEnd');
 
-    if (!periodStart || !periodEnd) {
-      throw new ValidationError('periodStart and periodEnd are required');
-    }
-
-    const { exportReportToExcel } = await import('../services/export');
-
-    const excelBuffer = await exportReportToExcel(
-      req.user.tenantId,
-      reportType as any,
-      new Date(periodStart as string),
-      new Date(periodEnd as string)
-    );
-
+    const excelBuffer = await exportReportToExcel(req.user.tenantId, reportType, periodStart, periodEnd);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="${reportType}-${periodStart}-${periodEnd}.xlsx"`);
+    const filename = `${reportType}-${formatDateSlug(periodStart)}-${formatDateSlug(periodEnd)}.xlsx`;
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.send(excelBuffer);
-  } catch (error) {
-    logger.error('Export Excel failed', error instanceof Error ? error : new Error(String(error)));
-    if (error instanceof ValidationError) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: 'Failed to export Excel' });
-  }
-});
+  })
+);
 
 // Schedule report
-router.post('/:reportType/schedule', async (req: AuthRequest, res: Response) => {
-  try {
+router.post(
+  '/:reportType/schedule',
+  asyncHandler(async (req: AuthRequest, res: Response) => {
     if (!req.user) {
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    const { reportType } = req.params;
-    const { schedule, email } = req.body;
+    const reportType = parseReportType(req.params.reportType);
+    const body = getBody(req);
+    const schedule = parseSchedule(body.schedule);
+    const email = parseString(body.email, 'email');
 
-    if (!schedule || !email) {
-      throw new ValidationError('schedule and email are required');
-    }
-
-    const { scheduleReport } = await import('../services/export');
-
-    const scheduleId = await scheduleReport(
-      req.user.tenantId,
-      reportType as any,
-      schedule,
-      email
-    );
-
+    const scheduleId = await scheduleReport(req.user.tenantId, reportType, schedule, email);
     res.status(201).json({ scheduleId, message: 'Report scheduled successfully' });
-  } catch (error) {
-    logger.error('Schedule report failed', error instanceof Error ? error : new Error(String(error)));
-    if (error instanceof ValidationError) {
-      res.status(400).json({ error: error.message });
-      return;
-    }
-    res.status(500).json({ error: 'Failed to schedule report' });
-  }
-});
+  })
+);
 
 export { router as reportingRouter };
+
+const VALID_REPORT_TYPES: readonly ReportType[] = ['profit_loss', 'balance_sheet', 'cash_flow'] as const;
+const VALID_SCHEDULES: readonly ScheduleFrequency[] = ['daily', 'weekly', 'monthly'] as const;
+
+function getBody(req: AuthRequest): Record<string, unknown> {
+  if (typeof req.body === 'object' && req.body !== null) {
+    return req.body as Record<string, unknown>;
+  }
+  return {};
+}
+
+function parseString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new ValidationError(`${field} is required`);
+  }
+  return value.trim();
+}
+
+function parseDateQuery(value: unknown, field: string): Date {
+  const dateValue = parseString(value, field);
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new ValidationError(`${field} must be a valid date`);
+  }
+  return parsed;
+}
+
+function parseReportType(value: unknown): ReportType {
+  const normalized = parseString(value, 'reportType');
+  if (!VALID_REPORT_TYPES.includes(normalized as ReportType)) {
+    throw new ValidationError('Invalid report type');
+  }
+  return normalized as ReportType;
+}
+
+function parseSchedule(value: unknown): ScheduleFrequency {
+  const normalized = parseString(value, 'schedule').toLowerCase();
+  if (!VALID_SCHEDULES.includes(normalized as ScheduleFrequency)) {
+    throw new ValidationError('Invalid schedule value');
+  }
+  return normalized as ScheduleFrequency;
+}
+
+function formatDateSlug(date: Date): string {
+  return date.toISOString().split('T')[0];
+}

@@ -9,9 +9,9 @@
     "test": "jest"
   },
   "dependencies": {
-    "@ai-accountant/database": "workspace:*",
-    "@ai-accountant/shared-types": "workspace:*",
-    "@ai-accountant/shared-utils": "workspace:*",
+    "@ai-accountant/database": "*",
+    "@ai-accountant/shared-types": "*",
+    "@ai-accountant/shared-utils": "*",
     "axios": "^1.6.0"
   },
   "devDependencies": {

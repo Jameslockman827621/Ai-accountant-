@@ -1,7 +1,7 @@
+import crypto from 'node:crypto';
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { generateProfitAndLoss, generateBalanceSheet, generateCashFlow } from './financialReports';
 
 const logger = createLogger('reporting-service');
 
@@ -87,7 +87,7 @@ async function generateSection(
   const params: unknown[] = [tenantId, periodStart, periodEnd, section.accountCodes];
 
   // Apply filters
-  filters.forEach((filter, index) => {
+  filters.forEach(filter => {
     const paramIndex = params.length + 1;
     switch (filter.operator) {
       case 'equals':

@@ -24,11 +24,11 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
     req.user = {
       userId: payload.userId,
       tenantId: payload.tenantId,
-      role: payload.role as string,
+      role: payload.role,
     };
 
     next();
-  } catch (error) {
+  } catch {
     res.status(401).json({ error: 'Invalid token' });
   }
 }
