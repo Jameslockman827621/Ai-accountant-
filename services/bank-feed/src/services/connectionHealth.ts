@@ -24,11 +24,11 @@ export async function checkConnectionHealth(
     last_sync: Date | null;
     last_success: Date | null;
     error_count: number;
-    expires_at: Date | null;
+    token_expires_at: Date | null;
   }>(
-    `SELECT provider, last_sync, last_success, error_count, expires_at
+    `SELECT provider, last_sync, last_success, error_count, token_expires_at
      FROM bank_connections
-     WHERE tenant_id = $1 AND id = $2`,
+     WHERE tenant_id = $1 AND id = $2 AND is_active = true`,
     [tenantId, connectionId]
   );
 
@@ -40,27 +40,20 @@ export async function checkConnectionHealth(
   const now = new Date();
 
   let status: ConnectionHealth['status'] = 'healthy';
-  
-  // Check if expired
-  if (conn.expires_at && new Date(conn.expires_at) < now) {
+
+  if (conn.token_expires_at && new Date(conn.token_expires_at) < now) {
     status = 'expired';
-  }
-  // Check if last sync was too long ago (>7 days)
-  else if (conn.last_sync && (now.getTime() - new Date(conn.last_sync).getTime()) > 7 * 24 * 60 * 60 * 1000) {
+  } else if (conn.last_sync && now.getTime() - new Date(conn.last_sync).getTime() > 7 * 24 * 60 * 60 * 1000) {
     status = 'degraded';
-  }
-  // Check error count
-  else if (conn.error_count > 5) {
+  } else if (conn.error_count > 5) {
     status = 'degraded';
-  }
-  // Check if last success was too long ago
-  else if (!conn.last_success || (now.getTime() - new Date(conn.last_success).getTime()) > 3 * 24 * 60 * 60 * 1000) {
+  } else if (!conn.last_success || now.getTime() - new Date(conn.last_success).getTime() > 3 * 24 * 60 * 60 * 1000) {
     status = 'degraded';
   }
 
   const nextSync = conn.last_sync
-    ? new Date(new Date(conn.last_sync).getTime() + 24 * 60 * 60 * 1000) // 24 hours after last sync
-    : new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now
+    ? new Date(new Date(conn.last_sync).getTime() + 24 * 60 * 60 * 1000)
+    : new Date(now.getTime() + 60 * 60 * 1000);
 
   return {
     tenantId,
@@ -75,25 +68,14 @@ export async function checkConnectionHealth(
 }
 
 export async function getAllConnectionHealth(tenantId: TenantId): Promise<ConnectionHealth[]> {
-  const result = await db.query<{
-    id: string;
-    provider: string;
-    last_sync: Date | null;
-    last_success: Date | null;
-    error_count: number;
-    expires_at: Date | null;
-  }>(
-    `SELECT id, provider, last_sync, last_success, error_count, expires_at
+  const result = await db.query<{ id: string }>(
+    `SELECT id
      FROM bank_connections
-     WHERE tenant_id = $1`,
+     WHERE tenant_id = $1 AND is_active = true`,
     [tenantId]
   );
 
-  return Promise.all(
-    result.rows.map(row =>
-      checkConnectionHealth(tenantId, row.id)
-    )
-  );
+  return Promise.all(result.rows.map(row => checkConnectionHealth(tenantId, row.id)));
 }
 
 export async function recordSyncSuccess(

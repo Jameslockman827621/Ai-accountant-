@@ -7,6 +7,7 @@ import { detectAnomalies } from '../services/anomalyDetector';
 import { checkConfidenceThresholds, enforceConfidenceThreshold } from '../services/confidenceThreshold';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { runValidationSuite } from '../services/validationSummary';
+import { getLatestValidationRun } from '../services/validationRunStore';
 
 const router = Router();
 const logger = createLogger('validation-service');
@@ -167,15 +168,19 @@ router.post('/summary', async (req: AuthRequest, res: Response) => {
       throw new ValidationError('entityType and entityId are required');
     }
 
+    const resolvedEntityId =
+      entityType === 'tenant' && entityId === 'self' ? req.user.tenantId : entityId;
+
     const summary = await runValidationSuite({
       tenantId: req.user.tenantId,
       entityType,
-      entityId,
+      entityId: resolvedEntityId,
       filingType,
       filingData,
       periodStart: parseDate(periodStart, 'periodStart'),
       periodEnd: parseDate(periodEnd, 'periodEnd'),
       includeConfidenceChecks,
+        triggeredBy: req.user.userId,
     });
 
     res.json(summary);
@@ -186,6 +191,79 @@ router.post('/summary', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to execute validation summary' });
+  }
+});
+
+router.post('/runs', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { entityType, entityId, filingType, filingData, periodStart, periodEnd, includeConfidenceChecks } = req.body;
+
+    if (!entityType || !entityId) {
+      throw new ValidationError('entityType and entityId are required');
+    }
+
+    const resolvedEntityId =
+      entityType === 'tenant' && entityId === 'self' ? req.user.tenantId : entityId;
+
+    const summary = await runValidationSuite({
+      tenantId: req.user.tenantId,
+      entityType,
+      entityId: resolvedEntityId,
+      filingType,
+      filingData,
+      periodStart: parseDate(periodStart, 'periodStart'),
+      periodEnd: parseDate(periodEnd, 'periodEnd'),
+      includeConfidenceChecks,
+      triggeredBy: req.user.userId,
+    });
+
+    res.status(202).json(summary);
+  } catch (error) {
+    logger.error('Validation run failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to run validation suite' });
+  }
+});
+
+router.get('/runs/latest', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const entityType = String(req.query.entityType || '');
+    const entityId = String(req.query.entityId || '');
+
+    if (!entityType || !entityId) {
+      throw new ValidationError('entityType and entityId query parameters are required');
+    }
+
+    const resolvedEntityId =
+      entityType === 'tenant' && entityId === 'self' ? req.user.tenantId : entityId;
+
+    const run = await getLatestValidationRun(req.user.tenantId, entityType, resolvedEntityId);
+    if (!run) {
+      res.status(404).json({ error: 'No validation run found' });
+      return;
+    }
+
+    res.json({ run });
+  } catch (error) {
+    logger.error('Fetch validation run failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to fetch validation run' });
   }
 });
 

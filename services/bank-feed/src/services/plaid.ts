@@ -15,6 +15,7 @@ import {
   markConnectionRefreshed,
   persistConnectionTokens,
 } from './connectionStore';
+import { recordSyncError, recordSyncSuccess } from './connectionHealth';
 
 const logger = createLogger('bank-feed-service');
 
@@ -69,19 +70,21 @@ export async function createLinkToken(userId: string): Promise<string> {
 
 export async function exchangePublicToken(
   publicToken: string,
-  tenantId: TenantId
+  tenantId: TenantId,
+  metadata?: Record<string, unknown>
 ): Promise<{ connectionId: string; itemId: string }> {
   try {
     const response = await plaidClient.itemPublicTokenExchange({
       public_token: publicToken,
     });
 
-    const { access_token: accessToken, item_id: itemId } = response.data;
+      const { access_token: accessToken, item_id: itemId } = response.data;
     const connectionId = await persistConnectionTokens({
       tenantId,
       provider: 'plaid',
       accessToken,
       itemId,
+        metadata: metadata || undefined,
     });
 
     return { connectionId, itemId };
@@ -136,9 +139,10 @@ export async function syncPlaidTransactions(
       );
     }
 
-    await markConnectionRefreshed(connectionId, {
-      accessToken: secrets.accessToken,
-    });
+      await markConnectionRefreshed(connectionId, {
+        accessToken: secrets.accessToken,
+      });
+      await recordSyncSuccess(tenantId, connectionId);
 
     logger.info('Plaid transactions synced', {
       tenantId,
@@ -148,12 +152,13 @@ export async function syncPlaidTransactions(
 
     return transactions.length;
   } catch (error) {
-    logger.error(
-      'Failed to sync Plaid transactions',
-      error instanceof Error ? error : new Error(String(error)),
-      { tenantId, connectionId }
-    );
-    throw new Error('Failed to fetch transactions');
+      const errObj = error instanceof Error ? error : new Error(String(error));
+      await recordSyncError(tenantId, connectionId, errObj.message);
+      logger.error('Failed to sync Plaid transactions', errObj, {
+        tenantId,
+        connectionId,
+      });
+      throw new Error('Failed to fetch transactions');
   }
 }
 

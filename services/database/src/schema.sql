@@ -29,6 +29,10 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(20) NOT NULL CHECK (role IN ('super_admin', 'accountant', 'client', 'viewer')),
     is_active BOOLEAN NOT NULL DEFAULT true,
+    email_verified BOOLEAN NOT NULL DEFAULT false,
+    email_verified_at TIMESTAMP WITH TIME ZONE,
+    mfa_enabled BOOLEAN NOT NULL DEFAULT false,
+    mfa_secret TEXT,
     last_login_at TIMESTAMP WITH TIME ZONE,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -49,6 +53,13 @@ CREATE TABLE documents (
     extracted_data JSONB,
     confidence_score DECIMAL(5, 4),
     error_message TEXT,
+    quality_score DECIMAL(5, 2),
+    quality_issues JSONB,
+    upload_checklist JSONB,
+    page_count INTEGER,
+    upload_source VARCHAR(30),
+    upload_notes TEXT,
+    suggested_document_type VARCHAR(20) CHECK (suggested_document_type IN ('invoice', 'receipt', 'statement', 'payslip', 'tax_form', 'other')),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -60,6 +71,80 @@ CREATE TABLE chart_of_accounts (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+
+CREATE TABLE bank_connections (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    provider VARCHAR(50) NOT NULL CHECK (provider IN ('plaid', 'truelayer')),
+    access_token_encrypted JSONB,
+    refresh_token_encrypted JSONB,
+    webhook_secret_encrypted JSONB,
+    token_expires_at TIMESTAMP WITH TIME ZONE,
+    last_refreshed_at TIMESTAMP WITH TIME ZONE,
+    last_sync TIMESTAMP WITH TIME ZONE,
+    last_success TIMESTAMP WITH TIME ZONE,
+    last_error TEXT,
+    item_id TEXT,
+    provider_account_id TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    exception_count INTEGER NOT NULL DEFAULT 0,
+    error_count INTEGER NOT NULL DEFAULT 0,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (tenant_id, provider, COALESCE(provider_account_id, item_id))
+);
+
+CREATE INDEX idx_bank_connections_tenant_id ON bank_connections(tenant_id);
+CREATE INDEX idx_bank_connections_provider ON bank_connections(provider);
+CREATE INDEX idx_bank_connections_is_active ON bank_connections(is_active);
+CREATE INDEX idx_bank_connections_status ON bank_connections(provider, is_active);
+CREATE INDEX idx_bank_connections_token_expiry ON bank_connections(provider, token_expires_at) WHERE token_expires_at IS NOT NULL;
+
+ALTER TABLE bank_connections ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation_bank_connections ON bank_connections
+    FOR ALL
+    USING (true); -- application enforces tenant scoping
+
+CREATE TRIGGER update_bank_connections_updated_at BEFORE UPDATE ON bank_connections
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TABLE email_verification_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    consumed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(token_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_user_id ON email_verification_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_email_verification_tokens_expires_at ON email_verification_tokens(expires_at);
+
+CREATE TABLE password_reset_tokens (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    consumed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(token_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user_id ON password_reset_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_expires_at ON password_reset_tokens(expires_at);
+
+CREATE TABLE mfa_challenges (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    challenge_token TEXT NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    consumed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_mfa_challenges_user_id ON mfa_challenges(user_id);
+CREATE INDEX IF NOT EXISTS idx_mfa_challenges_token ON mfa_challenges(challenge_token);
+CREATE INDEX IF NOT EXISTS idx_mfa_challenges_expires_at ON mfa_challenges(expires_at);
 
 -- Ledger Entries table
 CREATE TABLE ledger_entries (
@@ -132,6 +217,50 @@ CREATE TABLE tax_rulepacks (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     UNIQUE(country, version)
 );
+
+-- Validation results and runs
+CREATE TABLE validation_results (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id UUID NOT NULL,
+    validation_type VARCHAR(50) NOT NULL,
+    is_valid BOOLEAN NOT NULL,
+    errors JSONB NOT NULL DEFAULT '[]'::jsonb,
+    warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+    confidence DECIMAL(5, 4),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE validation_runs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    entity_type VARCHAR(50) NOT NULL,
+    entity_id UUID NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('pass', 'warning', 'fail')),
+    errors JSONB NOT NULL DEFAULT '[]'::jsonb,
+    warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+    summary JSONB NOT NULL DEFAULT '{}'::jsonb,
+    triggered_by UUID REFERENCES users(id),
+    triggered_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE validation_run_components (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    run_id UUID NOT NULL REFERENCES validation_runs(id) ON DELETE CASCADE,
+    component VARCHAR(50) NOT NULL,
+    status VARCHAR(20) NOT NULL CHECK (status IN ('pass', 'warning', 'fail')),
+    errors JSONB NOT NULL DEFAULT '[]'::jsonb,
+    warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metrics JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_validation_results_entity ON validation_results(tenant_id, entity_type, entity_id);
+CREATE INDEX idx_validation_runs_entity ON validation_runs(tenant_id, entity_type, entity_id);
+CREATE INDEX idx_validation_run_components_run ON validation_run_components(run_id);
 
 -- Bank Transactions table
 CREATE TABLE bank_transactions (
