@@ -12,6 +12,8 @@ import {
 import { InstallableTaxRulepack } from './rulepackTypes';
 import { getBuiltInUSRulepacks } from '../../../multi-jurisdiction/src/services/usTaxSystem';
 import { getBuiltInEUTaxRulepacks } from '../../../multi-jurisdiction/src/services/euTaxSystem';
+import { getBuiltInCanadaRulepacks } from '../../../multi-jurisdiction/src/services/canadaTaxSystem';
+import { getBuiltInMexicoRulepacks } from '../../../multi-jurisdiction/src/services/mexicoTaxSystem';
 
 const logger = createLogger('rules-engine-service');
 
@@ -42,6 +44,8 @@ type RegressionCaseResult = {
 const BUILT_IN_RULEPACKS: InstallableTaxRulepack[] = [
   ...getBuiltInUSRulepacks(),
   ...getBuiltInEUTaxRulepacks(),
+  ...getBuiltInCanadaRulepacks(),
+  ...getBuiltInMexicoRulepacks(),
 ];
 
 export async function getTaxRulepack(
