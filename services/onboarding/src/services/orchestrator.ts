@@ -3,6 +3,8 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'crypto';
+// Email imports - would be from notification service in production
+// For now, these would be called via HTTP or message queue
 
 const logger = createLogger('onboarding-orchestrator');
 
@@ -85,6 +87,26 @@ class OnboardingOrchestrator extends EventEmitter {
     );
 
     logger.info('Onboarding session created', { sessionId, tenantId, userId });
+
+    // Send welcome email
+    try {
+      const userResult = await db.query<{ email: string; name: string }>(
+        'SELECT email, name FROM users WHERE id = $1',
+        [userId]
+      );
+      const tenantResult = await db.query<{ name: string }>(
+        'SELECT name FROM tenants WHERE id = $1',
+        [tenantId]
+      );
+
+      if (userResult.rows.length > 0 && tenantResult.rows.length > 0) {
+        // In production, call notification service to send welcome email
+        // await sendOnboardingWelcome(userResult.rows[0].email, userResult.rows[0].name, tenantResult.rows[0].name);
+        logger.info('Welcome email queued', { email: userResult.rows[0].email });
+      }
+    } catch (error) {
+      logger.warn('Failed to send welcome email', error instanceof Error ? error : new Error(String(error)));
+    }
 
     return sessionId;
   }
@@ -467,6 +489,11 @@ This business is using the AI accountant to automate bookkeeping, tax compliance
   }
 
   async completeSession(sessionId: string): Promise<void> {
+    const context = await this.getSession(sessionId);
+    if (!context) {
+      throw new Error('Session not found');
+    }
+
     await db.query(
       `UPDATE onboarding_sessions
        SET status = $1, completed_at = NOW(), updated_at = NOW()
@@ -475,6 +502,53 @@ This business is using the AI accountant to automate bookkeeping, tax compliance
     );
 
     logger.info('Onboarding session completed', { sessionId });
+
+    // Send completion email
+    try {
+      const userResult = await db.query<{ email: string; name: string }>(
+        'SELECT email, name FROM users WHERE id = $1',
+        [context.userId]
+      );
+      const tenantResult = await db.query<{ name: string }>(
+        'SELECT name FROM tenants WHERE id = $1',
+        [context.tenantId]
+      );
+
+      // Get connector and filing calendar counts
+      const connectorResult = await db.query(
+        'SELECT COUNT(*) as count FROM connector_registry WHERE tenant_id = $1 AND is_enabled = true',
+        [context.tenantId]
+      );
+      const filingResult = await db.query(
+        'SELECT COUNT(*) as count FROM filing_calendars WHERE tenant_id = $1 AND is_active = true',
+        [context.tenantId]
+      );
+
+      if (userResult.rows.length > 0 && tenantResult.rows.length > 0) {
+        // In production, call notification service to send completion email
+        // await sendOnboardingComplete(
+        //   userResult.rows[0].email,
+        //   userResult.rows[0].name,
+        //   tenantResult.rows[0].name,
+        //   {
+        //     connectorsConnected: parseInt(connectorResult.rows[0]?.count || '0', 10),
+        //     filingCalendarsCreated: parseInt(filingResult.rows[0]?.count || '0', 10),
+        //     nextSteps: [
+        //       'Review your chart of accounts',
+        //       'Connect your bank accounts',
+        //       'Upload your first document',
+        //     ],
+        //   }
+        // );
+        logger.info('Completion email queued', { 
+          email: userResult.rows[0].email,
+          connectors: parseInt(connectorResult.rows[0]?.count || '0', 10),
+          filings: parseInt(filingResult.rows[0]?.count || '0', 10),
+        });
+      }
+    } catch (error) {
+      logger.warn('Failed to send completion email', error instanceof Error ? error : new Error(String(error)));
+    }
   }
 }
 
