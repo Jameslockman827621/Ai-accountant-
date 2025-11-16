@@ -8,6 +8,7 @@ import { bankFeedWebhookRouter } from './routes/webhooks';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 import { startTokenMaintenance } from './services/tokenMaintenance';
+import { startRetryWorker } from './workers/retryWorker';
 
 config();
 
@@ -37,5 +38,6 @@ app.listen(PORT, () => {
 });
 
 startTokenMaintenance();
+startRetryWorker();
 
 export default app;

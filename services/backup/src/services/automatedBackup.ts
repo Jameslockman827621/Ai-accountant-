@@ -45,12 +45,13 @@ export class AutomatedBackupService {
     const backupId = randomUUID();
     const storageLocation = `backups/${tenantId}/${backupId}.tar.gz`;
 
-    // Create backup record
+    // Create backup record (using backups table - the main table)
     await db.query(
       `INSERT INTO backups (
         id, tenant_id, backup_type, status, storage_location,
         started_at, created_at
-      ) VALUES ($1, $2, $3, 'in_progress', $4, NOW(), NOW())`,
+      ) VALUES ($1, $2, $3, 'in_progress', $4, NOW(), NOW())
+      ON CONFLICT DO NOTHING`,
       [backupId, tenantId, backupType, storageLocation]
     );
 

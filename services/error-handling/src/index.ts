@@ -6,6 +6,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { errorHandlingRouter } from './routes/errorHandling';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { startErrorRetryWorker } from './workers/retryWorker';
 
 config();
 
@@ -32,5 +33,7 @@ app.use(errorHandler);
 app.listen(PORT, () => {
   logger.info(`Error handling service listening on port ${PORT}`);
 });
+
+startErrorRetryWorker();
 
 export default app;

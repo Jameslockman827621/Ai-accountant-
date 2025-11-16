@@ -314,6 +314,32 @@ router.post('/webhook/stripe', async (req, res: Response) => {
     const signature = req.headers['stripe-signature'];
     const event = constructStripeEvent(req.body, signature);
     
+    // Idempotency check - prevent duplicate processing
+    const eventId = event.id;
+    const tenantId = (event.data.object as any).metadata?.tenantId as string | undefined;
+    
+    const existingResult = await db.query<{
+      id: string;
+    }>(
+      `SELECT id FROM webhook_events
+       WHERE id = $1 AND provider = 'stripe'`,
+      [eventId]
+    );
+
+    if (existingResult.rows.length > 0) {
+      logger.info('Duplicate webhook event ignored', { eventId, type: event.type });
+      res.json({ received: true, duplicate: true });
+      return;
+    }
+
+    // Store event for idempotency
+    await db.query(
+      `INSERT INTO webhook_events (id, tenant_id, provider, event_type, payload, created_at)
+       VALUES ($1, $2, 'stripe', $3, $4::jsonb, NOW())`,
+      [eventId, tenantId || 'unknown', event.type, JSON.stringify(event)]
+    );
+
+    // Process webhook
     await handleStripeWebhook(event);
     
     res.json({ received: true });
