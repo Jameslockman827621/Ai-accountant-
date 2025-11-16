@@ -111,6 +111,62 @@ export function useConnectors(token: string | null) {
     [token]
   );
 
+  const getCatalog = useCallback(
+    async (jurisdiction?: string, entityType?: string, connectorType?: string) => {
+      if (!token) {
+        return [];
+      }
+
+      try {
+        const params = new URLSearchParams();
+        if (jurisdiction) params.append('jurisdiction', jurisdiction);
+        if (entityType) params.append('entityType', entityType);
+        if (connectorType) params.append('connectorType', connectorType);
+
+        const response = await fetch(`${API_BASE}/api/connectors/catalog?${params.toString()}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to load connector catalog');
+        }
+
+        const data = await response.json();
+        return data.catalog || [];
+      } catch (err) {
+        console.error('Failed to fetch connector catalog', err);
+        return [];
+      }
+    },
+    [token]
+  );
+
+  const getLinkToken = useCallback(
+    async (provider: string) => {
+      if (!token) {
+        throw new Error('Missing authentication token');
+      }
+
+      const response = await fetch(`${API_BASE}/api/connectors/${provider}/link-token`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get link token');
+      }
+
+      const data = await response.json();
+      return data;
+    },
+    [token]
+  );
+
   return {
     connectors,
     isLoading,
@@ -118,5 +174,7 @@ export function useConnectors(token: string | null) {
     refresh: fetchConnectors,
     registerConnector,
     initiateConnection,
+    getCatalog,
+    getLinkToken,
   };
 }

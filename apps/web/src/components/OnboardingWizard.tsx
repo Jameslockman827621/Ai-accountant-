@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DocumentUpload from './DocumentUpload';
 import { DocumentType } from '@ai-accountant/shared-types';
-import BankConnectionsPanel from './BankConnectionsPanel';
+import UnifiedConnectionsPanel from './UnifiedConnectionsPanel';
 import type {
   OnboardingEventType,
   OnboardingProgress,
   OnboardingStep,
 } from '@/hooks/useOnboarding';
+import { useOnboarding } from '@/hooks/useOnboarding';
 
 interface OnboardingWizardProps {
   token: string;
@@ -179,11 +180,36 @@ export default function OnboardingWizard({
   isSubmitting,
   getStepData,
 }: OnboardingWizardProps) {
+  const { getSchema, saveStepData } = useOnboarding(token);
   const [wizardState, setWizardState] = useState<WizardState>(() => createDefaultWizardState());
   const [stepError, setStepError] = useState<string | null>(null);
   const [hydratingStep, setHydratingStep] = useState(false);
+  const [schema, setSchema] = useState<any>(null);
   const hydratedSteps = useRef<Set<OnboardingStep>>(new Set());
   const lastTrackedStep = useRef<OnboardingStep | null>(null);
+
+  // Load schema when jurisdiction is available
+  useEffect(() => {
+    const loadSchema = async () => {
+      const jurisdiction = wizardState.business_profile.country || 'GB';
+      try {
+        const schemaData = await getSchema(
+          jurisdiction,
+          wizardState.business_profile.businessType || undefined,
+          wizardState.business_profile.industry || undefined
+        );
+        if (schemaData) {
+          setSchema(schemaData);
+        }
+      } catch (err) {
+        console.error('Failed to load schema', err);
+      }
+    };
+
+    if (wizardState.business_profile.country) {
+      void loadSchema();
+    }
+  }, [wizardState.business_profile.country, wizardState.business_profile.businessType, wizardState.business_profile.industry, getSchema]);
 
   const activeStepIndex = useMemo(() => {
     const idx = STEP_DEFINITIONS.findIndex(step => step.key === progress.currentStep);
@@ -267,11 +293,22 @@ export default function OnboardingWizard({
     const payload = buildPayload(activeDefinition.key, wizardState);
 
     try {
+      // Save as draft if schema is available
+      if (schema && wizardState.business_profile.country) {
+        await saveStepData(
+          activeDefinition.key,
+          payload,
+          wizardState.business_profile.country,
+          wizardState.business_profile.businessType || undefined,
+          wizardState.business_profile.industry || undefined
+        );
+      }
+
       await onStepComplete(activeDefinition.key, payload);
     } catch (error) {
       setStepError(error instanceof Error ? error.message : 'Unable to complete this step right now.');
     }
-  }, [activeDefinition.key, onStepComplete, wizardState]);
+  }, [activeDefinition.key, onStepComplete, wizardState, schema, saveStepData]);
 
   const handleSkip = useCallback(async () => {
     setStepError(null);
@@ -323,6 +360,10 @@ export default function OnboardingWizard({
                 { value: 'GB', label: 'United Kingdom' },
                 { value: 'IE', label: 'Ireland' },
                 { value: 'US', label: 'United States' },
+                { value: 'CA', label: 'Canada' },
+                { value: 'AU', label: 'Australia' },
+                { value: 'SG', label: 'Singapore' },
+                { value: 'MX', label: 'Mexico' },
               ]}
             />
             <SelectField
@@ -337,10 +378,10 @@ export default function OnboardingWizard({
               ]}
             />
             <InputField
-              label="VAT number (optional)"
+              label={schema?.localization?.currencyCode === 'GBP' ? 'VAT number (optional)' : schema?.localization?.currencyCode === 'USD' ? 'Sales Tax ID (optional)' : 'Tax Registration Number (optional)'}
               value={wizardState.business_profile.vatNumber}
               onChange={value => updateState('business_profile', { vatNumber: value })}
-              placeholder="GB123456789"
+              placeholder={schema?.localization?.currencyCode === 'GBP' ? 'GB123456789' : schema?.localization?.currencyCode === 'USD' ? 'State-specific format' : 'Enter registration number'}
             />
             <InputField
               label="Employees / contractors"
@@ -443,7 +484,12 @@ export default function OnboardingWizard({
             />
             <div className="rounded-2xl border border-dashed border-blue-200 bg-blue-50/40 p-4">
               {token ? (
-                <BankConnectionsPanel token={token} variant="onboarding" />
+                <UnifiedConnectionsPanel
+                  token={token}
+                  variant="onboarding"
+                  jurisdiction={wizardState.business_profile.country}
+                  entityType={wizardState.business_profile.businessType}
+                />
               ) : (
                 <p className="text-sm text-blue-900">
                   Sign in again to link your bank feeds directly from onboarding.
