@@ -87,7 +87,7 @@ export default function HMRCCallbackPage() {
       }
     }
 
-    finalizeConnection();
+    void finalizeConnection();
   }, [redirectUri, router, searchParams, token]);
 
   return (
