@@ -20,6 +20,12 @@ import ExecutiveInsightsPanel from './ExecutiveInsightsPanel';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import DocumentIntakePanel from './DocumentIntakePanel';
 import ValidationCenter from './ValidationCenter';
+import ValidationDashboard from './ValidationDashboard';
+import ReviewQueue from './ReviewQueue';
+import ErrorRecoveryCenter from './ErrorRecoveryCenter';
+import BankConnectionHealth from './BankConnectionHealth';
+import ReconciliationReport from './ReconciliationReport';
+import FilingReviewPanel from './FilingReviewPanel';
 
 interface DashboardStats {
   period: {
@@ -310,6 +316,13 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             )}
             <BankConnectionsPanel token={token} />
             <SupportCenterPanel token={token} />
+            
+            {/* New World-Class Components */}
+            <ValidationDashboard />
+            <ReviewQueue />
+            <ErrorRecoveryCenter />
+            <BankConnectionHealth />
+            <ReconciliationReport />
           </div>
         </div>
       );

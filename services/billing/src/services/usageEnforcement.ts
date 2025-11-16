@@ -4,162 +4,210 @@ import { TenantId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('billing-service');
 
-export interface UsageLimits {
-  documents: number;
-  ocrRequests: number;
-  llmQueries: number;
-  storage: number; // bytes
-  filings: number;
+export interface TierLimits {
+  documentsPerMonth: number;
+  ocrRequestsPerMonth: number;
+  llmQueriesPerMonth: number;
+  filingsPerMonth: number;
+  storageGB: number;
+  bankConnections: number;
+  clients?: number; // For accountant tier
 }
 
-const TIER_LIMITS: Record<string, UsageLimits> = {
+const TIER_LIMITS: Record<string, TierLimits> = {
   freelancer: {
-    documents: 100,
-    ocrRequests: 100,
-    llmQueries: 500,
-    storage: 1000000000, // 1GB
-    filings: 12,
+    documentsPerMonth: 100,
+    ocrRequestsPerMonth: 100,
+    llmQueriesPerMonth: 500,
+    filingsPerMonth: 12,
+    storageGB: 5,
+    bankConnections: 2,
   },
   sme: {
-    documents: 500,
-    ocrRequests: 500,
-    llmQueries: 2000,
-    storage: 5000000000, // 5GB
-    filings: 12,
+    documentsPerMonth: 1000,
+    ocrRequestsPerMonth: 1000,
+    llmQueriesPerMonth: 5000,
+    filingsPerMonth: 50,
+    storageGB: 50,
+    bankConnections: 10,
   },
   accountant: {
-    documents: 2000,
-    ocrRequests: 2000,
-    llmQueries: 10000,
-    storage: 20000000000, // 20GB
-    filings: 50,
+    documentsPerMonth: 10000,
+    ocrRequestsPerMonth: 10000,
+    llmQueriesPerMonth: 50000,
+    filingsPerMonth: 500,
+    storageGB: 500,
+    bankConnections: 100,
+    clients: 50,
   },
   enterprise: {
-    documents: -1, // Unlimited
-    ocrRequests: -1,
-    llmQueries: -1,
-    storage: -1,
-    filings: -1,
+    documentsPerMonth: 100000,
+    ocrRequestsPerMonth: 100000,
+    llmQueriesPerMonth: 500000,
+    filingsPerMonth: 5000,
+    storageGB: 5000,
+    bankConnections: 1000,
+    clients: 1000,
   },
 };
 
+export interface UsageCheck {
+  allowed: boolean;
+  reason?: string;
+  currentUsage: number;
+  limit: number;
+  remaining: number;
+}
+
+/**
+ * Enforce tier limits and usage-based billing
+ */
 export async function checkUsageLimit(
   tenantId: TenantId,
-  limitType: keyof UsageLimits
-): Promise<{ allowed: boolean; remaining: number; limit: number }> {
+  resourceType: 'documents' | 'ocr' | 'llm' | 'filings' | 'storage' | 'bank_connections' | 'clients'
+): Promise<UsageCheck> {
   // Get tenant tier
-  const tenant = await db.query<{
+  const tenantResult = await db.query<{
     subscription_tier: string;
   }>(
-    'SELECT subscription_tier FROM tenants WHERE id = $1',
+    `SELECT subscription_tier
+     FROM tenants
+     WHERE id = $1`,
     [tenantId]
   );
 
-  if (tenant.rows.length === 0) {
+  if (tenantResult.rows.length === 0) {
     throw new Error('Tenant not found');
   }
 
-  const tier = tenant.rows[0].subscription_tier;
+  const tier = tenantResult.rows[0].subscription_tier as keyof typeof TIER_LIMITS;
   const limits = TIER_LIMITS[tier] || TIER_LIMITS.freelancer;
-  const limit = limits[limitType];
 
-  // Unlimited
-  if (limit === -1) {
-    return { allowed: true, remaining: -1, limit: -1 };
-  }
-
-  // Get current usage for the month
+  // Get current period usage
   const currentPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
 
-  const usage = await db.query<{
+  const usageResult = await db.query<{
     documents_processed: number;
     ocr_requests: number;
     llm_queries: number;
-    storage_used: number;
     filings_submitted: number;
+    storage_used: number;
   }>(
-    `SELECT documents_processed, ocr_requests, llm_queries, storage_used, filings_submitted
+    `SELECT 
+       documents_processed, ocr_requests, llm_queries,
+       filings_submitted, storage_used
      FROM usage_metrics
      WHERE tenant_id = $1 AND period = $2`,
     [tenantId, currentPeriod]
   );
 
-  const usageData = usage.rows[0] || {
+  const usage = usageResult.rows[0] || {
     documents_processed: 0,
     ocr_requests: 0,
     llm_queries: 0,
-    storage_used: 0,
     filings_submitted: 0,
+    storage_used: 0,
   };
 
-  let currentUsage = 0;
-  switch (limitType) {
+  // Map resource type to limit and usage
+  let limit: number;
+  let currentUsage: number;
+
+  switch (resourceType) {
     case 'documents':
-      currentUsage = typeof usageData.documents_processed === 'number'
-        ? usageData.documents_processed
-        : parseInt(String(usageData.documents_processed || '0'), 10);
+      limit = limits.documentsPerMonth;
+      currentUsage = parseInt(String(usage.documents_processed || 0), 10);
       break;
-    case 'ocrRequests':
-      currentUsage = typeof usageData.ocr_requests === 'number'
-        ? usageData.ocr_requests
-        : parseInt(String(usageData.ocr_requests || '0'), 10);
+    case 'ocr':
+      limit = limits.ocrRequestsPerMonth;
+      currentUsage = parseInt(String(usage.ocr_requests || 0), 10);
       break;
-    case 'llmQueries':
-      currentUsage = typeof usageData.llm_queries === 'number'
-        ? usageData.llm_queries
-        : parseInt(String(usageData.llm_queries || '0'), 10);
-      break;
-    case 'storage':
-      currentUsage = typeof usageData.storage_used === 'number'
-        ? usageData.storage_used
-        : parseInt(String(usageData.storage_used || '0'), 10);
+    case 'llm':
+      limit = limits.llmQueriesPerMonth;
+      currentUsage = parseInt(String(usage.llm_queries || 0), 10);
       break;
     case 'filings':
-      currentUsage = typeof usageData.filings_submitted === 'number'
-        ? usageData.filings_submitted
-        : parseInt(String(usageData.filings_submitted || '0'), 10);
+      limit = limits.filingsPerMonth;
+      currentUsage = parseInt(String(usage.filings_submitted || 0), 10);
       break;
+    case 'storage':
+      limit = limits.storageGB;
+      currentUsage = parseFloat(String(usage.storage_used || 0));
+      break;
+    case 'bank_connections':
+      limit = limits.bankConnections;
+      // Get actual count
+      const connResult = await db.query<{
+        count: number;
+      }>(
+        `SELECT COUNT(*) as count
+         FROM bank_connections
+         WHERE tenant_id = $1 AND is_active = true`,
+        [tenantId]
+      );
+      currentUsage = parseInt(String(connResult.rows[0]?.count || 0), 10);
+      break;
+    case 'clients':
+      limit = limits.clients || 0;
+      // Get actual count (for accountant tier)
+      const clientsResult = await db.query<{
+        count: number;
+      }>(
+        `SELECT COUNT(*) as count
+         FROM tenants
+         WHERE metadata->>'parent_tenant_id' = $1`,
+        [tenantId]
+      );
+      currentUsage = parseInt(String(clientsResult.rows[0]?.count || 0), 10);
+      break;
+    default:
+      throw new Error(`Unknown resource type: ${resourceType}`);
   }
 
-  const remaining = limit - currentUsage;
-  const allowed = remaining > 0;
+  const allowed = currentUsage < limit;
+  const remaining = Math.max(0, limit - currentUsage);
 
-  return { allowed, remaining, limit };
+  return {
+    allowed,
+    reason: allowed ? undefined : `Limit reached for ${resourceType}. Current: ${currentUsage}, Limit: ${limit}`,
+    currentUsage,
+    limit,
+    remaining,
+  };
 }
 
-export async function incrementUsage(
+/**
+ * Record usage for a resource
+ */
+export async function recordUsage(
   tenantId: TenantId,
-  limitType: keyof UsageLimits,
+  resourceType: 'documents' | 'ocr' | 'llm' | 'filings' | 'storage',
   amount: number = 1
 ): Promise<void> {
-  const currentPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const currentPeriod = new Date().toISOString().slice(0, 7);
 
-  let field = '';
-  switch (limitType) {
-    case 'documents':
-      field = 'documents_processed';
-      break;
-    case 'ocrRequests':
-      field = 'ocr_requests';
-      break;
-    case 'llmQueries':
-      field = 'llm_queries';
-      break;
-    case 'storage':
-      field = 'storage_used';
-      break;
-    case 'filings':
-      field = 'filings_submitted';
-      break;
+  const fieldMap: Record<string, string> = {
+    documents: 'documents_processed',
+    ocr: 'ocr_requests',
+    llm: 'llm_queries',
+    filings: 'filings_submitted',
+    storage: 'storage_used',
+  };
+
+  const field = fieldMap[resourceType];
+  if (!field) {
+    throw new Error(`Unknown resource type: ${resourceType}`);
   }
 
   await db.query(
-    `INSERT INTO usage_metrics (tenant_id, period, ${field}, created_at)
-     VALUES ($1, $2, $3, NOW())
-     ON CONFLICT (tenant_id, period) DO UPDATE
-     SET ${field} = usage_metrics.${field} + $3`,
+    `INSERT INTO usage_metrics (
+      id, tenant_id, period, ${field}, created_at, updated_at
+    ) VALUES (gen_random_uuid(), $1, $2, $3, NOW(), NOW())
+    ON CONFLICT (tenant_id, period) DO UPDATE
+    SET ${field} = usage_metrics.${field} + $3,
+        updated_at = NOW()`,
     [tenantId, currentPeriod, amount]
   );
 
-  logger.debug('Usage incremented', { tenantId, limitType, amount });
+  logger.debug('Usage recorded', { tenantId, resourceType, amount, period: currentPeriod });
 }

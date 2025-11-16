@@ -8,6 +8,9 @@ import { checkConfidenceThresholds, enforceConfidenceThreshold } from '../servic
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { runValidationSuite } from '../services/validationSummary';
 import { getLatestValidationRun } from '../services/validationRunStore';
+import { crossValidateData } from '../services/crossValidationEngine';
+import { verifyTaxCalculation } from '../services/taxCalculationVerifier';
+import { validatePreSubmission } from '../services/preSubmissionValidator';
 
 const router = Router();
 const logger = createLogger('validation-service');
@@ -264,6 +267,96 @@ router.get('/runs/latest', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to fetch validation run' });
+  }
+});
+
+// Cross-validation endpoint
+router.post('/cross-validate', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { periodStart, periodEnd } = req.body;
+
+    if (!periodStart || !periodEnd) {
+      throw new ValidationError('periodStart and periodEnd are required');
+    }
+
+    const report = await crossValidateData(
+      req.user.tenantId,
+      new Date(periodStart),
+      new Date(periodEnd)
+    );
+
+    res.json({ report });
+  } catch (error) {
+    logger.error('Cross-validation failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to cross-validate data' });
+  }
+});
+
+// Tax calculation verification endpoint
+router.post('/verify-tax', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingType, periodStart, periodEnd } = req.body;
+
+    if (!filingType || !periodStart || !periodEnd) {
+      throw new ValidationError('filingType, periodStart, and periodEnd are required');
+    }
+
+    const result = await verifyTaxCalculation(
+      req.user.tenantId,
+      filingType,
+      new Date(periodStart),
+      new Date(periodEnd)
+    );
+
+    res.json({ result });
+  } catch (error) {
+    logger.error('Tax verification failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to verify tax calculation' });
+  }
+});
+
+// Pre-submission validation endpoint
+router.post('/pre-submission', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.body;
+
+    if (!filingId) {
+      throw new ValidationError('filingId is required');
+    }
+
+    const result = await validatePreSubmission(req.user.tenantId, filingId);
+
+    res.json({ result });
+  } catch (error) {
+    logger.error('Pre-submission validation failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to validate pre-submission' });
   }
 });
 

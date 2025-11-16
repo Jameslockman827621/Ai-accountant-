@@ -4,6 +4,23 @@ import { AuthRequest } from '../middleware/auth';
 import { db } from '@ai-accountant/database';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { upgradeSubscription, cancelTenantSubscription } from '../services/subscription';
+import {
+  generateInvoice,
+  getInvoices,
+  markInvoicePaid,
+} from '../services/invoiceGenerator';
+import {
+  checkUsageLimit,
+  recordUsage,
+} from '../services/usageEnforcement';
+import {
+  handlePaymentFailure,
+  resolvePaymentFailure,
+} from '../services/paymentFailureHandler';
+import {
+  cancelTenantSubscription as cancelSubscription,
+  getCancellationHistory,
+} from '../services/subscriptionCancellation';
 
 const router = Router();
 const logger = createLogger('billing-service');
@@ -183,6 +200,74 @@ router.post('/invoices', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to generate invoice' });
+  }
+});
+
+// Get invoices
+router.get('/invoices', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { status } = req.query;
+    const invoices = await getInvoices(
+      req.user.tenantId,
+      status as any,
+      50
+    );
+
+    res.json({ invoices });
+  } catch (error) {
+    logger.error('Get invoices failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get invoices' });
+  }
+});
+
+// Check usage limit
+router.get('/usage/check', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { resourceType } = req.query;
+
+    if (!resourceType) {
+      throw new ValidationError('resourceType is required');
+    }
+
+    const check = await checkUsageLimit(
+      req.user.tenantId,
+      resourceType as any
+    );
+
+    res.json({ check });
+  } catch (error) {
+    logger.error('Check usage limit failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to check usage limit' });
+  }
+});
+
+// Get cancellation history
+router.get('/subscription/cancellation-history', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const history = await getCancellationHistory(req.user.tenantId);
+    res.json({ history });
+  } catch (error) {
+    logger.error('Get cancellation history failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get cancellation history' });
   }
 });
 

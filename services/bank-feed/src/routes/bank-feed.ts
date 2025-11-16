@@ -14,6 +14,14 @@ import {
   fetchTrueLayerTransactions,
 } from '../services/truelayer';
 import { getAllConnectionHealth, checkConnectionHealth } from '../services/connectionHealth';
+import {
+  checkConnectionHealth as checkHealth,
+  getConnectionsNeedingAttention,
+  performHealthCheck,
+} from '../services/connectionHealthMonitor';
+import { syncRetryEngine } from '../services/syncRetryEngine';
+import { importTransactionsFromCSV } from '../services/csvImport';
+import { generateReconciliationReport } from '../services/reconciliationReport';
 
 const router = Router();
 const logger = createLogger('bank-feed-service');
@@ -395,6 +403,88 @@ router.post('/import/csv', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to import CSV' });
+  }
+});
+
+// Check connection health
+router.get('/connections/:connectionId/health', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { connectionId } = req.params;
+    const health = await checkHealth(req.user.tenantId, connectionId);
+
+    res.json({ health: health[0] || null });
+  } catch (error) {
+    logger.error('Check connection health failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to check connection health' });
+  }
+});
+
+// Get connections needing attention
+router.get('/connections/attention', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const connections = await getConnectionsNeedingAttention(req.user.tenantId);
+    res.json({ connections });
+  } catch (error) {
+    logger.error('Get connections needing attention failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get connections needing attention' });
+  }
+});
+
+// Perform health check
+router.post('/health-check', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const summary = await performHealthCheck(req.user.tenantId);
+    res.json({ summary });
+  } catch (error) {
+    logger.error('Perform health check failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to perform health check' });
+  }
+});
+
+// Get reconciliation report
+router.get('/reconciliation', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { periodStart, periodEnd, accountId } = req.query;
+
+    if (!periodStart || !periodEnd) {
+      throw new ValidationError('periodStart and periodEnd are required');
+    }
+
+    const report = await generateReconciliationReport(
+      req.user.tenantId,
+      new Date(periodStart as string),
+      new Date(periodEnd as string),
+      accountId as string | undefined
+    );
+
+    res.json({ report });
+  } catch (error) {
+    logger.error('Generate reconciliation report failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to generate reconciliation report' });
   }
 });
 
