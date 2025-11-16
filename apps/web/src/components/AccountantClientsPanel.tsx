@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import ClientComparisonView from './ClientComparisonView';
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 
@@ -319,6 +320,16 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
         <SummaryCard label="Aggregate profit" value={`£${totalAUM.profit.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`} trend={totalAUM.profit >= 0 ? 'up' : 'down'} />
         <SummaryCard label="Open tasks" value={totalAUM.tasks.toLocaleString()} />
       </div>
+
+      {/* Client Comparison View */}
+      {selected.size > 1 && (
+        <div className="mb-6">
+          <ClientComparisonView
+            token={token}
+            selectedClients={Array.from(selected)}
+          />
+        </div>
+      )}
 
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-100 text-sm">

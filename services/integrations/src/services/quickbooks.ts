@@ -61,29 +61,46 @@ export async function syncQuickBooksAccounts(tenantId: TenantId): Promise<void> 
     connection.rows[0].realm_id = refreshed.rows[0].realm_id;
   }
 
-  // In production, call QuickBooks API:
-  // const response = await fetch(
-  //   `https://sandbox-quickbooks.api.intuit.com/v3/company/${realmId}/accounts`,
-  //   {
-  //     headers: {
-  //       'Authorization': `Bearer ${accessToken}`,
-  //       'Accept': 'application/json',
-  //     },
-  //   }
-  // );
-  // const data = await response.json();
-  // const accounts = data.QueryResponse.Account.map((acc: any) => ({
-  //   code: acc.AcctNum || acc.Id,
-  //   name: acc.Name,
-  //   type: acc.AccountType,
-  // }));
+  // Call QuickBooks API to get accounts
+  const accessToken = connection.rows[0].access_token;
+  const realmId = connection.rows[0].realm_id;
+  
+  const baseUrl = process.env.QUICKBOOKS_ENVIRONMENT === 'production'
+    ? 'https://quickbooks.api.intuit.com'
+    : 'https://sandbox-quickbooks.api.intuit.com';
 
-  // For now, use placeholder
-  const accounts = [
-    { code: '4000', name: 'Sales', type: 'Income' },
-    { code: '5000', name: 'Cost of Sales', type: 'Cost of Goods Sold' },
-    { code: '6000', name: 'Expenses', type: 'Expense' },
-  ];
+  let accounts: Array<{ code: string; name: string; type: string }> = [];
+
+  try {
+    const response = await fetch(
+      `${baseUrl}/v3/company/${realmId}/query?query=SELECT * FROM Account MAXRESULTS 1000`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`QuickBooks API error: ${response.status} ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    
+    if (data.QueryResponse && data.QueryResponse.Account) {
+      accounts = data.QueryResponse.Account.map((acc: any) => ({
+        code: acc.AcctNum || acc.Id,
+        name: acc.Name,
+        type: acc.AccountType,
+        subType: acc.AccountSubType,
+        fullyQualifiedName: acc.FullyQualifiedName,
+      }));
+    }
+  } catch (error) {
+    logger.error('Failed to fetch QuickBooks accounts', error);
+    throw new Error(`Failed to sync QuickBooks accounts: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   await db.query(
     `UPDATE chart_of_accounts
@@ -116,20 +133,101 @@ export async function syncQuickBooksTransactions(
     throw new Error('QuickBooks not connected');
   }
 
-  // In production, call QuickBooks API:
-  // const response = await fetch(
-  //   `https://sandbox-quickbooks.api.intuit.com/v3/company/${realmId}/reports/TransactionList?start_date=${startDate.toISOString().split('T')[0]}&end_date=${endDate.toISOString().split('T')[0]}`,
-  //   {
-  //     headers: {
-  //       'Authorization': `Bearer ${accessToken}`,
-  //       'Accept': 'application/json',
-  //     },
-  //   }
-  // );
-  // const data = await response.json();
+  // Check if token expired and refresh if needed
+  if (new Date(connection.rows[0].expires_at) < new Date()) {
+    await refreshQuickBooksToken(tenantId);
+    const refreshed = await db.query<{
+      access_token: string;
+      realm_id: string;
+    }>(
+      'SELECT access_token, realm_id FROM quickbooks_connections WHERE tenant_id = $1',
+      [tenantId]
+    );
+    connection.rows[0].access_token = refreshed.rows[0].access_token;
+    connection.rows[0].realm_id = refreshed.rows[0].realm_id;
+  }
+
+  const accessToken = connection.rows[0].access_token;
+  const realmId = connection.rows[0].realm_id;
   
-  // Create bank_transactions from QuickBooks data
+  const baseUrl = process.env.QUICKBOOKS_ENVIRONMENT === 'production'
+    ? 'https://quickbooks.api.intuit.com'
+    : 'https://sandbox-quickbooks.api.intuit.com';
+
   let synced = 0;
+  const maxRetries = 3;
+  let retryCount = 0;
+
+  while (retryCount < maxRetries) {
+    try {
+      // Get transactions using JournalEntry query
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      
+      const query = `SELECT * FROM JournalEntry WHERE TxnDate >= '${startDateStr}' AND TxnDate <= '${endDateStr}' MAXRESULTS 1000`;
+      const response = await fetch(
+        `${baseUrl}/v3/company/${realmId}/query?query=${encodeURIComponent(query)}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Accept': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 401 && retryCount < maxRetries - 1) {
+          // Token might be expired, refresh and retry
+          await refreshQuickBooksToken(tenantId);
+          const refreshed = await db.query<{
+            access_token: string;
+            realm_id: string;
+          }>(
+            'SELECT access_token, realm_id FROM quickbooks_connections WHERE tenant_id = $1',
+            [tenantId]
+          );
+          connection.rows[0].access_token = refreshed.rows[0].access_token;
+          retryCount++;
+          continue;
+        }
+        throw new Error(`QuickBooks API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.QueryResponse && data.QueryResponse.JournalEntry) {
+        const transactions = Array.isArray(data.QueryResponse.JournalEntry)
+          ? data.QueryResponse.JournalEntry
+          : [data.QueryResponse.JournalEntry];
+
+        for (const txn of transactions) {
+          // Create bank transaction from QuickBooks journal entry
+          const amount = txn.TotalAmt || 0;
+          const description = txn.DocNumber || txn.TxnDate || 'QuickBooks Transaction';
+          
+          await db.query(
+            `INSERT INTO bank_transactions (
+              id, tenant_id, amount, description, transaction_date, source, source_id, created_at
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'quickbooks', $5, NOW())
+            ON CONFLICT (tenant_id, source, source_id) DO NOTHING`,
+            [tenantId, amount, description, txn.TxnDate, txn.Id]
+          );
+          
+          synced++;
+        }
+      }
+
+      break; // Success, exit retry loop
+    } catch (error) {
+      retryCount++;
+      if (retryCount >= maxRetries) {
+        logger.error('Failed to sync QuickBooks transactions after retries', error);
+        throw new Error(`Failed to sync QuickBooks transactions: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+    }
+  }
   
   logger.info('QuickBooks transactions synced', { tenantId, synced });
   return synced;

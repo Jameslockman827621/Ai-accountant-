@@ -1,0 +1,23 @@
+{
+  "name": "@ai-accountant/multi-jurisdiction",
+  "version": "1.0.0",
+  "description": "Multi-jurisdiction tax and currency support service",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "@ai-accountant/database": "workspace:*",
+    "@ai-accountant/shared-types": "workspace:*",
+    "@ai-accountant/shared-utils": "workspace:*",
+    "axios": "^1.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0"
+  }
+}

@@ -1,6 +1,7 @@
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { db } from '@ai-accountant/database';
+import crypto from 'crypto';
 
 const logger = createLogger('integrations-service');
 
@@ -43,33 +44,53 @@ export class QuickBooksOAuth {
     }
 
     // Exchange code for tokens
-    // In production, use QuickBooks SDK
     const clientId = process.env.QUICKBOOKS_CLIENT_ID || '';
     const clientSecret = process.env.QUICKBOOKS_CLIENT_SECRET || '';
     const redirectUri = process.env.QUICKBOOKS_REDIRECT_URI || '';
 
-    // In production: const tokens = await quickBooksClient.exchangeCode(code, redirectUri);
-    const accessToken = 'qb-access-token';
-    const refreshToken = 'qb-refresh-token';
+    const tokenResponse = await fetch('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        redirect_uri: redirectUri,
+      }),
+    });
 
-    // Store tokens
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      throw new Error(`QuickBooks token exchange failed: ${tokenResponse.status} ${errorText}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const accessToken = tokenData.access_token;
+    const refreshToken = tokenData.refresh_token;
+    const realmId = tokenData.realmId; // QuickBooks company ID
+
+    // Store tokens and realm ID
+    const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+    
     await db.query(
-      `INSERT INTO integration_tokens (
-        tenant_id, provider, access_token, refresh_token, expires_at, updated_at
-      ) VALUES ($1, 'quickbooks', $2, $3, NOW() + INTERVAL '1 hour', NOW())
-      ON CONFLICT (tenant_id, provider) DO UPDATE
-      SET access_token = $2, refresh_token = $3, expires_at = NOW() + INTERVAL '1 hour', updated_at = NOW()`,
-      [tenantId, accessToken, refreshToken]
+      `INSERT INTO quickbooks_connections (
+        tenant_id, access_token, refresh_token, realm_id, expires_at, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      ON CONFLICT (tenant_id) DO UPDATE
+      SET access_token = $2, refresh_token = $3, realm_id = $4, expires_at = $5, updated_at = NOW()`,
+      [tenantId, accessToken, refreshToken, realmId, expiresAt]
     );
 
-    logger.info('QuickBooks OAuth completed', { tenantId });
+    logger.info('QuickBooks OAuth completed', { tenantId, realmId });
     return { accessToken, refreshToken };
   }
 
   async refreshToken(tenantId: TenantId): Promise<string> {
     const tokenResult = await db.query<{ refresh_token: string }>(
-      `SELECT refresh_token FROM integration_tokens
-       WHERE tenant_id = $1 AND provider = 'quickbooks'`,
+      `SELECT refresh_token FROM quickbooks_connections WHERE tenant_id = $1`,
       [tenantId]
     );
 
@@ -78,17 +99,40 @@ export class QuickBooksOAuth {
     }
 
     const refreshToken = tokenResult.rows[0]?.refresh_token || '';
+    const clientId = process.env.QUICKBOOKS_CLIENT_ID || '';
+    const clientSecret = process.env.QUICKBOOKS_CLIENT_SECRET || '';
 
-    // In production, use QuickBooks SDK to refresh
-    const newAccessToken = 'qb-new-access-token';
+    const tokenResponse = await fetch('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/json',
+        'Authorization': `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+      }),
+    });
+
+    if (!tokenResponse.ok) {
+      const errorText = await tokenResponse.text();
+      throw new Error(`QuickBooks token refresh failed: ${tokenResponse.status} ${errorText}`);
+    }
+
+    const tokenData = await tokenResponse.json();
+    const newAccessToken = tokenData.access_token;
+    const newRefreshToken = tokenData.refresh_token || refreshToken;
+    const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
 
     await db.query(
-      `UPDATE integration_tokens
-       SET access_token = $1, expires_at = NOW() + INTERVAL '1 hour', updated_at = NOW()
-       WHERE tenant_id = $2 AND provider = 'quickbooks'`,
-      [newAccessToken, tenantId]
+      `UPDATE quickbooks_connections
+       SET access_token = $1, refresh_token = $2, expires_at = $3, updated_at = NOW()
+       WHERE tenant_id = $4`,
+      [newAccessToken, newRefreshToken, expiresAt, tenantId]
     );
 
+    logger.info('QuickBooks token refreshed', { tenantId });
     return newAccessToken;
   }
 }

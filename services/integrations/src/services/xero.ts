@@ -53,14 +53,77 @@ export async function syncXeroContacts(tenantId: TenantId): Promise<void> {
     connection.rows[0].tenant_id_xero = refreshed.rows[0].tenant_id_xero;
   }
 
-  // In production, call Xero API:
-  // const response = await fetch('https://api.xero.com/api.xro/2.0/Contacts', {
-  //   headers: {
-  //     'Authorization': `Bearer ${accessToken}`,
-  //     'Xero-tenant-id': tenantIdXero,
-  //   },
-  // });
-  // const contacts = await response.json();
+  // Call Xero API to get contacts
+  const accessToken = connection.rows[0].access_token;
+  const tenantIdXero = connection.rows[0].tenant_id_xero;
+  
+  const maxRetries = 3;
+  let retryCount = 0;
+
+  while (retryCount < maxRetries) {
+    try {
+      const response = await fetch('https://api.xero.com/api.xro/2.0/Contacts', {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Xero-tenant-id': tenantIdXero,
+          'Accept': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        if (response.status === 401 && retryCount < maxRetries - 1) {
+          // Token might be expired, refresh and retry
+          await refreshXeroToken(tenantId);
+          const refreshed = await db.query<{
+            access_token: string;
+            tenant_id_xero: string;
+          }>(
+            'SELECT access_token, tenant_id_xero FROM xero_connections WHERE tenant_id = $1',
+            [tenantId]
+          );
+          connection.rows[0].access_token = refreshed.rows[0].access_token;
+          retryCount++;
+          continue;
+        }
+        throw new Error(`Xero API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.Contacts) {
+        const contacts = Array.isArray(data.Contacts) ? data.Contacts : [data.Contacts];
+        
+        // Store contacts in database
+        for (const contact of contacts) {
+          await db.query(
+            `INSERT INTO contacts (
+              id, tenant_id, external_id, name, email, phone, type, source, created_at, updated_at
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, 'xero', NOW(), NOW())
+            ON CONFLICT (tenant_id, external_id, source) DO UPDATE
+            SET name = $3, email = $4, phone = $5, type = $6, updated_at = NOW()`,
+            [
+              tenantId,
+              contact.ContactID,
+              contact.Name,
+              contact.EmailAddress || null,
+              contact.Phones?.[0]?.PhoneNumber || null,
+              contact.IsSupplier ? 'supplier' : 'customer',
+            ]
+          );
+        }
+      }
+
+      break; // Success, exit retry loop
+    } catch (error) {
+      retryCount++;
+      if (retryCount >= maxRetries) {
+        logger.error('Failed to sync Xero contacts after retries', error);
+        throw new Error(`Failed to sync Xero contacts: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+    }
+  }
   
   logger.info('Xero contacts synced', { tenantId });
 }
@@ -86,20 +149,96 @@ export async function syncXeroTransactions(
     throw new Error('Xero not connected');
   }
 
-  // In production, call Xero API to get transactions
-  // const response = await fetch(
-  //   `https://api.xero.com/api.xro/2.0/BankTransactions?where=Date>=DateTime(${startDate.toISOString()})&where=Date<=DateTime(${endDate.toISOString()})`,
-  //   {
-  //     headers: {
-  //       'Authorization': `Bearer ${accessToken}`,
-  //       'Xero-tenant-id': tenantIdXero,
-  //     },
-  //   }
-  // );
-  // const transactions = await response.json();
+  // Check if token expired and refresh if needed
+  if (new Date(connection.rows[0].expires_at) < new Date()) {
+    await refreshXeroToken(tenantId);
+    const refreshed = await db.query<{
+      access_token: string;
+      tenant_id_xero: string;
+    }>(
+      'SELECT access_token, tenant_id_xero FROM xero_connections WHERE tenant_id = $1',
+      [tenantId]
+    );
+    connection.rows[0].access_token = refreshed.rows[0].access_token;
+    connection.rows[0].tenant_id_xero = refreshed.rows[0].tenant_id_xero;
+  }
+
+  const accessToken = connection.rows[0].access_token;
+  const tenantIdXero = connection.rows[0].tenant_id_xero;
   
-  // Create bank_transactions from Xero data
   let synced = 0;
+  const maxRetries = 3;
+  let retryCount = 0;
+
+  while (retryCount < maxRetries) {
+    try {
+      // Format dates for Xero API
+      const startDateStr = startDate.toISOString().split('T')[0];
+      const endDateStr = endDate.toISOString().split('T')[0];
+      
+      const response = await fetch(
+        `https://api.xero.com/api.xro/2.0/BankTransactions?where=Date>=DateTime(${startDateStr})&where=Date<=DateTime(${endDateStr})`,
+        {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Xero-tenant-id': tenantIdXero,
+            'Accept': 'application/json',
+          },
+        }
+      );
+
+      if (!response.ok) {
+        if (response.status === 401 && retryCount < maxRetries - 1) {
+          // Token might be expired, refresh and retry
+          await refreshXeroToken(tenantId);
+          const refreshed = await db.query<{
+            access_token: string;
+            tenant_id_xero: string;
+          }>(
+            'SELECT access_token, tenant_id_xero FROM xero_connections WHERE tenant_id = $1',
+            [tenantId]
+          );
+          connection.rows[0].access_token = refreshed.rows[0].access_token;
+          retryCount++;
+          continue;
+        }
+        throw new Error(`Xero API error: ${response.status} ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      
+      if (data.BankTransactions) {
+        const transactions = Array.isArray(data.BankTransactions)
+          ? data.BankTransactions
+          : [data.BankTransactions];
+
+        for (const txn of transactions) {
+          const amount = txn.Total || 0;
+          const description = txn.Reference || txn.LineItems?.[0]?.Description || 'Xero Transaction';
+          
+          await db.query(
+            `INSERT INTO bank_transactions (
+              id, tenant_id, amount, description, transaction_date, source, source_id, created_at
+            ) VALUES (gen_random_uuid(), $1, $2, $3, $4, 'xero', $5, NOW())
+            ON CONFLICT (tenant_id, source, source_id) DO NOTHING`,
+            [tenantId, amount, description, txn.Date, txn.BankTransactionID]
+          );
+          
+          synced++;
+        }
+      }
+
+      break; // Success, exit retry loop
+    } catch (error) {
+      retryCount++;
+      if (retryCount >= maxRetries) {
+        logger.error('Failed to sync Xero transactions after retries', error);
+        throw new Error(`Failed to sync Xero transactions: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      // Wait before retry (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+    }
+  }
   
   logger.info('Xero transactions synced', { tenantId, synced });
   return synced;
