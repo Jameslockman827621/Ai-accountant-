@@ -245,13 +245,88 @@ export interface AuditLog {
   createdAt: Date;
 }
 
+export type TaxRulepackStatus = 'draft' | 'pending' | 'active' | 'deprecated';
+
+export interface TaxNexusThreshold {
+  type: 'sales' | 'transactions' | 'revenue' | 'customers';
+  amount?: number;
+  transactions?: number;
+  currency?: string;
+  period?: 'monthly' | 'quarterly' | 'annual' | 'rolling12';
+  description?: string;
+}
+
+export interface TaxFilingSchemaBox {
+  id: string;
+  label: string;
+  description?: string;
+  source?: string;
+  calculation?: string;
+}
+
+export interface TaxFilingSchema {
+  form: string;
+  jurisdictionCode: string;
+  description?: string;
+  frequency: 'monthly' | 'quarterly' | 'annual';
+  method: 'api' | 'efile' | 'paper';
+  boxes: TaxFilingSchemaBox[];
+  attachments?: string[];
+  dueDaysAfterPeriod?: number;
+}
+
+export interface RulepackTransactionInput {
+  amount: number;
+  type: 'sale' | 'purchase' | 'income' | 'corporate_income';
+  category?: string;
+  filingStatus?: 'single' | 'married' | 'head';
+  industry?: string;
+  stateCode?: string;
+  nexusState?: string;
+  deductions?: number;
+  credits?: number;
+  metadata?: Record<string, unknown>;
+}
+
+export interface TaxRegressionCase {
+  id: string;
+  description: string;
+  transaction: RulepackTransactionInput;
+  expected: {
+    taxAmount: number;
+    taxRate?: number;
+    filingBoxes?: Record<string, number>;
+    notes?: string;
+  };
+}
+
+export interface TaxRegressionSummary {
+  total: number;
+  passed: number;
+  failed: number;
+  skipped: number;
+  lastRunAt?: Date;
+}
+
 export interface TaxRulepack {
   id: string;
   country: string;
+  jurisdictionCode: string;
+  region: string;
+  year: number;
   version: string;
   rules: TaxRule[];
+  filingTypes: string[];
+  status: TaxRulepackStatus;
+  metadata?: Record<string, unknown>;
+  nexusThresholds?: TaxNexusThreshold[];
+  filingSchemas?: TaxFilingSchema[];
+  checksum?: string;
+  regressionSummary?: TaxRegressionSummary;
   effectiveFrom: Date;
   effectiveTo?: Date;
+  activatedAt?: Date;
+  deprecatedAt?: Date;
   isActive: boolean;
 }
 

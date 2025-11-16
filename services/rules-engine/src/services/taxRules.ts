@@ -1,4 +1,3 @@
-import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TaxRulepack, TaxRule } from '@ai-accountant/shared-types';
 import OpenAI from 'openai';
@@ -7,6 +6,7 @@ import { calculateIncomeTax, calculateCorporationTax, calculateNationalInsurance
 import { calculateVAT, determineVATRate } from './ukVATCalculations';
 import { calculateAllReliefs } from './ukTaxReliefs';
 import { calculateFilingDeadlines } from './ukFilingDeadlines';
+import { getTaxRulepack as getJurisdictionRulepack } from './multiCountryTax';
 
 const logger = createLogger('rules-engine-service');
 
@@ -55,57 +55,30 @@ const UK_VAT_RULES: TaxRule[] = [
 ];
 
 export async function getTaxRulepack(country: string, version?: string): Promise<TaxRulepack | null> {
-  let query = 'SELECT * FROM tax_rulepacks WHERE country = $1 AND is_active = true';
-  const params: unknown[] = [country.toUpperCase()];
+  const yearFromVersion = version ? parseInt(version, 10) || undefined : undefined;
+  const rulepack = await getJurisdictionRulepack(country, { year: yearFromVersion });
 
-  if (version) {
-    query += ' AND version = $2';
-    params.push(version);
-  } else {
-    query += ' ORDER BY effective_from DESC LIMIT 1';
+  if (rulepack) {
+    return rulepack;
   }
 
-  const result = await db.query<{
-    id: string;
-    country: string;
-    version: string;
-    rules: unknown;
-    effective_from: Date;
-    effective_to: Date | null;
-    is_active: boolean;
-  }>(query, params);
-
-  if (result.rows.length === 0) {
-    // Return default UK rules if none found
-    if (country.toUpperCase() === 'GB') {
-      return {
-        id: 'default-uk',
-        country: 'GB',
-        version: '1.0.0',
-        rules: UK_VAT_RULES,
-        effectiveFrom: new Date('2024-01-01'),
-        isActive: true,
-      };
-    }
-    return null;
+  if (country.toUpperCase() === 'GB') {
+    return {
+      id: 'default-uk',
+      country: 'GB',
+      jurisdictionCode: 'GB',
+      region: 'EU',
+      year: 2024,
+      version: '1.0.0',
+      rules: UK_VAT_RULES,
+      filingTypes: ['vat'],
+      status: 'active',
+      effectiveFrom: new Date('2024-01-01'),
+      isActive: true,
+    };
   }
 
-  const row = result.rows[0];
-  if (!row) {
-    return null;
-  }
-  const rulepack: TaxRulepack = {
-    id: row.id,
-    country: row.country,
-    version: row.version,
-    rules: row.rules as TaxRule[],
-    effectiveFrom: row.effective_from,
-    isActive: row.is_active,
-  };
-  if (row.effective_to) {
-    rulepack.effectiveTo = row.effective_to;
-  }
-  return rulepack;
+  return null;
 }
 
 export async function applyTaxRules(
