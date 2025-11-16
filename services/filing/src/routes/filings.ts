@@ -21,6 +21,31 @@ import {
   getDraftAmendmentSubmission,
   listFilingSubmissions,
 } from '../services/filingSubmissions';
+import {
+  createFilingReview,
+  getFilingReviewChecklist,
+  approveFilingReview,
+  rejectFilingReview,
+  requestFilingChanges,
+} from '../services/filingReviewWorkflow';
+import { compareFilings } from '../services/filingComparison';
+import {
+  createAmendmentDraft as createAmendment,
+  getFilingAmendments,
+  submitAmendment,
+} from '../services/filingAmendment';
+import {
+  storeSubmissionConfirmation,
+  getSubmissionConfirmation,
+} from '../services/submissionConfirmation';
+import {
+  handleFilingRejection,
+  getFilingRejection,
+} from '../services/rejectionHandler';
+import {
+  getUpcomingDeadlines,
+  sendDeadlineReminders,
+} from '../services/deadlineManager';
 import { VATReturnPayload } from '@ai-accountant/hmrc';
 import { getReceiptDownloadUrl } from '../storage/receiptStorage';
 
@@ -620,6 +645,166 @@ router.post('/:filingId/review/reject', async (req: AuthRequest, res: Response) 
       return;
     }
     res.status(500).json({ error: 'Failed to reject filing review' });
+  }
+});
+
+// Compare filings
+router.get('/:filingId/compare', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const { type } = req.query; // 'period' | 'year' | 'both'
+
+    const comparison = await compareFilings(
+      req.user.tenantId,
+      filingId,
+      (type as 'period' | 'year' | 'both') || 'both'
+    );
+
+    res.json({ comparison });
+  } catch (error) {
+    logger.error('Compare filings failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to compare filings' });
+  }
+});
+
+// Get filing amendments
+router.get('/:filingId/amendments', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const amendments = await getFilingAmendments(filingId, req.user.tenantId);
+
+    res.json({ amendments });
+  } catch (error) {
+    logger.error('Get filing amendments failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get filing amendments' });
+  }
+});
+
+// Create filing amendment
+router.post('/:filingId/amendments', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const { reason, changes } = req.body;
+
+    if (!reason || !changes) {
+      throw new ValidationError('reason and changes are required');
+    }
+
+    const amendmentId = await createAmendment(
+      filingId,
+      req.user.tenantId,
+      req.user.userId,
+      reason,
+      changes
+    );
+
+    res.status(201).json({ amendmentId, message: 'Amendment draft created' });
+  } catch (error) {
+    logger.error('Create amendment failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to create amendment' });
+  }
+});
+
+// Get submission confirmation
+router.get('/:filingId/confirmation', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const confirmation = await getSubmissionConfirmation(filingId, req.user.tenantId);
+
+    if (!confirmation) {
+      res.status(404).json({ error: 'Confirmation not found' });
+      return;
+    }
+
+    res.json({ confirmation });
+  } catch (error) {
+    logger.error('Get submission confirmation failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get submission confirmation' });
+  }
+});
+
+// Get filing rejection
+router.get('/:filingId/rejection', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const rejection = await getFilingRejection(filingId, req.user.tenantId);
+
+    if (!rejection) {
+      res.status(404).json({ error: 'Rejection not found' });
+      return;
+    }
+
+    res.json({ rejection });
+  } catch (error) {
+    logger.error('Get filing rejection failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get filing rejection' });
+  }
+});
+
+// Get upcoming deadlines
+router.get('/deadlines/upcoming', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { daysAhead } = req.query;
+    const deadlines = await getUpcomingDeadlines(
+      req.user.tenantId,
+      daysAhead ? parseInt(daysAhead as string, 10) : 30
+    );
+
+    res.json({ deadlines });
+  } catch (error) {
+    logger.error('Get upcoming deadlines failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get upcoming deadlines' });
+  }
+});
+
+// Send deadline reminders
+router.post('/deadlines/remind', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const count = await sendDeadlineReminders(req.user.tenantId);
+
+    res.json({ message: 'Reminders sent', count });
+  } catch (error) {
+    logger.error('Send deadline reminders failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to send deadline reminders' });
   }
 });
 

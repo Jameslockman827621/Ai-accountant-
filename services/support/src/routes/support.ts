@@ -11,6 +11,13 @@ import {
   SupportTicket,
 } from '../services/tickets';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { knowledgeBaseEngine } from '../services/knowledgeBaseEngine';
+import {
+  createHelpArticle,
+  updateHelpArticle,
+  deleteHelpArticle,
+  getAllHelpArticles,
+} from '../services/helpContentManager';
 
 const router = Router();
 const logger = createLogger('support-service');
@@ -206,6 +213,110 @@ router.post('/tickets/:ticketId/comments', async (req: AuthRequest, res: Respons
       return;
     }
     res.status(500).json({ error: 'Failed to add comment' });
+  }
+});
+
+// Search knowledge base
+router.get('/knowledge-base/search', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { q, category } = req.query;
+
+    if (!q) {
+      throw new ValidationError('Search query (q) is required');
+    }
+
+    const results = await knowledgeBaseEngine.searchArticles(
+      q as string,
+      category as string | undefined
+    );
+
+    res.json({ results });
+  } catch (error) {
+    logger.error('Search knowledge base failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to search knowledge base' });
+  }
+});
+
+// Get article by ID
+router.get('/knowledge-base/articles/:articleId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { articleId } = req.params;
+    const article = await knowledgeBaseEngine.getArticle(articleId);
+
+    if (!article) {
+      res.status(404).json({ error: 'Article not found' });
+      return;
+    }
+
+    res.json({ article });
+  } catch (error) {
+    logger.error('Get article failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get article' });
+  }
+});
+
+// Get articles by category
+router.get('/knowledge-base/categories/:category', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { category } = req.params;
+    const { limit } = req.query;
+
+    const articles = await knowledgeBaseEngine.getArticlesByCategory(
+      category,
+      limit ? parseInt(limit as string, 10) : 20
+    );
+
+    res.json({ articles });
+  } catch (error) {
+    logger.error('Get articles by category failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get articles' });
+  }
+});
+
+// Record article feedback
+router.post('/knowledge-base/articles/:articleId/feedback', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { articleId } = req.params;
+    const { helpful } = req.body;
+
+    if (typeof helpful !== 'boolean') {
+      throw new ValidationError('helpful (boolean) is required');
+    }
+
+    await knowledgeBaseEngine.recordFeedback(articleId, helpful);
+
+    res.json({ message: 'Feedback recorded' });
+  } catch (error) {
+    logger.error('Record feedback failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to record feedback' });
   }
 });
 

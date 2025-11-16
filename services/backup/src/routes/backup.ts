@@ -1,5 +1,5 @@
 import { Router, Response } from 'express';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import {
   createBackup,
@@ -8,6 +8,9 @@ import {
   downloadBackup,
   exportTenantData,
 } from '../services/backup';
+import { automatedBackupService } from '../services/automatedBackup';
+import { exportUserData, getExportStatus, getExports } from '../services/dataExport';
+import { restoreFromBackup, getRestoreStatus, getRestoreHistory } from '../services/restore';
 
 const router = Router();
 const logger = createLogger('backup-service');
@@ -108,6 +111,134 @@ router.get('/export/data', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Export data failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to export data' });
+  }
+});
+
+// Export user data (GDPR)
+router.post('/export', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { format } = req.body;
+    const exportId = await exportUserData(req.user.tenantId, format || 'json');
+
+    res.status(202).json({ exportId, message: 'Data export started' });
+  } catch (error) {
+    logger.error('Export user data failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to start data export' });
+  }
+});
+
+// Get export status
+router.get('/exports/:exportId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { exportId } = req.params;
+    const exportStatus = await getExportStatus(exportId, req.user.tenantId);
+
+    if (!exportStatus) {
+      res.status(404).json({ error: 'Export not found' });
+      return;
+    }
+
+    res.json({ export: exportStatus });
+  } catch (error) {
+    logger.error('Get export status failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get export status' });
+  }
+});
+
+// Get all exports
+router.get('/exports', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const exports = await getExports(req.user.tenantId);
+    res.json({ exports });
+  } catch (error) {
+    logger.error('Get exports failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get exports' });
+  }
+});
+
+// Restore from backup
+router.post('/restore', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { backupId, restoreType, restorePoint } = req.body;
+
+    if (!backupId) {
+      throw new ValidationError('backupId is required');
+    }
+
+    const restoreId = await restoreFromBackup(
+      req.user.tenantId,
+      backupId,
+      restoreType || 'full',
+      restorePoint ? new Date(restorePoint) : undefined
+    );
+
+    res.status(202).json({ restoreId, message: 'Restore operation started' });
+  } catch (error) {
+    logger.error('Restore from backup failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to start restore operation' });
+  }
+});
+
+// Get restore status
+router.get('/restores/:restoreId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { restoreId } = req.params;
+    const restoreStatus = await getRestoreStatus(restoreId, req.user.tenantId);
+
+    if (!restoreStatus) {
+      res.status(404).json({ error: 'Restore operation not found' });
+      return;
+    }
+
+    res.json({ restore: restoreStatus });
+  } catch (error) {
+    logger.error('Get restore status failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get restore status' });
+  }
+});
+
+// Get restore history
+router.get('/restores', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const history = await getRestoreHistory(req.user.tenantId);
+    res.json({ history });
+  } catch (error) {
+    logger.error('Get restore history failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get restore history' });
   }
 });
 
