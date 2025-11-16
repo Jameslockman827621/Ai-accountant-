@@ -48,6 +48,7 @@ import {
 } from '../services/deadlineManager';
 import { VATReturnPayload } from '@ai-accountant/hmrc';
 import { getReceiptDownloadUrl } from '../storage/receiptStorage';
+import { filingLifecycleService } from '../services/filingLifecycle';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -805,6 +806,104 @@ router.post('/deadlines/remind', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Send deadline reminders failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to send deadline reminders' });
+  }
+});
+
+// Create filing draft
+router.post('/draft', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingType, jurisdiction, periodStart, periodEnd } = req.body;
+
+    if (!filingType || !jurisdiction || !periodStart || !periodEnd) {
+      res.status(400).json({ error: 'Missing required fields' });
+      return;
+    }
+
+    const draft = await filingLifecycleService.createDraft(
+      req.user.tenantId,
+      {
+        filingType,
+        jurisdiction,
+        periodStart,
+        periodEnd,
+        dueDate: new Date(periodEnd).toISOString().split('T')[0],
+      },
+      req.user.userId
+    );
+
+    res.json({ draft });
+  } catch (error) {
+    logger.error('Create filing draft failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to create filing draft' });
+  }
+});
+
+// Submit filing
+router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const { adapter } = req.body;
+
+    if (!adapter) {
+      res.status(400).json({ error: 'Adapter is required' });
+      return;
+    }
+
+    const submission = await filingLifecycleService.submitFiling(
+      filingId,
+      req.user.tenantId,
+      req.user.userId,
+      adapter
+    );
+
+    res.json({ submission });
+  } catch (error) {
+    logger.error('Submit filing failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to submit filing' });
+  }
+});
+
+// Get filing explanations
+router.get('/:filingId/explanations', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+
+    const result = await db.query<{
+      section: string;
+      field_name: string | null;
+      value: number | null;
+      calculation_steps: unknown;
+      rule_applied: unknown;
+      source_transactions: unknown;
+      ai_commentary: string | null;
+    }>(
+      `SELECT section, field_name, value, calculation_steps, rule_applied,
+              source_transactions, ai_commentary
+       FROM filing_explanations
+       WHERE filing_id = $1
+       ORDER BY section, field_name`,
+      [filingId]
+    );
+
+    res.json({ explanations: result.rows });
+  } catch (error) {
+    logger.error('Get filing explanations failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get filing explanations' });
   }
 });
 

@@ -3,6 +3,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import { deleteUserData, exportUserData } from '../services/gdpr';
 import { getAuditLogs } from '../services/audit';
+import { complianceCalendarService } from '../services/complianceCalendar';
 import { UserRole } from '@ai-accountant/shared-types';
 import { AuthorizationError } from '@ai-accountant/shared-utils';
 
@@ -105,6 +106,68 @@ router.delete('/delete-data', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Delete data failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to delete data' });
+  }
+});
+
+// Get compliance calendar
+router.get('/calendar', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { startDate, endDate } = req.query;
+    const start = startDate ? (startDate as string) : new Date().toISOString().split('T')[0];
+    const end = endDate ? (endDate as string) : new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+    const calendar = await complianceCalendarService.generateCalendar(
+      req.user.tenantId,
+      start,
+      end
+    );
+
+    res.json({ calendar });
+  } catch (error) {
+    logger.error('Get compliance calendar failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get compliance calendar' });
+  }
+});
+
+// Get upcoming deadlines
+router.get('/deadlines', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const days = req.query.days ? parseInt(req.query.days as string, 10) : 30;
+    const deadlines = await complianceCalendarService.getUpcomingDeadlines(
+      req.user.tenantId,
+      days
+    );
+
+    res.json({ deadlines });
+  } catch (error) {
+    logger.error('Get deadlines failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get deadlines' });
+  }
+});
+
+// Update readiness scores
+router.post('/readiness/update', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    await complianceCalendarService.updateReadinessScores(req.user.tenantId);
+    res.json({ message: 'Readiness scores updated' });
+  } catch (error) {
+    logger.error('Update readiness failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to update readiness scores' });
   }
 });
 
