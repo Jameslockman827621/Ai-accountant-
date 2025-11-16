@@ -16,6 +16,7 @@ import {
   persistConnectionTokens,
 } from './connectionStore';
 import { recordSyncError, recordSyncSuccess } from './connectionHealth';
+import { syncRetryEngine } from './syncRetryEngine';
 
 const logger = createLogger('bank-feed-service');
 
@@ -154,6 +155,19 @@ export async function syncPlaidTransactions(
   } catch (error) {
       const errObj = error instanceof Error ? error : new Error(String(error));
       await recordSyncError(tenantId, connectionId, errObj.message);
+      
+      // Schedule automatic retry
+      try {
+        await syncRetryEngine.scheduleRetry(tenantId, connectionId, errObj.message);
+        logger.info('Sync retry scheduled', { tenantId, connectionId });
+      } catch (retryError) {
+        logger.warn('Failed to schedule sync retry', {
+          tenantId,
+          connectionId,
+          error: retryError instanceof Error ? retryError : new Error(String(retryError)),
+        });
+      }
+      
       logger.error('Failed to sync Plaid transactions', errObj, {
         tenantId,
         connectionId,

@@ -7,6 +7,7 @@ import { db } from '@ai-accountant/database';
 import { DocumentStatus, DocumentType, ProcessingQueues } from '@ai-accountant/shared-types';
 import { validateDocumentForPosting } from '@ai-accountant/validation-service/services/documentPostingValidator';
 import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
+import { routeToReviewQueue } from './services/reviewQueueManager';
 
 config();
 
@@ -263,6 +264,22 @@ async function startWorker(): Promise<void> {
             ]
           );
         });
+
+        // Route to review queue if confidence or quality is low
+        if (tenantId) {
+          try {
+            const needsReview = await routeToReviewQueue(tenantId, payload.documentId);
+            if (needsReview) {
+              logger.info('Document routed to review queue', { documentId: payload.documentId, tenantId });
+            }
+          } catch (reviewError) {
+            logger.warn('Failed to route to review queue', {
+              documentId: payload.documentId,
+              error: reviewError instanceof Error ? reviewError : new Error(String(reviewError)),
+            });
+            // Don't fail the classification if review routing fails
+          }
+        }
 
         const shouldPostToLedger =
           result.documentType === DocumentType.INVOICE || result.documentType === DocumentType.RECEIPT;

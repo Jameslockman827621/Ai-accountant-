@@ -205,9 +205,41 @@ export async function handleStripeWebhook(
     }
     case 'invoice.payment_failed': {
       const invoice = event.data.object as Stripe.Invoice;
+      const tenantId = invoice.metadata?.tenantId as string | undefined;
+      
+      if (tenantId && invoice.subscription) {
+        // Handle payment failure with dunning management
+        const { handlePaymentFailure } = await import('./paymentFailureHandler');
+        await handlePaymentFailure(
+          tenantId,
+          invoice.id,
+          invoice.last_payment_error?.message || 'Payment failed'
+        );
+        
+        // Send notification to user
+        const { notificationManager } = await import('@ai-accountant/notification-service/services/notificationManager');
+        await notificationManager.createNotification(
+          tenantId,
+          null,
+          'error',
+          'Payment Failed',
+          `Your payment for invoice ${invoice.number || invoice.id} has failed. Please update your payment method to avoid service interruption.`,
+          {
+            label: 'Update Payment Method',
+            url: '/settings/billing',
+          },
+          {
+            invoiceId: invoice.id,
+            amount: invoice.amount_due / 100,
+            currency: invoice.currency,
+          }
+        );
+      }
+      
       logger.warn('Stripe invoice payment failed', {
         invoiceId: invoice.id,
         subscriptionId: invoice.subscription,
+        tenantId,
       });
       break;
     }

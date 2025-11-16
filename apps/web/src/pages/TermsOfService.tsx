@@ -35,10 +35,23 @@ export default function TermsOfService() {
 
         <section className="mb-8">
           <h2 className="text-2xl font-semibold mb-4">4. Limitation of Liability</h2>
+          <p className="mb-4">
+            <strong>Important:</strong> AI Accountant SaaS provides tools and assistance but does not guarantee the accuracy of tax calculations
+            or filings. You are responsible for reviewing and approving all filings before submission to tax authorities.
+          </p>
+          <p className="mb-4">
+            <strong>Professional Review Recommended:</strong> We strongly recommend consulting with a qualified accountant or tax professional
+            for complex tax situations, significant transactions, or before submitting any tax filings.
+          </p>
+          <p className="mb-4">
+            <strong>No Warranties:</strong> The service is provided "as is" without warranties of any kind, either express or implied.
+            We do not warrant that the service will be uninterrupted, error-free, or completely accurate.
+          </p>
           <p>
-            AI Accountant SaaS provides tools and assistance but does not guarantee the accuracy of tax calculations
-            or filings. You are responsible for reviewing and approving all filings before submission. We recommend
-            consulting with a qualified accountant for complex tax situations.
+            <strong>Liability Limitation:</strong> To the maximum extent permitted by law, AI Accountant SaaS shall not be liable for
+            any indirect, incidental, special, consequential, or punitive damages, or any loss of profits or revenues,
+            whether incurred directly or indirectly, or any loss of data, use, goodwill, or other intangible losses,
+            resulting from your use of the service.
           </p>
         </section>
 
