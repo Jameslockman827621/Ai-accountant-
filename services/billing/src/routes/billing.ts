@@ -21,6 +21,12 @@ import {
   cancelTenantSubscription as cancelSubscription,
   getCancellationHistory,
 } from '../services/subscriptionCancellation';
+import {
+  createOneTimePaymentIntent,
+  createBillingPortalSession,
+  constructStripeEvent,
+  handleStripeWebhook,
+} from '../services/stripe';
 
 const router = Router();
 const logger = createLogger('billing-service');
@@ -147,18 +153,24 @@ router.post('/payment-intent', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { amount, currency } = req.body;
+    const { amount, currency, metadata } = req.body;
 
     if (!amount) {
       throw new ValidationError('amount is required');
     }
 
-    // In production, this would create a Stripe payment intent
-    // For now, return a placeholder
+    const paymentIntent = await createOneTimePaymentIntent(
+      req.user.tenantId,
+      parseFloat(amount),
+      currency || 'gbp',
+      metadata
+    );
+
     res.json({
-      clientSecret: 'placeholder_client_secret',
-      amount,
-      currency: currency || 'gbp',
+      clientSecret: paymentIntent.client_secret,
+      paymentIntentId: paymentIntent.id,
+      amount: paymentIntent.amount / 100,
+      currency: paymentIntent.currency.toUpperCase(),
     });
   } catch (error) {
     logger.error('Create payment intent failed', error instanceof Error ? error : new Error(String(error)));
@@ -268,6 +280,46 @@ router.get('/subscription/cancellation-history', async (req: AuthRequest, res: R
   } catch (error) {
     logger.error('Get cancellation history failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get cancellation history' });
+  }
+});
+
+// Create billing portal session
+router.post('/billing-portal', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { returnUrl } = req.body;
+    if (!returnUrl) {
+      throw new ValidationError('returnUrl is required');
+    }
+
+    const session = await createBillingPortalSession(req.user.tenantId, returnUrl);
+    res.json({ url: session.url });
+  } catch (error) {
+    logger.error('Create billing portal session failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to create billing portal session' });
+  }
+});
+
+// Stripe webhook endpoint (no auth required - uses signature verification)
+router.post('/webhook/stripe', async (req, res: Response) => {
+  try {
+    const signature = req.headers['stripe-signature'];
+    const event = constructStripeEvent(req.body, signature);
+    
+    await handleStripeWebhook(event);
+    
+    res.json({ received: true });
+  } catch (error) {
+    logger.error('Stripe webhook failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(400).json({ error: 'Webhook error' });
   }
 });
 

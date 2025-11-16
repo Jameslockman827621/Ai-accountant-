@@ -1,6 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
+import { notificationManager } from '@ai-accountant/notification-service/services/notificationManager';
 
 const logger = createLogger('filing-service');
 
@@ -174,19 +175,153 @@ async function getCorporationTaxDeadlines(
   tenantId: TenantId,
   futureDate: Date
 ): Promise<FilingDeadline[]> {
+  const deadlines: FilingDeadline[] = [];
+  const now = new Date();
+
+  // Get company year end from tenant metadata or filings
+  const tenantResult = await db.query<{
+    metadata: unknown;
+  }>(
+    `SELECT metadata FROM tenants WHERE id = $1`,
+    [tenantId]
+  );
+
+  const metadata = tenantResult.rows[0]?.metadata as Record<string, unknown> | null;
+  const yearEndMonth = (metadata?.yearEndMonth as number) || 3; // Default to March
+  const yearEndDay = (metadata?.yearEndDay as number) || 31;
+
+  // Get most recent Corporation Tax filing to determine year end
+  const filingResult = await db.query<{
+    period_end: Date;
+  }>(
+    `SELECT period_end
+     FROM filings
+     WHERE tenant_id = $1
+       AND filing_type = 'corporation_tax'
+     ORDER BY period_end DESC
+     LIMIT 1`,
+    [tenantId]
+  );
+
+  let yearEndDate: Date;
+  if (filingResult.rows.length > 0) {
+    // Use the period end from last filing as year end
+    const lastPeriodEnd = filingResult.rows[0].period_end;
+    yearEndDate = new Date(lastPeriodEnd);
+    yearEndDate.setFullYear(yearEndDate.getFullYear() + 1);
+  } else {
+    // Calculate from current date
+    const currentYear = now.getFullYear();
+    yearEndDate = new Date(currentYear, yearEndMonth - 1, yearEndDay);
+    if (yearEndDate < now) {
+      yearEndDate.setFullYear(currentYear + 1);
+    }
+  }
+
   // Corporation Tax is due 9 months after year end
-  // This would typically come from company records
-  return []; // Placeholder
+  const dueDate = new Date(yearEndDate);
+  dueDate.setMonth(dueDate.getMonth() + 9);
+
+  if (dueDate <= futureDate) {
+    const daysUntilDue = Math.ceil((dueDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+
+    // Check if already filed
+    const filingCheck = await db.query<{
+      id: string;
+      status: string;
+    }>(
+      `SELECT id, status
+       FROM filings
+       WHERE tenant_id = $1
+         AND filing_type = 'corporation_tax'
+         AND period_end = $2
+         AND status IN ('submitted', 'accepted')`,
+      [tenantId, yearEndDate]
+    );
+
+    const periodStart = new Date(yearEndDate);
+    periodStart.setFullYear(periodStart.getFullYear() - 1);
+    periodStart.setDate(1);
+
+    const status = filingCheck.rows.length > 0
+      ? 'filed'
+      : daysUntilDue < 0
+      ? 'overdue'
+      : daysUntilDue <= 7
+      ? 'due_soon'
+      : 'upcoming';
+
+    deadlines.push({
+      filingType: 'corporation_tax',
+      periodStart,
+      periodEnd: yearEndDate,
+      dueDate,
+      daysUntilDue,
+      status,
+      filingId: filingCheck.rows[0]?.id,
+    });
+  }
+
+  return deadlines;
 }
 
 async function sendDueSoonReminder(tenantId: TenantId, deadline: FilingDeadline): Promise<void> {
-  // This would integrate with notification service
   logger.info('Sending due soon reminder', { tenantId, deadline });
-  // Would call notification service here
+
+  const filingTypeLabels: Record<FilingDeadline['filingType'], string> = {
+    vat: 'VAT Return',
+    paye: 'PAYE Return',
+    corporation_tax: 'Corporation Tax Return',
+    income_tax: 'Income Tax Return',
+  };
+
+  await notificationManager.createNotification(
+    tenantId,
+    null, // Tenant-wide notification
+    'warning',
+    `${filingTypeLabels[deadline.filingType]} Due Soon`,
+    `Your ${filingTypeLabels[deadline.filingType]} for the period ${deadline.periodStart.toLocaleDateString()} to ${deadline.periodEnd.toLocaleDateString()} is due in ${deadline.daysUntilDue} days (${deadline.dueDate.toLocaleDateString()}).`,
+    {
+      label: 'View Filing',
+      url: `/filings?filingType=${deadline.filingType}&periodStart=${deadline.periodStart.toISOString()}&periodEnd=${deadline.periodEnd.toISOString()}`,
+    },
+    {
+      deadlineType: deadline.filingType,
+      periodStart: deadline.periodStart.toISOString(),
+      periodEnd: deadline.periodEnd.toISOString(),
+      dueDate: deadline.dueDate.toISOString(),
+      daysUntilDue: deadline.daysUntilDue,
+    }
+  );
 }
 
 async function sendOverdueReminder(tenantId: TenantId, deadline: FilingDeadline): Promise<void> {
-  // This would integrate with notification service
   logger.warn('Sending overdue reminder', { tenantId, deadline });
-  // Would call notification service here
+
+  const filingTypeLabels: Record<FilingDeadline['filingType'], string> = {
+    vat: 'VAT Return',
+    paye: 'PAYE Return',
+    corporation_tax: 'Corporation Tax Return',
+    income_tax: 'Income Tax Return',
+  };
+
+  await notificationManager.createNotification(
+    tenantId,
+    null, // Tenant-wide notification
+    'error',
+    `${filingTypeLabels[deadline.filingType]} Overdue`,
+    `Your ${filingTypeLabels[deadline.filingType]} for the period ${deadline.periodStart.toLocaleDateString()} to ${deadline.periodEnd.toLocaleDateString()} is overdue. It was due on ${deadline.dueDate.toLocaleDateString()}. Please file immediately to avoid penalties.`,
+    {
+      label: 'File Now',
+      url: `/filings?filingType=${deadline.filingType}&periodStart=${deadline.periodStart.toISOString()}&periodEnd=${deadline.periodEnd.toISOString()}`,
+    },
+    {
+      deadlineType: deadline.filingType,
+      periodStart: deadline.periodStart.toISOString(),
+      periodEnd: deadline.periodEnd.toISOString(),
+      dueDate: deadline.dueDate.toISOString(),
+      daysUntilDue: deadline.daysUntilDue,
+      overdue: true,
+    }
+  );
 }
