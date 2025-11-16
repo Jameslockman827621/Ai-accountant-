@@ -12,6 +12,23 @@ export enum UserRole {
   ACCOUNTANT = 'accountant',
   CLIENT = 'client',
   VIEWER = 'viewer',
+  OWNER = 'owner',
+  STAFF = 'staff',
+  AUDITOR = 'auditor',
+}
+
+export enum OrganizationType {
+  FIRM = 'firm',
+  CLIENT = 'client',
+  STANDALONE = 'standalone',
+}
+
+export enum OrganizationRole {
+  OWNER = 'owner',
+  ACCOUNTANT = 'accountant',
+  STAFF = 'staff',
+  AUDITOR = 'auditor',
+  VIEWER = 'viewer',
 }
 
 export enum DocumentType {

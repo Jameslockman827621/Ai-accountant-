@@ -7,6 +7,7 @@ import { automationRouter } from './routes/automation';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 import { ruleScheduler } from './ruleScheduler';
+import { startAutopilotScheduler } from './scheduler/autopilotScheduler';
 
 config();
 
@@ -32,6 +33,9 @@ app.use(errorHandler);
 
 // Start rule scheduler
 ruleScheduler.startScheduler(60000); // Run every minute
+
+// Start autopilot scheduler
+startAutopilotScheduler();
 
 app.listen(PORT, () => {
   logger.info(`Automation service listening on port ${PORT}`);

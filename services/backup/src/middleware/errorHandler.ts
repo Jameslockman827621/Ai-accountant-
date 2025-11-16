@@ -1,24 +1,32 @@
 import { Request, Response, NextFunction } from 'express';
+import { AppError } from '@ai-accountant/shared-utils';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { ValidationError } from '@ai-accountant/shared-utils';
 
 const logger = createLogger('backup-service');
 
 export function errorHandler(
-  err: Error,
-  req: Request,
+  err: Error | AppError,
+  _req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): void {
-  logger.error('Request error', err);
-
-  if (err instanceof ValidationError) {
-    res.status(400).json({ error: err.message });
+  if (err instanceof AppError) {
+    logger.error(err.message, err, { code: err.code, statusCode: err.statusCode });
+    res.status(err.statusCode).json({
+      error: {
+        code: err.code,
+        message: err.message,
+        details: err.details,
+      },
+    });
     return;
   }
 
+  logger.error('Unhandled error', err);
   res.status(500).json({
-    error: 'Internal server error',
-    message: process.env.NODE_ENV === 'development' ? err.message : undefined,
+    error: {
+      code: 'INTERNAL_ERROR',
+      message: 'An unexpected error occurred',
+    },
   });
 }

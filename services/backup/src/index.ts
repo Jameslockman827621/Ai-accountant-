@@ -11,7 +11,7 @@ config();
 
 const app: Express = express();
 const logger = createLogger('backup-service');
-const PORT = process.env.PORT || 3023;
+const PORT = process.env.PORT || 3022;
 
 app.use(helmet());
 app.use(cors({

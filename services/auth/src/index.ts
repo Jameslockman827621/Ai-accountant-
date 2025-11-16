@@ -7,6 +7,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { authRouter } from './routes/auth';
 import { userRouter } from './routes/users';
 import { tenantRouter } from './routes/tenants';
+import { organizationRouter } from './routes/organizations';
 import { errorHandler } from './middleware/errorHandler';
 
 config();
@@ -43,6 +44,7 @@ app.get('/health', (_req: Request, res: Response) => {
 app.use('/api/auth', authRouter);
 app.use('/api/users', userRouter);
 app.use('/api/tenants', tenantRouter);
+app.use('/api/organizations', organizationRouter);
 
 // Error handling
 app.use(errorHandler);
