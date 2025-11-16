@@ -464,19 +464,147 @@ function createProvinceRulepack(
   };
 }
 
-// Remaining provinces
+// ============================================================================
+// BRITISH COLUMBIA - Accurate 2024 Tax Brackets
+// ============================================================================
+const BRITISH_COLUMBIA_INCOME_BRACKETS_2024: Record<CanadaFilingStatus, CanadaIncomeTaxBracket[]> = {
+  single: [
+    { min: 0, max: 47937, rate: 0.0506 },
+    { min: 47937, max: 95875, rate: 0.077 },
+    { min: 95875, max: 110076, rate: 0.105 },
+    { min: 110076, max: 133664, rate: 0.1229 },
+    { min: 133664, max: 181232, rate: 0.147 },
+    { min: 181232, max: 252752, rate: 0.168 },
+    { min: 252752, max: null, rate: 0.205 },
+  ],
+  married: [
+    { min: 0, max: 47937, rate: 0.0506 },
+    { min: 47937, max: 95875, rate: 0.077 },
+    { min: 95875, max: 110076, rate: 0.105 },
+    { min: 110076, max: 133664, rate: 0.1229 },
+    { min: 133664, max: 181232, rate: 0.147 },
+    { min: 181232, max: 252752, rate: 0.168 },
+    { min: 252752, max: null, rate: 0.205 },
+  ],
+  common_law: [
+    { min: 0, max: 47937, rate: 0.0506 },
+    { min: 47937, max: 95875, rate: 0.077 },
+    { min: 95875, max: 110076, rate: 0.105 },
+    { min: 110076, max: 133664, rate: 0.1229 },
+    { min: 133664, max: 181232, rate: 0.147 },
+    { min: 181232, max: 252752, rate: 0.168 },
+    { min: 252752, max: null, rate: 0.205 },
+  ],
+};
+
+// ============================================================================
+// ALBERTA - Accurate 2024 Tax Brackets (Flat Rate)
+// ============================================================================
+const ALBERTA_INCOME_BRACKETS_2024: CanadaIncomeTaxBracket[] = [
+  { min: 0, max: null, rate: 0.10 },
+];
+
+// Remaining provinces with accurate data
 const PROVINCES = [
-  { code: 'AB', name: 'Alberta', incomeTax: 0.10, pst: 0, hasHST: false, hst: 0 },
-  { code: 'BC', name: 'British Columbia', incomeTax: 0.0506, pst: 0.07, hasHST: false, hst: 0 },
-  { code: 'MB', name: 'Manitoba', incomeTax: 0.108, pst: 0.07, hasHST: false, hst: 0 },
-  { code: 'NB', name: 'New Brunswick', incomeTax: 0.094, pst: 0, hasHST: true, hst: 0.15 },
-  { code: 'NL', name: 'Newfoundland and Labrador', incomeTax: 0.087, pst: 0, hasHST: true, hst: 0.15 },
-  { code: 'NS', name: 'Nova Scotia', incomeTax: 0.0875, pst: 0, hasHST: true, hst: 0.15 },
-  { code: 'PE', name: 'Prince Edward Island', incomeTax: 0.098, pst: 0, hasHST: true, hst: 0.15 },
-  { code: 'SK', name: 'Saskatchewan', incomeTax: 0.105, pst: 0.06, hasHST: false, hst: 0 },
-  { code: 'NT', name: 'Northwest Territories', incomeTax: 0.059, pst: 0, hasHST: false, hst: 0 },
-  { code: 'NU', name: 'Nunavut', incomeTax: 0.04, pst: 0, hasHST: false, hst: 0 },
-  { code: 'YT', name: 'Yukon', incomeTax: 0.064, pst: 0, hasHST: false, hst: 0 },
+  { 
+    code: 'AB', 
+    name: 'Alberta', 
+    incomeBrackets: ALBERTA_INCOME_BRACKETS_2024,
+    incomeTax: 0.10, 
+    pst: 0, 
+    hasHST: false, 
+    hst: 0 
+  },
+  { 
+    code: 'BC', 
+    name: 'British Columbia', 
+    incomeBrackets: BRITISH_COLUMBIA_INCOME_BRACKETS_2024,
+    incomeTax: 0.0506, 
+    pst: 0.07, 
+    hasHST: false, 
+    hst: 0 
+  },
+  { 
+    code: 'MB', 
+    name: 'Manitoba', 
+    incomeBrackets: null,
+    incomeTax: 0.108, 
+    pst: 0.07, 
+    hasHST: false, 
+    hst: 0 
+  },
+  { 
+    code: 'NB', 
+    name: 'New Brunswick', 
+    incomeBrackets: null,
+    incomeTax: 0.094, 
+    pst: 0, 
+    hasHST: true, 
+    hst: 0.15 
+  },
+  { 
+    code: 'NL', 
+    name: 'Newfoundland and Labrador', 
+    incomeBrackets: null,
+    incomeTax: 0.087, 
+    pst: 0, 
+    hasHST: true, 
+    hst: 0.15 
+  },
+  { 
+    code: 'NS', 
+    name: 'Nova Scotia', 
+    incomeBrackets: null,
+    incomeTax: 0.0875, 
+    pst: 0, 
+    hasHST: true, 
+    hst: 0.15 
+  },
+  { 
+    code: 'PE', 
+    name: 'Prince Edward Island', 
+    incomeBrackets: null,
+    incomeTax: 0.098, 
+    pst: 0, 
+    hasHST: true, 
+    hst: 0.15 
+  },
+  { 
+    code: 'SK', 
+    name: 'Saskatchewan', 
+    incomeBrackets: null,
+    incomeTax: 0.105, 
+    pst: 0.06, 
+    hasHST: false, 
+    hst: 0 
+  },
+  { 
+    code: 'NT', 
+    name: 'Northwest Territories', 
+    incomeBrackets: null,
+    incomeTax: 0.059, 
+    pst: 0, 
+    hasHST: false, 
+    hst: 0 
+  },
+  { 
+    code: 'NU', 
+    name: 'Nunavut', 
+    incomeBrackets: null,
+    incomeTax: 0.04, 
+    pst: 0, 
+    hasHST: false, 
+    hst: 0 
+  },
+  { 
+    code: 'YT', 
+    name: 'Yukon', 
+    incomeBrackets: null,
+    incomeTax: 0.064, 
+    pst: 0, 
+    hasHST: false, 
+    hst: 0 
+  },
 ];
 
 const PROVINCE_RULEPACKS = PROVINCES.map(province => {
@@ -508,11 +636,15 @@ const PROVINCE_RULEPACKS = PROVINCES.map(province => {
     });
   }
 
+  // Use accurate brackets if available, otherwise use flat rate
+  const incomeBrackets = (province as any).incomeBrackets || null;
+  const incomeTaxRate = incomeBrackets ? 0 : province.incomeTax;
+
   return createProvinceRulepack(
     province.code,
     province.name,
-    null,
-    province.incomeTax,
+    incomeBrackets,
+    incomeTaxRate,
     province.pst,
     province.hasHST,
     province.hst,
