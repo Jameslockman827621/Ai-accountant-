@@ -1,6 +1,6 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId } from '@ai-accountant/shared-types';
+import { TenantId, ValidationStatus } from '@ai-accountant/shared-types';
 import { validateTaxCalculation, ValidationResult } from './taxValidator';
 import { checkDataAccuracy, AccuracyCheck } from './dataAccuracy';
 import { detectAnomalies, Anomaly } from './anomalyDetector';
@@ -9,6 +9,11 @@ import {
   ConfidenceCheck,
   CRITICAL_CONFIDENCE_THRESHOLD,
 } from './confidenceThreshold';
+import {
+  startValidationRun,
+  recordValidationComponent,
+  completeValidationRun,
+} from './validationRunStore';
 
 const logger = createLogger('validation-service');
 
@@ -48,6 +53,7 @@ export interface ValidationSuiteOptions {
   periodStart?: Date;
   periodEnd?: Date;
   includeConfidenceChecks?: boolean;
+  triggeredBy?: string;
 }
 
 export interface ValidationSuiteSummary {
@@ -78,6 +84,7 @@ export interface ValidationSuiteSummary {
     startedAt: string;
     completedAt: string;
   };
+  runId?: string;
 }
 
 interface PersistParams {
@@ -89,6 +96,7 @@ interface PersistParams {
   errors?: string[];
   warnings?: string[];
   confidence?: number | null;
+  metrics?: Record<string, unknown>;
 }
 
 function resolvePeriod(periodStart?: Date, periodEnd?: Date): { start: Date; end: Date } {
@@ -113,7 +121,14 @@ function highestSeverity(anomalies: Anomaly[]): 'none' | 'low' | 'medium' | 'hig
   }, 'none');
 }
 
-async function persistComponent(params: PersistParams): Promise<string | null> {
+function deriveComponentStatus(isValid: boolean, errors?: string[], warnings?: string[]): ValidationStatus {
+  if (isValid) {
+    return warnings && warnings.length > 0 ? 'warning' : 'pass';
+  }
+  return errors && errors.length > 0 ? 'fail' : 'warning';
+}
+
+async function persistComponent(params: PersistParams, runId?: string): Promise<string | null> {
   try {
     const result = await db.query<{ id: string }>(INSERT_VALIDATION_RESULT, [
       params.tenantId,
@@ -125,7 +140,28 @@ async function persistComponent(params: PersistParams): Promise<string | null> {
       JSON.stringify(params.warnings ?? []),
       params.confidence ?? null,
     ]);
-    return result.rows[0]?.id ?? null;
+    const recordId = result.rows[0]?.id ?? null;
+
+    if (runId) {
+      try {
+        await recordValidationComponent({
+          runId,
+          component: params.component,
+          status: deriveComponentStatus(params.isValid, params.errors, params.warnings),
+          errors: params.errors,
+          warnings: params.warnings,
+          metrics: params.metrics,
+        });
+      } catch (error) {
+        logger.warn(
+          'Failed to record validation component run',
+          error instanceof Error ? error : new Error(String(error)),
+          { component: params.component, runId }
+        );
+      }
+    }
+
+    return recordId;
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
       logger.error('Failed to persist validation result', err, {
@@ -145,6 +181,23 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
   const includeConfidence = options.includeConfidenceChecks !== false;
   const { start: periodStart, end: periodEnd } = resolvePeriod(options.periodStart, options.periodEnd);
   const startedAt = new Date();
+  let runId: string | null = null;
+
+  try {
+    const run = await startValidationRun({
+      tenantId,
+      entityType,
+      entityId,
+      triggeredBy: options.triggeredBy,
+    });
+    runId = run.runId;
+  } catch (error) {
+    logger.warn(
+      'Unable to record validation run start',
+      error instanceof Error ? error : new Error(String(error)),
+      { tenantId, entityType, entityId }
+    );
+  }
 
   const overallErrors: string[] = [];
   const overallWarnings: string[] = [];
@@ -154,16 +207,19 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
   if (options.filingType && options.filingData) {
     try {
       taxResult = await validateTaxCalculation(tenantId, options.filingType, options.filingData);
-      recordsPersisted.tax = await persistComponent({
+        recordsPersisted.tax = await persistComponent({
         tenantId,
         entityType,
         entityId,
         component: 'tax',
         isValid: taxResult.isValid,
         errors: taxResult.errors,
-        warnings: taxResult.warnings,
+          warnings: taxResult.warnings,
         confidence: taxResult.confidence,
-      });
+          metrics: {
+            confidence: taxResult.confidence ?? null,
+          },
+        }, runId ?? undefined);
 
       if (!taxResult.isValid) {
         overallErrors.push('Tax validation failed');
@@ -174,14 +230,14 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
         const err = error instanceof Error ? error : new Error(String(error));
         logger.error('Tax validation execution failed', err, { entityId });
       overallErrors.push('Tax validation could not be executed');
-      recordsPersisted.tax = await persistComponent({
+        recordsPersisted.tax = await persistComponent({
         tenantId,
         entityType,
         entityId,
         component: 'tax',
         isValid: false,
         errors: ['Tax validation execution error'],
-      });
+        }, runId ?? undefined);
     }
   }
 
@@ -189,14 +245,18 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
   try {
     accuracyChecks = await checkDataAccuracy(tenantId, periodStart, periodEnd);
     const failedChecks = accuracyChecks.filter(check => !check.passed);
-    recordsPersisted.accuracy = await persistComponent({
+      recordsPersisted.accuracy = await persistComponent({
       tenantId,
       entityType,
       entityId,
       component: 'accuracy',
       isValid: failedChecks.length === 0,
       errors: failedChecks.map(check => `${check.check}: ${check.message}`),
-    });
+        metrics: {
+          totalChecks: accuracyChecks.length,
+          failedChecks: failedChecks.length,
+        },
+      }, runId ?? undefined);
     if (failedChecks.length) {
       overallErrors.push('Data accuracy checks failed');
     }
@@ -204,14 +264,14 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
       const err = error instanceof Error ? error : new Error(String(error));
       logger.error('Accuracy check execution failed', err, { entityId });
     overallErrors.push('Accuracy checks could not be executed');
-    recordsPersisted.accuracy = await persistComponent({
+      recordsPersisted.accuracy = await persistComponent({
       tenantId,
       entityType,
       entityId,
       component: 'accuracy',
       isValid: false,
       errors: ['Accuracy check execution error'],
-    });
+      }, runId ?? undefined);
   }
 
   let anomalyItems: Anomaly[] = [];
@@ -224,15 +284,19 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
   }
 
   const anomalySeverity = highestSeverity(anomalyItems);
-  recordsPersisted.anomalies = await persistComponent({
+    recordsPersisted.anomalies = await persistComponent({
     tenantId,
     entityType,
     entityId,
     component: 'anomalies',
     isValid: anomalySeverity !== 'high',
     errors: anomalySeverity === 'high' ? ['High severity anomalies detected'] : [],
-    warnings: anomalySeverity === 'medium' ? ['Medium severity anomalies detected'] : [],
-  });
+      warnings: anomalySeverity === 'medium' ? ['Medium severity anomalies detected'] : [],
+      metrics: {
+        anomalyCount: anomalyItems.length,
+        highestSeverity: anomalySeverity,
+      },
+    }, runId ?? undefined);
 
   if (anomalySeverity === 'high') {
     overallErrors.push('High severity anomalies detected');
@@ -259,7 +323,7 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
   );
 
   if (includeConfidence) {
-    recordsPersisted.confidence = await persistComponent({
+      recordsPersisted.confidence = await persistComponent({
       tenantId,
       entityType,
       entityId,
@@ -275,7 +339,12 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
           ? confidenceChecks.reduce((sum, check) => sum + check.confidenceScore, 0) /
             confidenceChecks.length
           : null,
-    });
+        metrics: {
+          totalChecks: confidenceChecks.length,
+          failures: confidenceFailures.length,
+          critical: criticalConfidence.length,
+        },
+      }, runId ?? undefined);
   }
 
   if (criticalConfidence.length) {
@@ -293,7 +362,7 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
 
   const completedAt = new Date();
 
-  return {
+  const summary: ValidationSuiteSummary = {
     entityType,
     entityId,
     status,
@@ -323,5 +392,50 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
       startedAt: startedAt.toISOString(),
       completedAt: completedAt.toISOString(),
     },
+    runId: runId ?? undefined,
   };
+
+  if (runId) {
+    try {
+      await completeValidationRun({
+        runId,
+        status,
+        errors: overallErrors,
+        warnings: overallWarnings,
+        summary: {
+          tax: taxResult
+            ? {
+                isValid: taxResult.isValid,
+                errors: taxResult.errors,
+                warnings: taxResult.warnings,
+                confidence: taxResult.confidence ?? null,
+              }
+            : null,
+          accuracy: {
+            total: accuracyChecks.length,
+            failed: accuracyChecks.filter(check => !check.passed).length,
+          },
+          anomalies: {
+            count: anomalyItems.length,
+            severity: anomalySeverity,
+          },
+          confidence: includeConfidence
+            ? {
+                total: confidenceChecks.length,
+                failures: confidenceFailures.length,
+                critical: criticalConfidence.length,
+              }
+            : null,
+        },
+      });
+    } catch (error) {
+      logger.warn(
+        'Unable to record validation run completion',
+        error instanceof Error ? error : new Error(String(error)),
+        { runId }
+      );
+    }
+  }
+
+  return summary;
 }

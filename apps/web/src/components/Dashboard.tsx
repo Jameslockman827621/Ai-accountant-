@@ -19,6 +19,7 @@ import AccountantClientsPanel from './AccountantClientsPanel';
 import ExecutiveInsightsPanel from './ExecutiveInsightsPanel';
 import { useOnboarding } from '@/hooks/useOnboarding';
 import DocumentIntakePanel from './DocumentIntakePanel';
+import ValidationCenter from './ValidationCenter';
 
 interface DashboardStats {
   period: {
@@ -255,6 +256,7 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             </div>
             <ProcessingStatus token={token} />
             <DocumentIntakePanel token={token} />
+            <ValidationCenter token={token} />
             <ReconciliationDashboard token={token} />
             <ScenarioPlanner token={token} />
             <ExecutiveInsightsPanel token={token} />

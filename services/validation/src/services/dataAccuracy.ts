@@ -147,5 +147,63 @@ export async function checkDataAccuracy(
     details: { calculatedTax, recordedTax, difference: taxDifference },
   });
 
+  const highValueResult = await db.query<{ pending: number }>(
+    `SELECT COUNT(*) as pending
+       FROM documents
+      WHERE tenant_id = $1
+        AND created_at BETWEEN $2 AND $3
+        AND status <> 'posted'
+        AND COALESCE((extracted_data->>'total')::numeric, 0) >= $4`,
+    [tenantId, periodStart, periodEnd, 1000]
+  );
+  const pendingHighValue = parseInt(String(highValueResult.rows[0]?.pending ?? '0'), 10);
+  checks.push({
+    check: 'High-value documents posted',
+    passed: pendingHighValue === 0,
+    message:
+      pendingHighValue === 0
+        ? 'All high-value documents are posted'
+        : `${pendingHighValue} high-value documents awaiting posting`,
+    details: { pendingHighValue, threshold: 1000 },
+  });
+
+  const staleConnectionsResult = await db.query<{ stale: number }>(
+    `SELECT COUNT(*) as stale
+       FROM bank_connections
+      WHERE tenant_id = $1
+        AND is_active = true
+        AND (last_sync IS NULL OR last_sync < NOW() - INTERVAL '5 days')`,
+    [tenantId]
+  );
+  const staleConnections = parseInt(String(staleConnectionsResult.rows[0]?.stale ?? '0'), 10);
+  checks.push({
+    check: 'Bank feed freshness',
+    passed: staleConnections === 0,
+    message:
+      staleConnections === 0
+        ? 'All active bank feeds synced recently'
+        : `${staleConnections} bank connections need refreshing`,
+    details: { staleConnections },
+  });
+
+  const orphanedEntriesResult = await db.query<{ count: number }>(
+    `SELECT COUNT(*) as count
+       FROM ledger_entries
+      WHERE tenant_id = $1
+        AND transaction_date BETWEEN $2 AND $3
+        AND document_id IS NULL`,
+    [tenantId, periodStart, periodEnd]
+  );
+  const orphanedEntries = parseInt(String(orphanedEntriesResult.rows[0]?.count ?? '0'), 10);
+  checks.push({
+    check: 'Ledger-document linkage',
+    passed: orphanedEntries === 0,
+    message:
+      orphanedEntries === 0
+        ? 'All ledger entries reference source documents'
+        : `${orphanedEntries} ledger entries missing source documents`,
+    details: { orphanedEntries },
+  });
+
   return checks;
 }

@@ -26,6 +26,7 @@ async function executeValidationSummary(params: {
   filingData: Record<string, unknown>;
   periodStart: Date;
   periodEnd: Date;
+  triggeredBy?: UserId;
 }): Promise<ValidationSuiteSummary> {
   return runValidationSuite({
     tenantId: params.tenantId,
@@ -36,6 +37,7 @@ async function executeValidationSummary(params: {
     periodStart: params.periodStart,
     periodEnd: params.periodEnd,
     includeConfidenceChecks: true,
+    triggeredBy: params.triggeredBy,
   });
 }
 
@@ -83,6 +85,7 @@ export async function createFilingReview(
     filingData: filing.filing_data,
     periodStart: new Date(filing.period_start),
     periodEnd: new Date(filing.period_end),
+    triggeredBy: reviewerId,
   });
 
   await db.query(

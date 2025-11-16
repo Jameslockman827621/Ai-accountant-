@@ -50,6 +50,31 @@ export interface DocumentChecklistItem {
   helpText?: string;
 }
 
+export type ValidationStatus = 'pass' | 'warning' | 'fail';
+
+export interface ValidationComponentSummary {
+  component: string;
+  status: ValidationStatus;
+  errors: string[];
+  warnings: string[];
+  metrics?: Record<string, unknown>;
+}
+
+export interface ValidationRunSummary {
+  id: string;
+  tenantId: TenantId;
+  entityType: string;
+  entityId: string;
+  status: ValidationStatus;
+  errors: string[];
+  warnings: string[];
+  summary: Record<string, unknown>;
+  triggeredBy?: UserId;
+  triggeredAt: Date;
+  completedAt?: Date;
+  components: ValidationComponentSummary[];
+}
+
 export enum LedgerEntryType {
   DEBIT = 'debit',
   CREDIT = 'credit',
