@@ -198,6 +198,14 @@ if (require.main === module) {
   const app = createMonitoringApp();
   const PORT = process.env.PORT || 3019;
 
+  // Add API routes
+  const { monitoringRouter } = require('./routes/monitoring');
+  const { authenticate } = require('./middleware/auth');
+  const { errorHandler } = require('./middleware/errorHandler');
+  
+  app.use('/api/monitoring', authenticate, monitoringRouter);
+  app.use(errorHandler);
+
   app.listen(PORT, () => {
     logger.info(`Monitoring service listening on port ${PORT}`);
   });

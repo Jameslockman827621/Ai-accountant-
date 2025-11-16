@@ -1,5 +1,5 @@
 {
-  "name": "@ai-accountant/backup-service",
+  "name": "@ai-accountant/quality-service",
   "version": "1.0.0",
   "main": "./dist/index.js",
   "scripts": {

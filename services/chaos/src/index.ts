@@ -3,15 +3,15 @@ import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { backupRouter } from './routes/backup';
+import { chaosRouter } from './routes/chaos';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
 config();
 
 const app: Express = express();
-const logger = createLogger('backup-service');
-const PORT = process.env.PORT || 3022;
+const logger = createLogger('chaos-service');
+const PORT = process.env.PORT || 3023;
 
 app.use(helmet());
 app.use(cors({
@@ -22,15 +22,15 @@ app.use(cors({
 app.use(express.json());
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'backup-service' });
+  res.json({ status: 'ok', service: 'chaos-service' });
 });
 
-app.use('/api/backup', authenticate, backupRouter);
+app.use('/api/chaos', authenticate, chaosRouter);
 
 app.use(errorHandler);
 
 app.listen(PORT, () => {
-  logger.info(`Backup service listening on port ${PORT}`);
+  logger.info(`Chaos service listening on port ${PORT}`);
 });
 
 export default app;

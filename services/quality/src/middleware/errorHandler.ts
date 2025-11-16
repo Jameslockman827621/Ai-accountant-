@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@ai-accountant/shared-utils';
 import { createLogger } from '@ai-accountant/shared-utils';
 
-const logger = createLogger('backup-service');
+const logger = createLogger('quality-service');
 
 export function errorHandler(
   err: Error | AppError,
