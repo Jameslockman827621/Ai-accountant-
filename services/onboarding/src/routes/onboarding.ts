@@ -11,6 +11,8 @@ import {
   OnboardingEventType,
 } from '../services/onboarding';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { generateSampleData } from '../services/sampleDataGenerator';
+import { tutorialEngine } from '../services/tutorialEngine';
 
 const router = Router();
 const logger = createLogger('onboarding-service');
@@ -159,6 +161,109 @@ router.post('/events', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to record onboarding event' });
+  }
+});
+
+// Generate sample data
+router.post('/sample-data', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const result = await generateSampleData(req.user.tenantId, req.user.userId);
+    res.json({ result });
+  } catch (error) {
+    logger.error('Generate sample data failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to generate sample data' });
+  }
+});
+
+// Get available tutorials
+router.get('/tutorials', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const tutorials = tutorialEngine.getAvailableTutorials(req.user.tenantId, req.user.userId);
+    res.json({ tutorials });
+  } catch (error) {
+    logger.error('Get tutorials failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get tutorials' });
+  }
+});
+
+// Get tutorial
+router.get('/tutorials/:tutorialId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { tutorialId } = req.params;
+    const tutorial = tutorialEngine.getTutorial(tutorialId);
+
+    if (!tutorial) {
+      res.status(404).json({ error: 'Tutorial not found' });
+      return;
+    }
+
+    res.json({ tutorial });
+  } catch (error) {
+    logger.error('Get tutorial failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get tutorial' });
+  }
+});
+
+// Get contextual help
+router.get('/help/:component', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { component } = req.params;
+    const { action } = req.query;
+
+    const help = tutorialEngine.getContextualHelp(component, action as string | undefined);
+    
+    if (!help) {
+      res.status(404).json({ error: 'Help not found' });
+      return;
+    }
+
+    res.json({ help });
+  } catch (error) {
+    logger.error('Get contextual help failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get contextual help' });
+  }
+});
+
+// Complete tutorial step
+router.post('/tutorials/:tutorialId/steps/:stepId/complete', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { tutorialId, stepId } = req.params;
+    const completed = tutorialEngine.completeStep(tutorialId, stepId);
+
+    if (!completed) {
+      res.status(404).json({ error: 'Tutorial or step not found' });
+      return;
+    }
+
+    res.json({ message: 'Step completed' });
+  } catch (error) {
+    logger.error('Complete tutorial step failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to complete tutorial step' });
   }
 });
 
