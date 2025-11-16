@@ -2,6 +2,7 @@ import { Router, Response } from 'express';
 import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { AuthRequest } from '../middleware/auth';
+import { db } from '@ai-accountant/database';
 import {
   getAccountantClients,
   switchClientContext,
@@ -9,6 +10,7 @@ import {
   getClientTasks,
   resolveClientTask,
 } from '../services/multiClient';
+import { firmPortalService } from '../services/firmPortal';
 
 const router = Router();
 const logger = createLogger('accountant-service');
@@ -157,6 +159,69 @@ router.post('/bulk-operation', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to perform bulk operation' });
+  }
+});
+
+// Get firm overview
+router.get('/firm/overview', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    // Get user's firm
+    const firmResult = await db.query<{ firm_id: string }>(
+      `SELECT firm_id FROM accountant_staff WHERE user_id = $1 AND is_active = true LIMIT 1`,
+      [req.user.userId]
+    );
+
+    if (firmResult.rows.length === 0) {
+      res.status(404).json({ error: 'Firm not found' });
+      return;
+    }
+
+    const overview = await firmPortalService.getFirmOverview(firmResult.rows[0].firm_id, req.user.userId);
+    res.json({ overview });
+  } catch (error) {
+    logger.error('Get firm overview failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get firm overview' });
+  }
+});
+
+// Get client summary
+router.get('/firm/clients/:clientTenantId/summary', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    // Get user's firm
+    const firmResult = await db.query<{ firm_id: string }>(
+      `SELECT firm_id FROM accountant_staff WHERE user_id = $1 AND is_active = true LIMIT 1`,
+      [req.user.userId]
+    );
+
+    if (firmResult.rows.length === 0) {
+      res.status(404).json({ error: 'Firm not found' });
+      return;
+    }
+
+    const summary = await firmPortalService.getClientSummary(
+      firmResult.rows[0].firm_id,
+      req.params.clientTenantId as TenantId
+    );
+
+    if (!summary) {
+      res.status(404).json({ error: 'Client not found or access denied' });
+      return;
+    }
+
+    res.json({ summary });
+  } catch (error) {
+    logger.error('Get client summary failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get client summary' });
   }
 });
 

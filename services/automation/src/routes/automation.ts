@@ -13,6 +13,10 @@ import {
   listPlaybookRuns,
   confirmPlaybookRun,
 } from '../services/playbooks';
+import { autopilotEngine } from '../services/autopilotEngine';
+import { taskAssignmentService } from '../services/taskAssignment';
+import { taskExecutionService } from '../services/taskExecution';
+import { policyEngine } from '../services/policyEngine';
 
 const router = Router();
 const logger = createLogger('automation-service');
@@ -307,6 +311,273 @@ router.post('/rules/:ruleId/execute', async (req: AuthRequest, res: Response) =>
   } catch (error) {
     logger.error('Execute rule failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to execute rule' });
+  }
+});
+
+// Generate daily agenda
+router.post('/autopilot/agenda', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { date } = req.body;
+    const agenda = await autopilotEngine.generateDailyAgenda(req.user.tenantId, date);
+
+    res.json({ agenda });
+  } catch (error) {
+    logger.error('Generate agenda failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to generate agenda' });
+  }
+});
+
+// Get agenda
+router.get('/autopilot/agenda/:agendaId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { agendaId } = req.params;
+    const agenda = await autopilotEngine.getAgenda(agendaId);
+
+    res.json({ agenda });
+  } catch (error) {
+    logger.error('Get agenda failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get agenda' });
+  }
+});
+
+// List tasks
+router.get('/tasks', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { status, priority, assignedTo, limit = 50, offset = 0 } = req.query;
+
+    let query = `
+      SELECT * FROM autopilot_tasks
+      WHERE tenant_id = $1
+    `;
+    const params: unknown[] = [req.user.tenantId];
+    let paramCount = 2;
+
+    if (status) {
+      query += ` AND status = $${paramCount++}`;
+      params.push(status);
+    }
+
+    if (priority) {
+      query += ` AND priority = $${paramCount++}`;
+      params.push(priority);
+    }
+
+    if (assignedTo) {
+      query += ` AND assigned_to = $${paramCount++}`;
+      params.push(assignedTo);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${paramCount++} OFFSET $${paramCount++}`;
+    params.push(parseInt(limit as string, 10), parseInt(offset as string, 10));
+
+    const result = await db.query(query, params);
+
+    res.json({ tasks: result.rows });
+  } catch (error) {
+    logger.error('List tasks failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to list tasks' });
+  }
+});
+
+// Get task
+router.get('/tasks/:taskId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { taskId } = req.params;
+    const task = await autopilotEngine.getTask(taskId);
+
+    if (task.tenantId !== req.user.tenantId) {
+      res.status(403).json({ error: 'Access denied' });
+      return;
+    }
+
+    res.json({ task });
+  } catch (error) {
+    logger.error('Get task failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get task' });
+  }
+});
+
+// Assign task
+router.post('/tasks/:taskId/assign', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { taskId } = req.params;
+    const { method, userId } = req.body;
+
+    if (!method) {
+      res.status(400).json({ error: 'Assignment method is required' });
+      return;
+    }
+
+    const assignedUserId = await taskAssignmentService.assignTask(
+      taskId,
+      req.user.tenantId,
+      method,
+      req.user.userId,
+      userId
+    );
+
+    res.json({ assignedTo: assignedUserId });
+  } catch (error) {
+    logger.error('Assign task failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to assign task' });
+  }
+});
+
+// Get assignment suggestion
+router.get('/tasks/:taskId/suggest-assignment', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { taskId } = req.params;
+    const suggestion = await taskAssignmentService.getAISuggestion(taskId, req.user.tenantId);
+
+    res.json({ suggestion });
+  } catch (error) {
+    logger.error('Get assignment suggestion failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get suggestion' });
+  }
+});
+
+// Execute task
+router.post('/tasks/:taskId/execute', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { taskId } = req.params;
+    const { executionMethod, simulation } = req.body;
+
+    const result = await taskExecutionService.executeTask(
+      taskId,
+      req.user.tenantId,
+      req.user.userId,
+      executionMethod || 'human',
+      simulation || false
+    );
+
+    res.json({ result });
+  } catch (error) {
+    logger.error('Execute task failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to execute task' });
+  }
+});
+
+// Get task execution history
+router.get('/tasks/:taskId/history', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { taskId } = req.params;
+
+    const result = await db.query(
+      `SELECT * FROM task_execution_history
+       WHERE task_id = $1
+       ORDER BY action_timestamp DESC`,
+      [taskId]
+    );
+
+    res.json({ history: result.rows });
+  } catch (error) {
+    logger.error('Get task history failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get task history' });
+  }
+});
+
+// Evaluate policy
+router.post('/policies/evaluate', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { actionType, context } = req.body;
+
+    if (!actionType) {
+      res.status(400).json({ error: 'Action type is required' });
+      return;
+    }
+
+    const result = await policyEngine.evaluateAction(
+      req.user.tenantId,
+      req.user.userId,
+      req.user.role,
+      actionType,
+      context || {}
+    );
+
+    res.json({ evaluation: result });
+  } catch (error) {
+    logger.error('Evaluate policy failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to evaluate policy' });
+  }
+});
+
+// Create policy
+router.post('/policies', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { policyName, policyType, scope, scopeId, conditions, actions, riskThreshold, priority } = req.body;
+
+    if (!policyName || !policyType || !scope || !conditions || !actions) {
+      res.status(400).json({ error: 'Missing required fields' });
+      return;
+    }
+
+    const policyId = await policyEngine.createPolicy(
+      req.user.tenantId,
+      policyName,
+      policyType,
+      scope,
+      scopeId || null,
+      conditions,
+      actions,
+      riskThreshold || null,
+      priority || 0,
+      req.user.userId
+    );
+
+    res.json({ policyId });
+  } catch (error) {
+    logger.error('Create policy failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to create policy' });
   }
 });
 

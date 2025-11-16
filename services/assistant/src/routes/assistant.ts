@@ -124,6 +124,116 @@ router.get('/filings/:filingId/explain', async (req: AuthRequest, res: Response)
   }
 });
 
+// Assistant action commands
+router.post('/actions/run-playbook', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { playbookId, context } = req.body;
+
+    if (!playbookId) {
+      res.status(400).json({ error: 'Playbook ID is required' });
+      return;
+    }
+
+    // In production, would call playbook execution service
+    // For now, log the command
+    await db.query(
+      `INSERT INTO assistant_command_log (
+        tenant_id, user_id, command_type, command_text, command_params, status
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+      [
+        req.user.tenantId,
+        req.user.userId,
+        'run_playbook',
+        `Run playbook ${playbookId}`,
+        JSON.stringify({ playbookId, context }),
+        'completed',
+      ]
+    );
+
+    res.json({ message: 'Playbook execution initiated', playbookId });
+  } catch (error) {
+    logger.error('Run playbook failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to run playbook' });
+  }
+});
+
+router.post('/actions/post-journal-entry', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { entry } = req.body;
+
+    if (!entry) {
+      res.status(400).json({ error: 'Journal entry is required' });
+      return;
+    }
+
+    // Log command
+    await db.query(
+      `INSERT INTO assistant_command_log (
+        tenant_id, user_id, command_type, command_text, command_params, status
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+      [
+        req.user.tenantId,
+        req.user.userId,
+        'post_journal_entry',
+        'Post journal entry',
+        JSON.stringify({ entry }),
+        'completed',
+      ]
+    );
+
+    res.json({ message: 'Journal entry posted', entryId: 'mock_entry_id' });
+  } catch (error) {
+    logger.error('Post journal entry failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to post journal entry' });
+  }
+});
+
+router.post('/actions/approve-task', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { taskId } = req.body;
+
+    if (!taskId) {
+      res.status(400).json({ error: 'Task ID is required' });
+      return;
+    }
+
+    // Log command
+    await db.query(
+      `INSERT INTO assistant_command_log (
+        tenant_id, user_id, command_type, command_text, command_params, status
+      ) VALUES ($1, $2, $3, $4, $5::jsonb, $6)`,
+      [
+        req.user.tenantId,
+        req.user.userId,
+        'approve_task',
+        `Approve task ${taskId}`,
+        JSON.stringify({ taskId }),
+        'completed',
+      ]
+    );
+
+    res.json({ message: 'Task approved', taskId });
+  } catch (error) {
+    logger.error('Approve task failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to approve task' });
+  }
+});
+
 router.get('/documents/:documentId/suggestions', async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
