@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { documentRouter } from './routes/documents';
+import { ingestionRouter } from './routes/ingestion';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 import { connectQueue } from './messaging/queue';
@@ -32,6 +33,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/documents', authenticate, documentRouter);
+app.use('/api/ingestion', ingestionRouter); // Mix of public (email/webhook) and protected routes
 
 app.use(errorHandler);
 

@@ -49,6 +49,7 @@ import {
 import { VATReturnPayload } from '@ai-accountant/hmrc';
 import { getReceiptDownloadUrl } from '../storage/receiptStorage';
 import { filingLifecycleService } from '../services/filingLifecycle';
+import { filingWorkflowService } from '../services/filingWorkflows';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -328,6 +329,24 @@ router.get('/:filingId', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get filing failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get filing' });
+  }
+});
+
+// Get filing audit trail (Chunk 2)
+router.get('/:filingId/audit-trail', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const auditTrail = await filingWorkflowService.getAuditTrail(filingId);
+
+    res.json({ auditTrail });
+  } catch (error) {
+    logger.error('Get audit trail failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get audit trail' });
   }
 });
 

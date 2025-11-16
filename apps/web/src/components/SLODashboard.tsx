@@ -1,50 +1,79 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { TrendingUp, AlertTriangle, CheckCircle, Activity } from 'lucide-react';
+import { createLogger } from '@ai-accountant/shared-utils';
 
-interface SLO {
+const logger = createLogger('SLO-Dashboard');
+
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+interface SLODefinition {
   id: string;
-  serviceName: string;
   sloName: string;
-  sloType: 'availability' | 'latency' | 'error_rate' | 'freshness';
-  targetPercentage: number;
-  currentPercentage?: number;
-  status: 'on_track' | 'at_risk' | 'breached';
-  errorBudgetRemaining?: number;
-  errorBudgetBurnRate?: number;
-  lastBreachAt?: string;
+  serviceName: string;
+  metricName: string;
+  targetValue: number;
+  windowDays: number;
+  description: string | null;
 }
 
-export default function SLODashboard() {
-  const [slos, setSlos] = useState<SLO[]>([]);
+interface SLOStatus {
+  slo: SLODefinition;
+  currentValue: number;
+  errorBudget: number;
+  status: 'healthy' | 'warning' | 'breached';
+  trend: 'improving' | 'stable' | 'degrading';
+}
+
+interface AlertFire {
+  id: string;
+  ruleName: string;
+  severity: 'info' | 'warning' | 'critical';
+  firedAt: string;
+  metricValue: number;
+  runbookUrl: string | null;
+}
+
+interface SLODashboardProps {
+  token: string;
+}
+
+/**
+ * SLO Dashboard Component (Chunk 2)
+ * Summarizes SLO status, error budgets, and active incidents
+ */
+export default function SLODashboard({ token }: SLODashboardProps) {
+  const [slos, setSlos] = useState<SLOStatus[]>([]);
+  const [alerts, setAlerts] = useState<AlertFire[]>([]);
   const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState({
-    serviceName: '',
-    sloType: '',
-    status: '',
-  });
 
   useEffect(() => {
-    fetchSLOs();
-  }, [filter]);
+    loadData();
+    const interval = setInterval(loadData, 30000); // Refresh every 30 seconds
+    return () => clearInterval(interval);
+  }, []);
 
-  const fetchSLOs = async () => {
+  const loadData = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const params = new URLSearchParams();
-      if (filter.serviceName) params.append('serviceName', filter.serviceName);
-      if (filter.sloType) params.append('sloType', filter.sloType);
-      if (filter.status) params.append('status', filter.status);
-      params.append('limit', '100');
-
-      const res = await fetch(`/api/monitoring/slos?${params}`, {
+      // Load SLOs
+      const slosRes = await fetch(`${API_BASE}/api/monitoring/slos`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      setSlos(data.slos || []);
+      if (slosRes.ok) {
+        const slosData = await slosRes.json();
+        setSlos(slosData.slos || []);
+      }
+
+      // Load active alerts
+      const alertsRes = await fetch(`${API_BASE}/api/monitoring/alerts/active`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (alertsRes.ok) {
+        const alertsData = await alertsRes.json();
+        setAlerts(alertsData.alerts || []);
+      }
     } catch (error) {
-      console.error('Error fetching SLOs:', error);
+      logger.error('Failed to load SLO data', error);
     } finally {
       setLoading(false);
     }
@@ -52,151 +81,140 @@ export default function SLODashboard() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'breached': return 'text-red-700 bg-red-50 border-red-200';
-      case 'at_risk': return 'text-yellow-700 bg-yellow-50 border-yellow-200';
-      default: return 'text-green-700 bg-green-50 border-green-200';
+      case 'healthy':
+        return 'bg-green-100 text-green-800 border-green-200';
+      case 'warning':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'breached':
+        return 'bg-red-100 text-red-800 border-red-200';
+      default:
+        return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    switch (status) {
-      case 'breached': return <AlertTriangle className="w-5 h-5 text-red-600" />;
-      case 'at_risk': return <Activity className="w-5 h-5 text-yellow-600" />;
-      default: return <CheckCircle className="w-5 h-5 text-green-600" />;
+  const getSeverityColor = (severity: string) => {
+    switch (severity) {
+      case 'critical':
+        return 'bg-red-100 text-red-800';
+      case 'warning':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'info':
+        return 'bg-blue-100 text-blue-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
     }
   };
 
   if (loading) {
-    return <div className="p-6">Loading SLOs...</div>;
+    return (
+      <div className="rounded-lg border border-gray-200 p-6">
+        <div className="animate-pulse space-y-4">
+          <div className="h-4 bg-gray-200 rounded w-3/4"></div>
+          <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold flex items-center gap-2">
-          <TrendingUp className="w-8 h-8" />
-          Service Level Objectives
-        </h1>
-        <button
-          onClick={fetchSLOs}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-        >
-          Refresh
-        </button>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Total SLOs</div>
-          <div className="text-2xl font-bold">{slos.length}</div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">On Track</div>
-          <div className="text-2xl font-bold text-green-600">
-            {slos.filter((s) => s.status === 'on_track').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">At Risk</div>
-          <div className="text-2xl font-bold text-yellow-600">
-            {slos.filter((s) => s.status === 'at_risk').length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg shadow p-4">
-          <div className="text-sm text-gray-600">Breached</div>
-          <div className="text-2xl font-bold text-red-600">
-            {slos.filter((s) => s.status === 'breached').length}
-          </div>
+        <div>
+          <h1 className="text-3xl font-bold text-gray-900">SLO Dashboard</h1>
+          <p className="text-gray-600 mt-1">Service Level Objectives and Error Budgets</p>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="bg-white rounded-lg shadow p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <input
-          type="text"
-          placeholder="Service Name"
-          value={filter.serviceName}
-          onChange={(e) => setFilter({ ...filter, serviceName: e.target.value })}
-          className="px-3 py-2 border rounded-lg"
-        />
-        <select
-          value={filter.sloType}
-          onChange={(e) => setFilter({ ...filter, sloType: e.target.value })}
-          className="px-3 py-2 border rounded-lg"
-        >
-          <option value="">All Types</option>
-          <option value="availability">Availability</option>
-          <option value="latency">Latency</option>
-          <option value="error_rate">Error Rate</option>
-          <option value="freshness">Freshness</option>
-        </select>
-        <select
-          value={filter.status}
-          onChange={(e) => setFilter({ ...filter, status: e.target.value })}
-          className="px-3 py-2 border rounded-lg"
-        >
-          <option value="">All Statuses</option>
-          <option value="on_track">On Track</option>
-          <option value="at_risk">At Risk</option>
-          <option value="breached">Breached</option>
-        </select>
-      </div>
-
-      {/* SLOs List */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <table className="w-full">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Service</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">SLO Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Target</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Current</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Error Budget</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {slos.map((slo) => (
-              <tr key={slo.id} className="hover:bg-gray-50">
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">{slo.serviceName}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">{slo.sloName}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm capitalize">{slo.sloType.replace('_', ' ')}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">{slo.targetPercentage}%</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {slo.currentPercentage !== undefined ? `${slo.currentPercentage.toFixed(2)}%` : '-'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="flex items-center gap-2">
-                    {getStatusIcon(slo.status)}
-                    <span className={`px-2 py-1 rounded text-xs font-medium border ${getStatusColor(slo.status)}`}>
-                      {slo.status.replace('_', ' ')}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm">
-                  {slo.errorBudgetRemaining !== undefined ? (
-                    <div>
-                      <div>{slo.errorBudgetRemaining.toFixed(2)}% remaining</div>
-                      {slo.errorBudgetBurnRate !== undefined && (
-                        <div className="text-xs text-gray-500">
-                          Burn rate: {slo.errorBudgetBurnRate.toFixed(2)}x
-                        </div>
-                      )}
+      {/* Active Alerts */}
+      {alerts.length > 0 && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-6">
+          <h2 className="text-lg font-semibold text-red-900 mb-4">Active Incidents</h2>
+          <div className="space-y-3">
+            {alerts.map(alert => (
+              <div key={alert.id} className="bg-white rounded-lg p-4 border border-red-200">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-2 mb-2">
+                      <span className={`px-2 py-1 rounded text-xs font-medium ${getSeverityColor(alert.severity)}`}>
+                        {alert.severity.toUpperCase()}
+                      </span>
+                      <span className="font-semibold text-gray-900">{alert.ruleName}</span>
                     </div>
-                  ) : (
-                    '-'
+                    <p className="text-sm text-gray-600">
+                      Metric Value: {alert.metricValue.toFixed(2)} | Fired: {new Date(alert.firedAt).toLocaleString()}
+                    </p>
+                  </div>
+                  {alert.runbookUrl && (
+                    <a
+                      href={alert.runbookUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="ml-4 px-3 py-1 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+                    >
+                      Runbook
+                    </a>
                   )}
-                </td>
-              </tr>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
-        {slos.length === 0 && (
-          <div className="p-6 text-center text-gray-500">No SLOs found</div>
-        )}
+          </div>
+        </div>
+      )}
+
+      {/* SLO Status Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {slos.map(slo => (
+          <div
+            key={slo.slo.id}
+            className={`rounded-lg border-2 p-6 ${getStatusColor(slo.status)}`}
+          >
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="font-semibold text-lg">{slo.slo.sloName}</h3>
+              <span className="text-xs font-medium px-2 py-1 rounded bg-white bg-opacity-50">
+                {slo.status.toUpperCase()}
+              </span>
+            </div>
+            <p className="text-sm opacity-80 mb-4">{slo.slo.serviceName}</p>
+
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Current Value:</span>
+                <span className="font-medium">{slo.currentValue.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>Target:</span>
+                <span className="font-medium">{slo.slo.targetValue.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>Error Budget:</span>
+                <span className="font-medium">{(slo.errorBudget * 100).toFixed(1)}%</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>Trend:</span>
+                <span className="font-medium capitalize">{slo.trend}</span>
+              </div>
+            </div>
+
+            {/* Error Budget Bar */}
+            <div className="mt-4">
+              <div className="w-full bg-white bg-opacity-50 rounded-full h-2">
+                <div
+                  className={`h-2 rounded-full ${
+                    slo.errorBudget > 0.5 ? 'bg-green-600' : slo.errorBudget > 0.2 ? 'bg-yellow-600' : 'bg-red-600'
+                  }`}
+                  style={{ width: `${Math.max(0, Math.min(100, slo.errorBudget * 100))}%` }}
+                />
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
+
+      {slos.length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          <p>No SLOs configured</p>
+        </div>
+      )}
     </div>
   );
 }

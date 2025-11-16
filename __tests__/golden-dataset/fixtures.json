@@ -1,0 +1,83 @@
+{
+  "version": "1.0.0",
+  "description": "Golden dataset for testing OCR → classification → ledger → filing pipeline",
+  "fixtures": [
+    {
+      "id": "invoice-001",
+      "documentType": "invoice",
+      "fileName": "sample-invoice.pdf",
+      "expectedOCR": {
+        "rawText": "INVOICE\nInvoice Number: INV-2024-001\nDate: 2024-01-15\nVendor: Acme Corp\nTotal: £1,200.00\nVAT: £240.00",
+        "tokens": [
+          {"text": "INVOICE", "bbox": {"x": 100, "y": 50, "width": 200, "height": 30}},
+          {"text": "Invoice Number: INV-2024-001", "bbox": {"x": 100, "y": 100, "width": 300, "height": 20}}
+        ]
+      },
+      "expectedClassification": {
+        "documentType": "invoice",
+        "confidence": 0.98,
+        "extractedData": {
+          "vendor": "Acme Corp",
+          "invoiceNumber": "INV-2024-001",
+          "date": "2024-01-15",
+          "total": 1200.00,
+          "tax": 240.00,
+          "currency": "GBP"
+        }
+      },
+      "expectedLedger": {
+        "entries": [
+          {
+            "accountCode": "4000",
+            "description": "Acme Corp - INV-2024-001",
+            "debitAmount": 1200.00,
+            "creditAmount": 0
+          },
+          {
+            "accountCode": "2000",
+            "description": "VAT Input",
+            "debitAmount": 240.00,
+            "creditAmount": 0
+          }
+        ]
+      },
+      "expectedFiling": {
+        "vatReturn": {
+          "box1": 240.00,
+          "box4": 240.00,
+          "box6": 1200.00
+        }
+      }
+    },
+    {
+      "id": "receipt-001",
+      "documentType": "receipt",
+      "fileName": "sample-receipt.jpg",
+      "expectedOCR": {
+        "rawText": "RECEIPT\nDate: 2024-01-20\nTotal: £45.50\nVAT: £7.58",
+        "tokens": []
+      },
+      "expectedClassification": {
+        "documentType": "receipt",
+        "confidence": 0.95,
+        "extractedData": {
+          "date": "2024-01-20",
+          "total": 45.50,
+          "tax": 7.58,
+          "currency": "GBP"
+        }
+      },
+      "expectedLedger": {
+        "entries": [
+          {
+            "accountCode": "5000",
+            "description": "Expense Receipt",
+            "debitAmount": 45.50,
+            "creditAmount": 0
+          }
+        ]
+      },
+      "expectedFiling": null
+    }
+  ]
+}

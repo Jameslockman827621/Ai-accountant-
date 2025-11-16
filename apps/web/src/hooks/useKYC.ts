@@ -101,6 +101,38 @@ export function useKYC(token: string | null) {
     [token]
   );
 
+  const createSession = useCallback(
+    async (config: {
+      verificationType: string;
+      provider?: string;
+      documentType?: string;
+      documentReferences?: string[];
+      metadata?: Record<string, unknown>;
+    }) => {
+      if (!token) {
+        throw new Error('Missing authentication token');
+      }
+
+      const response = await fetch(`${API_BASE}/api/kyc/sessions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(config),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to create KYC session');
+      }
+
+      const data = await response.json();
+      await fetchVerifications();
+      return data.session;
+    },
+    [token, fetchVerifications]
+  );
+
   return {
     verifications,
     isLoading,
@@ -108,5 +140,6 @@ export function useKYC(token: string | null) {
     refresh: fetchVerifications,
     initiateVerification,
     getVerification,
+    createSession,
   };
 }

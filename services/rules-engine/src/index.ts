@@ -5,6 +5,9 @@ import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { rulesRouter } from './routes/rules';
 import { ukTaxRouter } from './routes/ukTax';
+import { rulepackRouter } from './routes/rulepacks';
+import { taxRouter } from './routes/tax';
+import { scenarioRouter } from './routes/scenarios';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
@@ -28,6 +31,9 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/rules', authenticate, rulesRouter);
 app.use('/api/uk-tax', authenticate, ukTaxRouter);
+app.use('/api/rulepacks', authenticate, rulepackRouter);
+app.use('/api/tax', authenticate, taxRouter);
+app.use('/api/tax/scenarios', authenticate, scenarioRouter);
 
 app.use(errorHandler);
 

@@ -173,6 +173,64 @@ export function useOnboarding(token: string | null) {
     [authenticatedHeaders]
   );
 
+  const getSchema = useCallback(
+    async (jurisdiction: string, entityType?: string, industry?: string) => {
+      const headers = authenticatedHeaders();
+      if (!headers) {
+        return null;
+      }
+
+      try {
+        const params = new URLSearchParams({ jurisdiction });
+        if (entityType) params.append('entityType', entityType);
+        if (industry) params.append('industry', industry);
+
+        const response = await fetch(`${API_BASE}/api/onboarding/schema?${params.toString()}`, {
+          headers,
+        });
+
+        if (!response.ok) {
+          throw new Error('Failed to load onboarding schema');
+        }
+
+        const data = await response.json() as { schema: any };
+        return data.schema;
+      } catch (err) {
+        console.error('Failed to fetch onboarding schema', err);
+        return null;
+      }
+    },
+    [authenticatedHeaders]
+  );
+
+  const saveStepData = useCallback(
+    async (stepName: OnboardingStep, stepData: StepData, jurisdiction?: string, entityType?: string, industry?: string) => {
+      const headers = authenticatedHeaders();
+      if (!headers) {
+        throw new Error('Missing authentication token');
+      }
+
+      try {
+        const response = await fetch(`${API_BASE}/api/onboarding/steps/${stepName}`, {
+          method: 'PATCH',
+          headers,
+          body: JSON.stringify({ stepData, jurisdiction, entityType, industry }),
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}));
+          throw new Error(errorData.error || 'Failed to save step data');
+        }
+
+        stepDataCache.current.set(stepName, stepData);
+      } catch (err) {
+        console.error('Failed to save step data', err);
+        throw err;
+      }
+    },
+    [authenticatedHeaders]
+  );
+
   return {
     progress,
     isLoading,
@@ -182,5 +240,7 @@ export function useOnboarding(token: string | null) {
     completeStep,
     recordEvent,
     getStepData,
+    getSchema,
+    saveStepData,
   };
 }
