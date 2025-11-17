@@ -1,6 +1,9 @@
- import { db } from '@ai-accountant/database';
- import { createLogger } from '@ai-accountant/shared-utils';
- import { TenantId, UserId } from '@ai-accountant/shared-types';
+import { db } from '@ai-accountant/database';
+import { createLogger } from '@ai-accountant/shared-utils';
+import { TenantId, UserId } from '@ai-accountant/shared-types';
+import { intentProfileService } from './intentProfile';
+import { orchestrator } from './orchestrator';
+import { emitOnboardingEvent } from './onboardingEvents';
 
 const logger = createLogger('onboarding-service');
 
@@ -86,6 +89,12 @@ export async function completeOnboardingStep(
 
   logger.info('Onboarding step completed', { tenantId, stepName, skipped });
 
+  // Update intent profile based on step data
+  if (stepData && !skipped) {
+    await updateIntentProfileFromStep(tenantId, userId, stepName, stepData);
+  }
+
+  // Record event
   await recordOnboardingEvent(
     tenantId,
     userId,
@@ -95,25 +104,168 @@ export async function completeOnboardingStep(
       stepData: stepData || {},
     }
   );
+
+  // Emit event to message queue for downstream processing
+  await emitOnboardingEvent('onboarding.step.completed', {
+    tenantId,
+    userId,
+    stepName,
+    stepData: stepData || {},
+    skipped,
+  });
+
+  // Check if onboarding is complete and trigger provisioning
+  const progress = await getOnboardingProgress(tenantId);
+  if (progress.currentStep === 'complete') {
+    await handleOnboardingCompletion(tenantId, userId);
+  }
+}
+
+/**
+ * Update intent profile based on onboarding step data
+ */
+async function updateIntentProfileFromStep(
+  tenantId: TenantId,
+  userId: UserId,
+  stepName: OnboardingStep,
+  stepData: Record<string, unknown>
+): Promise<void> {
+  try {
+    const existingProfile = await intentProfileService.getProfile(tenantId);
+    const profileData: any = existingProfile || {};
+
+    switch (stepName) {
+      case 'business_profile': {
+        await intentProfileService.createOrUpdateProfile({
+          tenantId,
+          userId,
+          entityType: (stepData.businessType as string) || profileData.entity_type,
+          businessName: (stepData.businessName as string) || profileData.business_name,
+          industry: (stepData.industry as string) || profileData.industry,
+          employeesCount: stepData.employees ? parseInt(String(stepData.employees), 10) : profileData.employees_count,
+          primaryJurisdiction: (stepData.country as string) || profileData.primary_jurisdiction || 'GB',
+          vatNumber: (stepData.vatNumber as string) || profileData.vat_number,
+        });
+        break;
+      }
+      case 'tax_scope': {
+        await intentProfileService.createOrUpdateProfile({
+          tenantId,
+          userId,
+          entityType: profileData.entity_type || '',
+          businessName: profileData.business_name || '',
+          primaryJurisdiction: profileData.primary_jurisdiction || 'GB',
+          taxObligations: (stepData.taxObligations as string[]) || profileData.tax_obligations || [],
+          vatRegistered: Boolean(stepData.vatRegistered ?? profileData.vat_registered),
+          payrollEnabled: Boolean(stepData.payrollEnabled ?? profileData.payroll_enabled),
+        });
+        break;
+      }
+      case 'filing_preferences': {
+        await intentProfileService.createOrUpdateProfile({
+          tenantId,
+          userId,
+          entityType: profileData.entity_type || '',
+          businessName: profileData.business_name || '',
+          primaryJurisdiction: profileData.primary_jurisdiction || 'GB',
+          filingFrequency: (stepData.frequency as 'monthly' | 'quarterly' | 'annually') || profileData.filing_frequency,
+        });
+        break;
+      }
+      default:
+        // Other steps don't directly update intent profile
+        break;
+    }
+  } catch (error) {
+    logger.warn('Failed to update intent profile from step', {
+      tenantId,
+      stepName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    // Don't throw - intent profile update failure shouldn't block onboarding
+  }
+}
+
+/**
+ * Handle onboarding completion - trigger provisioning
+ */
+async function handleOnboardingCompletion(tenantId: TenantId, userId: UserId): Promise<void> {
+  try {
+    logger.info('Onboarding completion detected', { tenantId, userId });
+
+    // Get or create onboarding session
+    const sessionResult = await db.query<{ id: string }>(
+      'SELECT id FROM onboarding_sessions WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 1',
+      [tenantId]
+    );
+
+    let sessionId: string;
+    if (sessionResult.rows.length > 0) {
+      sessionId = sessionResult.rows[0].id;
+    } else {
+      // Create new session
+      sessionId = await orchestrator.createSession(tenantId, userId);
+    }
+
+    // Trigger provisioning (this will transition through states and complete)
+    await orchestrator.triggerProvisioning(sessionId);
+
+    // Emit completion event
+    await emitOnboardingEvent('onboarding.completed', {
+      tenantId,
+      userId,
+      sessionId,
+    });
+
+    logger.info('Onboarding completion handled', { tenantId, userId, sessionId });
+  } catch (error) {
+    logger.error('Failed to handle onboarding completion', {
+      tenantId,
+      userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    // Don't throw - completion handling failure shouldn't block the user
+  }
 }
 
 export async function getOnboardingStepData(
   tenantId: TenantId,
   stepName: OnboardingStep
 ): Promise<Record<string, unknown> | null> {
-  const result = await db.query<{
-    step_data: unknown;
-  }>(
-    'SELECT step_data FROM onboarding_steps WHERE tenant_id = $1 AND step_name = $2',
-    [tenantId, stepName]
-  );
+  try {
+    // First try onboarding_steps table
+    const result = await db.query<{
+      step_data: unknown;
+    }>(
+      'SELECT step_data FROM onboarding_steps WHERE tenant_id = $1 AND step_name = $2',
+      [tenantId, stepName]
+    );
 
-  const row = result.rows[0];
-  if (!row) {
+    if (result.rows.length > 0) {
+      return (result.rows[0].step_data as Record<string, unknown>) || null;
+    }
+
+    // Fallback to onboarding_step_data table (for draft data)
+    const draftResult = await db.query<{
+      step_data: unknown;
+    }>(
+      'SELECT step_data FROM onboarding_step_data WHERE tenant_id = $1 AND step_name = $2 ORDER BY updated_at DESC LIMIT 1',
+      [tenantId, stepName]
+    );
+
+    if (draftResult.rows.length > 0) {
+      return (draftResult.rows[0].step_data as Record<string, unknown>) || null;
+    }
+
     return null;
+  } catch (error) {
+    logger.error('Failed to get onboarding step data', {
+      tenantId,
+      stepName,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   }
-
-  return (row.step_data as Record<string, unknown>) || null;
 }
 
 export async function resetOnboarding(tenantId: TenantId, userId: UserId): Promise<void> {
