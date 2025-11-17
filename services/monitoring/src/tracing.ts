@@ -1,63 +1,64 @@
+/**
+ * OpenTelemetry Tracing Instrumentation
+ * Provides distributed tracing with W3C trace context propagation
+ */
+
+import { NodeSDK } from '@opentelemetry/sdk-node';
+import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
+import { Resource } from '@opentelemetry/resources';
+import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
+import { BatchSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { Tracer, TraceContext } from './index';
 
-const logger = createLogger('monitoring-service');
+const logger = createLogger('tracing');
 
-// OpenTelemetry integration
-export class OpenTelemetryTracer {
-  private tracer: Tracer;
+// Create trace exporter (Jaeger/Tempo compatible)
+const traceExporter = new OTLPTraceExporter({
+  url: process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || 'http://localhost:4318/v1/traces',
+  headers: process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS
+    ? JSON.parse(process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS)
+    : {},
+});
 
-  constructor() {
-    this.tracer = new Tracer();
-  }
+// Create SDK
+const sdk = new NodeSDK({
+  resource: new Resource({
+    [SemanticResourceAttributes.SERVICE_NAME]: process.env.SERVICE_NAME || 'ai-accountant',
+    [SemanticResourceAttributes.SERVICE_VERSION]: process.env.SERVICE_VERSION || '1.0.0',
+    [SemanticResourceAttributes.DEPLOYMENT_ENVIRONMENT]: process.env.NODE_ENV || 'development',
+  }),
+  traceExporter,
+  spanProcessor: new BatchSpanProcessor(traceExporter, {
+    maxQueueSize: 2048,
+    maxExportBatchSize: 512,
+    scheduledDelayMillis: 5000,
+  }),
+  instrumentations: [
+    getNodeAutoInstrumentations({
+      // Disable fs instrumentation in production for performance
+      '@opentelemetry/instrumentation-fs': {
+        enabled: process.env.NODE_ENV !== 'production',
+      },
+    }),
+  ],
+});
 
-  startSpan(
-    name: string,
-    parentContext?: TraceContext,
-    attributes?: Record<string, string>
-  ): TraceContext {
-    const context = this.tracer.startTrace(name, parentContext);
-    logger.debug('OpenTelemetry span started', { name, attributes });
-    return context;
-  }
+// Initialize tracing
+export function initializeTracing() {
+  sdk.start();
+  logger.info('Tracing initialized', {
+    endpoint: process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || 'http://localhost:4318/v1/traces',
+  });
 
-  endSpan(context: TraceContext, name: string): void {
-    this.tracer.endTrace(context, name, 0);
-    logger.debug('OpenTelemetry span ended', { name });
-  }
-
-  addEvent(_context: TraceContext, name: string, attributes?: Record<string, unknown>): void {
-    logger.debug('Event added to span', { name, attributes });
-  }
-
-  setAttribute(_context: TraceContext, key: string, value: string): void {
-    logger.debug('Attribute set on span', { key, value });
-  }
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    sdk
+      .shutdown()
+      .then(() => logger.info('Tracing shutdown complete'))
+      .catch((error) => logger.error('Error shutting down tracing', error));
+  });
 }
 
-export const otelTracer = new OpenTelemetryTracer();
-
-// Trace context propagation
-export function injectTraceContext(context: TraceContext, headers: Record<string, string>): void {
-  headers['x-trace-id'] = context.traceId;
-  headers['x-span-id'] = context.spanId;
-  if (context.parentSpanId) {
-    headers['x-parent-span-id'] = context.parentSpanId;
-  }
-}
-
-export function extractTraceContext(headers: Record<string, string>): TraceContext | null {
-  const traceId = headers['x-trace-id'];
-  const spanId = headers['x-span-id'];
-  const parentSpanId = headers['x-parent-span-id'];
-
-  if (!traceId || !spanId) {
-    return null;
-  }
-
-  const context: TraceContext = { traceId, spanId };
-  if (parentSpanId) {
-    context.parentSpanId = parentSpanId;
-  }
-  return context;
-}
+// Export SDK for manual instrumentation
+export { sdk };
