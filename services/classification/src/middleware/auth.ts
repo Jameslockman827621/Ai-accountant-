@@ -24,6 +24,7 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
   const token = authHeader.substring(7);
   
   // For now, extract user from token (would verify JWT in production)
+  // This is a placeholder - in production would decode and verify JWT
   try {
     // Simulated user extraction
     req.user = {
