@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { ledgerRouter } from './routes/ledger';
+import { periodCloseRouter } from './routes/periodClose';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
@@ -27,6 +28,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/ledger', authenticate, ledgerRouter);
+app.use('/api/ledger/period-close', authenticate, periodCloseRouter);
 
 app.use(errorHandler);
 

@@ -4,8 +4,10 @@ import helmet from 'helmet';
 import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { reconciliationRouter } from './routes/reconciliation';
+import { reconciliationCockpitRouter } from './routes/reconciliationCockpit';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { reconciliationWorker } from './workers/reconciliationWorker';
 
 config();
 
@@ -26,8 +28,12 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/reconciliation', authenticate, reconciliationRouter);
+app.use('/api/reconciliation', authenticate, reconciliationCockpitRouter);
 
 app.use(errorHandler);
+
+// Start background reconciliation worker
+reconciliationWorker.start();
 
 app.listen(PORT, () => {
   logger.info(`Reconciliation service listening on port ${PORT}`);
