@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from '@jest/globals';
 import { db } from '@ai-accountant/database';
-import { replaceTransactionSplits, getTransactionSplits, deleteTransactionSplits } from '../services/transactionSplits';
+import {
+  replaceTransactionSplits,
+  getTransactionSplits,
+  deleteTransactionSplits,
+  submitTransactionSplits,
+  approveTransactionSplits,
+  rejectTransactionSplits,
+} from '../services/transactionSplits';
 import { ValidationError } from '@ai-accountant/shared-utils';
 
 describe('Transaction split service', () => {
@@ -9,6 +16,7 @@ describe('Transaction split service', () => {
   let documentId: string;
   let ledgerEntryId: string;
   let bankTransactionId: string;
+  const originalApprovalEnv = process.env.RECON_SPLIT_APPROVAL_REQUIRED;
 
   beforeAll(async () => {
     const tenantResult = await db.query<{ id: string }>(
@@ -26,12 +34,14 @@ describe('Transaction split service', () => {
       [tenantId]
     );
     userId = userResult.rows[0]?.id as string;
+    process.env.RECON_SPLIT_APPROVAL_REQUIRED = 'true';
   });
 
   afterAll(async () => {
     await db.query('DELETE FROM users WHERE id = $1', [userId]);
     await db.query('DELETE FROM tenants WHERE id = $1', [tenantId]);
     await db.close();
+    process.env.RECON_SPLIT_APPROVAL_REQUIRED = originalApprovalEnv;
   });
 
   beforeEach(async () => {
@@ -118,5 +128,70 @@ describe('Transaction split service', () => {
     expect(fetched.splits).toHaveLength(0);
     expect(fetched.isSplit).toBe(false);
     expect(fetched.splitRemainingAmount).toEqual(100);
+  });
+
+  it('submits splits for review and approves them', async () => {
+    await replaceTransactionSplits(
+      tenantId,
+      bankTransactionId,
+      userId,
+      [
+        { amount: 60, documentId },
+        { amount: 40, ledgerEntryId },
+      ]
+    );
+
+    const submitted = await submitTransactionSplits(tenantId, bankTransactionId, userId);
+    expect(submitted.status).toBe('pending_review');
+    expect(submitted.submittedBy).toEqual(userId);
+
+    await approveTransactionSplits(tenantId, bankTransactionId, userId, { reviewerNotes: 'looks good' });
+
+    const txResult = await db.query<{ reconciled: boolean; split_status: string }>(
+      `SELECT reconciled, split_status
+       FROM bank_transactions
+       WHERE id = $1`,
+      [bankTransactionId]
+    );
+    expect(txResult.rows[0]?.reconciled).toBe(true);
+    expect(txResult.rows[0]?.split_status).toBe('applied');
+  });
+
+  it('auto-approves splits when approval disabled', async () => {
+    process.env.RECON_SPLIT_APPROVAL_REQUIRED = 'false';
+
+    await replaceTransactionSplits(
+      tenantId,
+      bankTransactionId,
+      userId,
+      [
+        { amount: 70, documentId },
+        { amount: 30, ledgerEntryId },
+      ]
+    );
+
+    const summary = await submitTransactionSplits(tenantId, bankTransactionId, userId);
+    expect(summary.status).toBe('applied');
+
+    process.env.RECON_SPLIT_APPROVAL_REQUIRED = 'true';
+  });
+
+  it('rejects splits back to draft', async () => {
+    await replaceTransactionSplits(
+      tenantId,
+      bankTransactionId,
+      userId,
+      [
+        { amount: 60, documentId },
+        { amount: 40, ledgerEntryId },
+      ]
+    );
+
+    await submitTransactionSplits(tenantId, bankTransactionId, userId);
+    const summary = await rejectTransactionSplits(tenantId, bankTransactionId, userId, 'Incorrect allocation');
+
+    expect(summary.status).toBe('draft');
+    expect(summary.reviewNotes).toBe('Incorrect allocation');
+    expect(summary.submittedBy).toBeNull();
   });
 });
