@@ -1,276 +1,239 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { randomUUID } from 'crypto';
+import { createHash } from 'crypto';
 
-const logger = createLogger('modelops-service');
+const logger = createLogger('model-registry');
 
-export interface ModelRegistry {
-  id: string;
+export type ModelType = 'ocr' | 'classification' | 'extraction' | 'layout' | 'semantic';
+export type RolloutStage = 'development' | 'staging' | 'production' | 'deprecated';
+
+export interface ModelMetadata {
   modelName: string;
-  modelType: 'classification' | 'extraction' | 'prediction' | 'other';
-  version: string;
-  trainingDataHash?: string;
-  trainingDataLineage?: Record<string, unknown>;
-  trainingConfig?: Record<string, unknown>;
-  trainingMetrics?: Record<string, unknown>;
-  evaluationMetrics?: Record<string, unknown>;
-  goldenDatasetScores?: Record<string, unknown>;
-  fairnessMetrics?: Record<string, unknown>;
-  status: 'draft' | 'training' | 'evaluating' | 'approved' | 'deployed' | 'deprecated';
-  deployedAt?: Date;
-  deployedBy?: string;
-  rolloutPercentage: number;
-  ownerTeam?: string;
-  ownerEmail?: string;
-  modelArtifactPath?: string;
-  explainabilityArtifacts?: Record<string, unknown>;
-  createdAt: Date;
-  updatedAt: Date;
+  modelVersion: string;
+  modelType: ModelType;
+  trainingDataHash: string;
+  modelStoragePath?: string;
+  metrics: Record<string, number>;
+  hyperparameters: Record<string, unknown>;
+  rolloutStage?: RolloutStage;
+  performanceMetrics?: Record<string, number>;
+  createdBy?: string;
+}
+
+export interface ModelPerformance {
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1Score: number;
+  fieldLevelMetrics?: Record<string, {
+    accuracy: number;
+    precision: number;
+    recall: number;
+  }>;
 }
 
 export class ModelRegistryService {
-  async registerModel(
-    modelName: string,
-    modelType: ModelRegistry['modelType'],
-    version: string,
-    options: {
-      trainingDataHash?: string;
-      trainingDataLineage?: Record<string, unknown>;
-      trainingConfig?: Record<string, unknown>;
-      trainingMetrics?: Record<string, unknown>;
-      evaluationMetrics?: Record<string, unknown>;
-      goldenDatasetScores?: Record<string, unknown>;
-      fairnessMetrics?: Record<string, unknown>;
-      ownerTeam?: string;
-      ownerEmail?: string;
-      modelArtifactPath?: string;
-      explainabilityArtifacts?: Record<string, unknown>;
-    } = {}
-  ): Promise<ModelRegistry> {
-    const id = randomUUID();
+  /**
+   * Register a new model version
+   */
+  async registerModel(metadata: ModelMetadata): Promise<string> {
+    const modelId = randomUUID();
 
     await db.query(
       `INSERT INTO model_registry (
-        id, model_name, model_type, version, training_data_hash,
-        training_data_lineage, training_config, training_metrics,
-        evaluation_metrics, golden_dataset_scores, fairness_metrics,
-        status, owner_team, owner_email, model_artifact_path, explainability_artifacts
-      ) VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16::jsonb)`,
+        id, model_name, model_version, model_type, training_data_hash,
+        model_storage_path, metrics, hyperparameters, rollout_stage,
+        performance_metrics, created_by, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10::jsonb, $11, NOW(), NOW())`,
       [
-        id,
-        modelName,
-        modelType,
-        version,
-        options.trainingDataHash || null,
-        options.trainingDataLineage ? JSON.stringify(options.trainingDataLineage) : null,
-        options.trainingConfig ? JSON.stringify(options.trainingConfig) : null,
-        options.trainingMetrics ? JSON.stringify(options.trainingMetrics) : null,
-        options.evaluationMetrics ? JSON.stringify(options.evaluationMetrics) : null,
-        options.goldenDatasetScores ? JSON.stringify(options.goldenDatasetScores) : null,
-        options.fairnessMetrics ? JSON.stringify(options.fairnessMetrics) : null,
-        'draft',
-        options.ownerTeam || null,
-        options.ownerEmail || null,
-        options.modelArtifactPath || null,
-        options.explainabilityArtifacts ? JSON.stringify(options.explainabilityArtifacts) : null,
+        modelId,
+        metadata.modelName,
+        metadata.modelVersion,
+        metadata.modelType,
+        metadata.trainingDataHash,
+        metadata.modelStoragePath || null,
+        JSON.stringify(metadata.metrics),
+        JSON.stringify(metadata.hyperparameters),
+        metadata.rolloutStage || 'development',
+        JSON.stringify(metadata.performanceMetrics || {}),
+        metadata.createdBy || null,
       ]
     );
 
-    logger.info('Model registered', { id, modelName, version });
-    return this.getModel(id);
+    logger.info('Model registered', {
+      modelId,
+      modelName: metadata.modelName,
+      modelVersion: metadata.modelVersion,
+      modelType: metadata.modelType,
+    });
+
+    return modelId;
   }
 
-  async getModel(id: string): Promise<ModelRegistry> {
+  /**
+   * Get model by name and version
+   */
+  async getModel(modelName: string, modelVersion?: string): Promise<ModelMetadata | null> {
+    let query = `
+      SELECT id, model_name, model_version, model_type, training_data_hash,
+             model_storage_path, metrics, hyperparameters, rollout_stage,
+             performance_metrics, created_by, created_at
+      FROM model_registry
+      WHERE model_name = $1
+    `;
+    const params: unknown[] = [modelName];
+
+    if (modelVersion) {
+      query += ` AND model_version = $2`;
+      params.push(modelVersion);
+    } else {
+      query += ` AND rollout_stage = 'production' ORDER BY created_at DESC LIMIT 1`;
+    }
+
     const result = await db.query<{
       id: string;
       model_name: string;
+      model_version: string;
       model_type: string;
-      version: string;
-      training_data_hash: string | null;
-      training_data_lineage: unknown;
-      training_config: unknown;
-      training_metrics: unknown;
-      evaluation_metrics: unknown;
-      golden_dataset_scores: unknown;
-      fairness_metrics: unknown;
-      status: string;
-      deployed_at: Date | null;
-      deployed_by: string | null;
-      rollout_percentage: number;
-      owner_team: string | null;
-      owner_email: string | null;
-      model_artifact_path: string | null;
-      explainability_artifacts: unknown;
+      training_data_hash: string;
+      model_storage_path: string | null;
+      metrics: unknown;
+      hyperparameters: unknown;
+      rollout_stage: string;
+      performance_metrics: unknown;
+      created_by: string | null;
       created_at: Date;
-      updated_at: Date;
-    }>('SELECT * FROM model_registry WHERE id = $1', [id]);
+    }>(query, params);
 
     if (result.rows.length === 0) {
-      throw new Error(`Model not found: ${id}`);
+      return null;
     }
 
     const row = result.rows[0];
     return {
-      id: row.id,
       modelName: row.model_name,
-      modelType: row.model_type as ModelRegistry['modelType'],
-      version: row.version,
-      trainingDataHash: row.training_data_hash || undefined,
-      trainingDataLineage: row.training_data_lineage as Record<string, unknown> | undefined,
-      trainingConfig: row.training_config as Record<string, unknown> | undefined,
-      trainingMetrics: row.training_metrics as Record<string, unknown> | undefined,
-      evaluationMetrics: row.evaluation_metrics as Record<string, unknown> | undefined,
-      goldenDatasetScores: row.golden_dataset_scores as Record<string, unknown> | undefined,
-      fairnessMetrics: row.fairness_metrics as Record<string, unknown> | undefined,
-      status: row.status as ModelRegistry['status'],
-      deployedAt: row.deployed_at || undefined,
-      deployedBy: row.deployed_by || undefined,
-      rolloutPercentage: row.rollout_percentage,
-      ownerTeam: row.owner_team || undefined,
-      ownerEmail: row.owner_email || undefined,
-      modelArtifactPath: row.model_artifact_path || undefined,
-      explainabilityArtifacts: row.explainability_artifacts as Record<string, unknown> | undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
+      modelVersion: row.model_version,
+      modelType: row.model_type as ModelType,
+      trainingDataHash: row.training_data_hash,
+      modelStoragePath: row.model_storage_path || undefined,
+      metrics: (row.metrics as Record<string, number>) || {},
+      hyperparameters: (row.hyperparameters as Record<string, unknown>) || {},
+      rolloutStage: row.rollout_stage as RolloutStage,
+      performanceMetrics: (row.performance_metrics as Record<string, number>) || {},
+      createdBy: row.created_by || undefined,
     };
   }
 
-  async updateModelStatus(
-    id: string,
-    status: ModelRegistry['status'],
-    options: {
-      deployedBy?: string;
-      rolloutPercentage?: number;
-      evaluationMetrics?: Record<string, unknown>;
-      goldenDatasetScores?: Record<string, unknown>;
-      fairnessMetrics?: Record<string, unknown>;
-    } = {}
-  ): Promise<ModelRegistry> {
-    const updates: string[] = ['status = $1', 'updated_at = NOW()'];
-    const params: unknown[] = [status];
-    let paramIndex = 2;
+  /**
+   * Update model rollout stage
+   */
+  async updateRolloutStage(
+    modelName: string,
+    modelVersion: string,
+    stage: RolloutStage
+  ): Promise<void> {
+    await db.query(
+      `UPDATE model_registry
+       SET rollout_stage = $1, updated_at = NOW()
+       WHERE model_name = $2 AND model_version = $3`,
+      [stage, modelName, modelVersion]
+    );
 
-    if (status === 'deployed') {
-      updates.push(`deployed_at = NOW()`);
-      if (options.deployedBy) {
-        updates.push(`deployed_by = $${paramIndex++}`);
-        params.push(options.deployedBy);
-      }
-      if (options.rolloutPercentage !== undefined) {
-        updates.push(`rollout_percentage = $${paramIndex++}`);
-        params.push(options.rolloutPercentage);
-      }
-    }
-
-    if (options.evaluationMetrics) {
-      updates.push(`evaluation_metrics = $${paramIndex++}::jsonb`);
-      params.push(JSON.stringify(options.evaluationMetrics));
-    }
-    if (options.goldenDatasetScores) {
-      updates.push(`golden_dataset_scores = $${paramIndex++}::jsonb`);
-      params.push(JSON.stringify(options.goldenDatasetScores));
-    }
-    if (options.fairnessMetrics) {
-      updates.push(`fairness_metrics = $${paramIndex++}::jsonb`);
-      params.push(JSON.stringify(options.fairnessMetrics));
-    }
-
-    params.push(id);
-    await db.query(`UPDATE model_registry SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
-
-    logger.info('Model status updated', { id, status });
-    return this.getModel(id);
+    logger.info('Model rollout stage updated', { modelName, modelVersion, stage });
   }
 
-  async listModels(filters: {
-    modelName?: string;
-    modelType?: ModelRegistry['modelType'];
-    status?: ModelRegistry['status'];
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<{ models: ModelRegistry[]; total: number }> {
-    let query = 'SELECT * FROM model_registry WHERE 1=1';
+  /**
+   * Update model performance metrics
+   */
+  async updatePerformanceMetrics(
+    modelName: string,
+    modelVersion: string,
+    metrics: ModelPerformance
+  ): Promise<void> {
+    await db.query(
+      `UPDATE model_registry
+       SET performance_metrics = $1::jsonb, updated_at = NOW()
+       WHERE model_name = $2 AND model_version = $3`,
+      [
+        JSON.stringify({
+          accuracy: metrics.accuracy,
+          precision: metrics.precision,
+          recall: metrics.recall,
+          f1Score: metrics.f1Score,
+          fieldLevelMetrics: metrics.fieldLevelMetrics || {},
+        }),
+        modelName,
+        modelVersion,
+      ]
+    );
+
+    logger.info('Model performance metrics updated', { modelName, modelVersion });
+  }
+
+  /**
+   * List models by type and stage
+   */
+  async listModels(
+    modelType?: ModelType,
+    rolloutStage?: RolloutStage
+  ): Promise<ModelMetadata[]> {
+    let query = `
+      SELECT id, model_name, model_version, model_type, training_data_hash,
+             model_storage_path, metrics, hyperparameters, rollout_stage,
+             performance_metrics, created_by, created_at
+      FROM model_registry
+      WHERE 1=1
+    `;
     const params: unknown[] = [];
-    let paramIndex = 1;
 
-    if (filters.modelName) {
-      query += ` AND model_name = $${paramIndex++}`;
-      params.push(filters.modelName);
-    }
-    if (filters.modelType) {
-      query += ` AND model_type = $${paramIndex++}`;
-      params.push(filters.modelType);
-    }
-    if (filters.status) {
-      query += ` AND status = $${paramIndex++}`;
-      params.push(filters.status);
+    if (modelType) {
+      query += ` AND model_type = $${params.length + 1}`;
+      params.push(modelType);
     }
 
-    // Count total
-    const countQuery = query.replace('SELECT *', 'SELECT COUNT(*)');
-    const countResult = await db.query<{ count: string }>(countQuery, params);
-    const total = parseInt(countResult.rows[0].count, 10);
+    if (rolloutStage) {
+      query += ` AND rollout_stage = $${params.length + 1}`;
+      params.push(rolloutStage);
+    }
 
-    query += ' ORDER BY created_at DESC';
-    if (filters.limit) {
-      query += ` LIMIT $${paramIndex++}`;
-      params.push(filters.limit);
-    }
-    if (filters.offset) {
-      query += ` OFFSET $${paramIndex++}`;
-      params.push(filters.offset);
-    }
+    query += ` ORDER BY created_at DESC`;
 
     const result = await db.query<{
       id: string;
       model_name: string;
+      model_version: string;
       model_type: string;
-      version: string;
-      training_data_hash: string | null;
-      training_data_lineage: unknown;
-      training_config: unknown;
-      training_metrics: unknown;
-      evaluation_metrics: unknown;
-      golden_dataset_scores: unknown;
-      fairness_metrics: unknown;
-      status: string;
-      deployed_at: Date | null;
-      deployed_by: string | null;
-      rollout_percentage: number;
-      owner_team: string | null;
-      owner_email: string | null;
-      model_artifact_path: string | null;
-      explainability_artifacts: unknown;
+      training_data_hash: string;
+      model_storage_path: string | null;
+      metrics: unknown;
+      hyperparameters: unknown;
+      rollout_stage: string;
+      performance_metrics: unknown;
+      created_by: string | null;
       created_at: Date;
-      updated_at: Date;
     }>(query, params);
 
-    return {
-      models: result.rows.map((row) => ({
-        id: row.id,
-        modelName: row.model_name,
-        modelType: row.model_type as ModelRegistry['modelType'],
-        version: row.version,
-        trainingDataHash: row.training_data_hash || undefined,
-        trainingDataLineage: row.training_data_lineage as Record<string, unknown> | undefined,
-        trainingConfig: row.training_config as Record<string, unknown> | undefined,
-        trainingMetrics: row.training_metrics as Record<string, unknown> | undefined,
-        evaluationMetrics: row.evaluation_metrics as Record<string, unknown> | undefined,
-        goldenDatasetScores: row.golden_dataset_scores as Record<string, unknown> | undefined,
-        fairnessMetrics: row.fairness_metrics as Record<string, unknown> | undefined,
-        status: row.status as ModelRegistry['status'],
-        deployedAt: row.deployed_at || undefined,
-        deployedBy: row.deployed_by || undefined,
-        rolloutPercentage: row.rollout_percentage,
-        ownerTeam: row.owner_team || undefined,
-        ownerEmail: row.owner_email || undefined,
-        modelArtifactPath: row.model_artifact_path || undefined,
-        explainabilityArtifacts: row.explainability_artifacts as Record<string, unknown> | undefined,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      })),
-      total,
-    };
+    return result.rows.map((row) => ({
+      modelName: row.model_name,
+      modelVersion: row.model_version,
+      modelType: row.model_type as ModelType,
+      trainingDataHash: row.training_data_hash,
+      modelStoragePath: row.model_storage_path || undefined,
+      metrics: (row.metrics as Record<string, number>) || {},
+      hyperparameters: (row.hyperparameters as Record<string, unknown>) || {},
+      rolloutStage: row.rollout_stage as RolloutStage,
+      performanceMetrics: (row.performance_metrics as Record<string, number>) || {},
+      createdBy: row.created_by || undefined,
+    }));
+  }
+
+  /**
+   * Compute training data hash
+   */
+  computeTrainingDataHash(trainingData: Array<{ id: string; label: unknown }>): string {
+    const dataString = JSON.stringify(trainingData.sort((a, b) => a.id.localeCompare(b.id)));
+    return createHash('sha256').update(dataString).digest('hex');
   }
 }
 
