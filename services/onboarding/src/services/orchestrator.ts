@@ -65,6 +65,7 @@ const STATE_TRANSITIONS: StateTransition[] = [
   { from: 'chart_of_accounts', to: 'filing_calendar', event: 'step_complete' },
   { from: 'filing_calendar', to: 'ai_memory', event: 'step_complete' },
   { from: 'ai_memory', to: 'completed', event: 'provision_complete' },
+  { from: 'kyc_approved', to: 'completed', event: 'provision_complete' },
   { from: 'error', to: 'business_profile', event: 'retry' },
 ];
 
@@ -238,8 +239,11 @@ class OnboardingOrchestrator extends EventEmitter {
       // Create AI memory documents
       await this.createAIMemoryDocuments(context);
 
-      // Mark provisioning complete
+      // Transition to completed state
       await this.transitionState(sessionId, 'provision_complete');
+      
+      // Complete the session
+      await this.completeSession(sessionId);
     } catch (error) {
       logger.error('Provisioning failed', error instanceof Error ? error : new Error(String(error)));
       await this.setErrorState(sessionId, error instanceof Error ? error.message : 'Provisioning failed');

@@ -2,25 +2,22 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import ComplianceMode from '@/components/ComplianceMode';
-import ComplianceEvidenceDashboard from '@/components/ComplianceEvidenceDashboard';
-import ComplianceWarning from '@/components/ComplianceWarning';
-import ReadinessDashboard from '@/components/ReadinessDashboard';
-import ComplianceCalendar from '@/components/ComplianceCalendar';
+import TrustDashboard from '@/components/TrustDashboard';
+import SecurityCenter from '@/components/SecurityCenter';
+import SecurityEventsDashboard from '@/components/SecurityEventsDashboard';
+import AccountSecurityPanel from '@/components/AccountSecurityPanel';
 
-export default function CompliancePage() {
+export default function TrustPage() {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'mode' | 'evidence' | 'readiness' | 'calendar'>('mode');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'security' | 'events' | 'account'>('dashboard');
   const router = useRouter();
 
   useEffect(() => {
-    // In production, get token from auth context or localStorage
     const storedToken = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
     if (storedToken) {
       setToken(storedToken);
     } else {
-      // Redirect to login if no token
       router.push('/');
     }
     setLoading(false);
@@ -31,7 +28,7 @@ export default function CompliancePage() {
       <div className="flex items-center justify-center h-screen">
         <div className="text-center">
           <div className="mb-4 inline-block h-8 w-8 animate-spin rounded-full border-4 border-solid border-blue-600 border-r-transparent"></div>
-          <p className="text-gray-600">Loading compliance dashboard...</p>
+          <p className="text-gray-600">Loading trust dashboard...</p>
         </div>
       </div>
     );
@@ -46,47 +43,47 @@ export default function CompliancePage() {
       <div className="border-b border-gray-200 bg-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
-            <h1 className="text-2xl font-semibold text-gray-900">Compliance Dashboard</h1>
+            <h1 className="text-2xl font-semibold text-gray-900">Trust & Security</h1>
             <nav className="flex space-x-1">
               <button
-                onClick={() => setActiveTab('mode')}
+                onClick={() => setActiveTab('dashboard')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  activeTab === 'mode'
+                  activeTab === 'dashboard'
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                Compliance Mode
+                Trust Dashboard
               </button>
               <button
-                onClick={() => setActiveTab('readiness')}
+                onClick={() => setActiveTab('security')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  activeTab === 'readiness'
+                  activeTab === 'security'
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                Readiness
+                Security Center
               </button>
               <button
-                onClick={() => setActiveTab('calendar')}
+                onClick={() => setActiveTab('events')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  activeTab === 'calendar'
+                  activeTab === 'events'
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                Calendar
+                Security Events
               </button>
               <button
-                onClick={() => setActiveTab('evidence')}
+                onClick={() => setActiveTab('account')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
-                  activeTab === 'evidence'
+                  activeTab === 'account'
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-600 hover:bg-gray-100'
                 }`}
               >
-                Evidence
+                Account Security
               </button>
             </nav>
           </div>
@@ -94,10 +91,18 @@ export default function CompliancePage() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'mode' && <ComplianceMode token={token} />}
-        {activeTab === 'readiness' && <ReadinessDashboard token={token} />}
-        {activeTab === 'calendar' && <ComplianceCalendar token={token} />}
-        {activeTab === 'evidence' && <ComplianceEvidenceDashboard />}
+        {activeTab === 'dashboard' && <TrustDashboard />}
+        {activeTab === 'security' && <SecurityCenter token={token} />}
+        {activeTab === 'events' && <SecurityEventsDashboard />}
+        {activeTab === 'account' && (
+          <AccountSecurityPanel
+            token={token}
+            email=""
+            emailVerified={false}
+            mfaEnabled={false}
+            onRefresh={() => {}}
+          />
+        )}
       </div>
     </div>
   );

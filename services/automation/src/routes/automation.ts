@@ -17,6 +17,7 @@ import { autopilotEngine } from '../services/autopilotEngine';
 import { taskAssignmentService } from '../services/taskAssignment';
 import { taskExecutionService } from '../services/taskExecution';
 import { policyEngine } from '../services/policyEngine';
+import { slaTrackingService } from '../services/slaTracking';
 
 const router = Router();
 const logger = createLogger('automation-service');
@@ -578,6 +579,42 @@ router.post('/policies', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Create policy failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to create policy' });
+  }
+});
+
+// Get SLA statistics
+router.get('/sla/stats', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const days = parseInt(req.query.days as string) || 30;
+    const stats = await slaTrackingService.getSLAStats(req.user.tenantId, days);
+
+    res.json({ stats });
+  } catch (error) {
+    logger.error('Get SLA stats failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get SLA stats' });
+  }
+});
+
+// Get at-risk tasks
+router.get('/sla/at-risk', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 50;
+    const tasks = await slaTrackingService.getAtRiskTasks(req.user.tenantId, limit);
+
+    res.json({ tasks });
+  } catch (error) {
+    logger.error('Get at-risk tasks failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get at-risk tasks' });
   }
 });
 

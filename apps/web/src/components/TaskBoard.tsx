@@ -41,7 +41,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').re
 
 interface TaskBoardProps {
   token: string;
-  tenantId: string;
+  tenantId?: string;
   clientTenantId?: string; // For accountant view
 }
 

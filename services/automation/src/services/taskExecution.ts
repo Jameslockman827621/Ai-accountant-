@@ -116,14 +116,8 @@ export class TaskExecutionService {
       );
 
       // Update SLA tracking
-      await db.query(
-        `UPDATE sla_tracking
-         SET status = 'on_track',
-             completed_at = NOW(),
-             actual_hours = EXTRACT(EPOCH FROM (NOW() - sla_start_time)) / 3600
-         WHERE task_id = $1`,
-        [taskId]
-      );
+      const { slaTrackingService } = await import('./slaTracking');
+      await slaTrackingService.markCompleted(taskId);
 
       // Log completion
       await this.logExecution(taskId, 'completed', executedBy, executionMethod, 'in_progress', 'completed', result.result);
