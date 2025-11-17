@@ -41,7 +41,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').re
 
 interface AutopilotDashboardProps {
   token: string;
-  tenantId: string;
+  tenantId?: string;
 }
 
 export default function AutopilotDashboard({ token, tenantId }: AutopilotDashboardProps) {
