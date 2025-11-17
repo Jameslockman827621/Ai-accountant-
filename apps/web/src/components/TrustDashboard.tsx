@@ -52,16 +52,17 @@ export default function TrustDashboard() {
 
   const fetchMetrics = async () => {
     try {
-      const token = localStorage.getItem('token');
+      const token = localStorage.getItem('authToken') || localStorage.getItem('auth_token') || localStorage.getItem('token');
       const headers = { Authorization: `Bearer ${token}` };
+      const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 
       const [eventsRes, incidentsRes, slosRes, evidenceRes, modelsRes, backupsRes] = await Promise.all([
-        fetch('/api/security/events?limit=1', { headers }),
-        fetch('/api/security/incidents?limit=1', { headers }),
-        fetch('/api/monitoring/slos?limit=1', { headers }),
-        fetch('/api/compliance/evidence?complianceFramework=soc2&limit=1', { headers }),
-        fetch('/api/modelops/models?status=deployed&limit=1', { headers }),
-        fetch('/api/backup/backups?limit=1', { headers }),
+        fetch(`${API_BASE}/api/security/events?limit=100`, { headers }).catch(() => ({ ok: false, json: () => Promise.resolve({ events: [], total: 0 }) })),
+        fetch(`${API_BASE}/api/security/incidents?limit=100`, { headers }).catch(() => ({ ok: false, json: () => Promise.resolve({ incidents: [], total: 0 }) })),
+        fetch(`${API_BASE}/api/monitoring/slos?limit=100`, { headers }).catch(() => ({ ok: false, json: () => Promise.resolve({ slos: [], total: 0 }) })),
+        fetch(`${API_BASE}/api/compliance/evidence?complianceFramework=soc2&limit=100`, { headers }).catch(() => ({ ok: false, json: () => Promise.resolve({ evidence: [], total: 0 }) })),
+        fetch(`${API_BASE}/api/modelops/models?status=deployed&limit=100`, { headers }).catch(() => ({ ok: false, json: () => Promise.resolve({ models: [] }) })),
+        fetch(`${API_BASE}/api/backup/backups?limit=100`, { headers }).catch(() => ({ ok: false, json: () => Promise.resolve({ logs: [] }) })),
       ]);
 
       const [events, incidents, slos, evidence, models, backups] = await Promise.all([
