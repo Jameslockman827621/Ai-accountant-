@@ -3,18 +3,78 @@
     "id": "vat-liability",
     "question": "What is our latest VAT liability and when is it due?",
     "requiredKeywords": ["vat", "due", "return"],
-    "minConfidence": 0.7
+    "minConfidence": 0.7,
+    "domain": "VAT",
+    "expectedToolCalls": ["get_ledger_slice", "generate_filing_draft"]
   },
   {
     "id": "expense-policy",
     "question": "Remind me of the rules for employee expense claims.",
     "requiredKeywords": ["policy", "expense", "receipt"],
-    "minConfidence": 0.6
+    "minConfidence": 0.6,
+    "domain": "compliance"
   },
   {
     "id": "cash-runway",
     "question": "How long is our current cash runway based on the latest ledger data?",
     "requiredKeywords": ["runway", "cash", "months"],
-    "minConfidence": 0.6
+    "minConfidence": 0.6,
+    "domain": "forecasting",
+    "expectedToolCalls": ["get_ledger_slice"]
+  },
+  {
+    "id": "reconciliation-status",
+    "question": "What is the reconciliation status for account 1000?",
+    "requiredKeywords": ["reconciliation", "account", "matched"],
+    "minConfidence": 0.7,
+    "domain": "reconciliation",
+    "expectedToolCalls": ["get_reconciliation_status"]
+  },
+  {
+    "id": "tax-calculation",
+    "question": "Calculate the VAT for a £1000 transaction in the UK.",
+    "requiredKeywords": ["vat", "calculate", "rate"],
+    "minConfidence": 0.8,
+    "domain": "VAT",
+    "expectedToolCalls": ["calculate_tax"]
+  },
+  {
+    "id": "filing-preparation",
+    "question": "Prepare the Q2 VAT return for the UK.",
+    "requiredKeywords": ["vat", "return", "prepare"],
+    "minConfidence": 0.7,
+    "domain": "VAT",
+    "expectedToolCalls": ["generate_filing_draft"]
+  },
+  {
+    "id": "rule-explanation",
+    "question": "Explain the VAT rule for zero-rated supplies in the UK.",
+    "requiredKeywords": ["vat", "rule", "zero-rated"],
+    "minConfidence": 0.7,
+    "domain": "VAT",
+    "expectedToolCalls": ["get_rule_explanation"]
+  },
+  {
+    "id": "ledger-analysis",
+    "question": "Show me all transactions for account 4000 in the last month.",
+    "requiredKeywords": ["transactions", "account", "month"],
+    "minConfidence": 0.7,
+    "domain": "ledger",
+    "expectedToolCalls": ["get_ledger_slice"]
+  },
+  {
+    "id": "compliance-question",
+    "question": "What are the filing deadlines for corporation tax this year?",
+    "requiredKeywords": ["filing", "deadline", "corporation"],
+    "minConfidence": 0.7,
+    "domain": "compliance"
+  },
+  {
+    "id": "forecasting",
+    "question": "Based on current trends, what will our tax liability be next quarter?",
+    "requiredKeywords": ["trend", "tax", "liability", "quarter"],
+    "minConfidence": 0.6,
+    "domain": "forecasting",
+    "expectedToolCalls": ["get_ledger_slice", "calculate_tax"]
   }
 ]

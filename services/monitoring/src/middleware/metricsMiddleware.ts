@@ -1,21 +1,18 @@
+/**
+ * Express Middleware for Metrics Collection
+ */
+
 import { Request, Response, NextFunction } from 'express';
-import { recordRequest } from '../services/metrics';
+import { recordRequestMetrics } from '../metrics';
 
-export function metricsMiddleware(serviceName: string) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const startTime = Date.now();
+export function metricsMiddleware(req: Request, res: Response, next: NextFunction) {
+  const startTime = Date.now();
 
-    res.on('finish', () => {
-      const duration = Date.now() - startTime;
-      recordRequest(
-        serviceName,
-        req.method,
-        req.path,
-        res.statusCode,
-        duration
-      );
-    });
+  // Record metrics when response finishes
+  res.on('finish', () => {
+    const duration = Date.now() - startTime;
+    recordRequestMetrics(req.method, req.path, res.statusCode, duration);
+  });
 
-    next();
-  };
+  next();
 }

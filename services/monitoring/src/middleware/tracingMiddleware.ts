@@ -1,30 +1,25 @@
+/**
+ * Express Middleware for Trace Context Propagation
+ */
+
 import { Request, Response, NextFunction } from 'express';
-import { tracingService } from '../services/tracing';
+import { context, propagation } from '@opentelemetry/api';
 
-export function tracingMiddleware(serviceName: string) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const traceId = req.headers['x-trace-id'] as string | undefined;
-    const parentSpanId = req.headers['x-span-id'] as string | undefined;
+export function tracingMiddleware(req: Request, res: Response, next: NextFunction) {
+  // Extract trace context from headers (W3C Trace Context)
+  const parentContext = propagation.extract(context.active(), req.headers);
 
-    const spanId = tracingService.startSpan(
-      serviceName,
-      `${req.method} ${req.path}`,
-      parentSpanId,
-      traceId
-    );
+  // Set trace context
+  context.with(parentContext, () => {
+    // Store trace ID in environment for logging
+    const traceId = context.active().traceId;
+    if (traceId) {
+      process.env.TRACE_ID = traceId;
+    }
 
-    tracingService.addTag(spanId, 'http.method', req.method);
-    tracingService.addTag(spanId, 'http.path', req.path);
-    tracingService.addTag(spanId, 'http.user_agent', req.get('user-agent') || '');
-
-    res.setHeader('x-trace-id', tracingService['activeSpans'].get(spanId)?.traceId || '');
-    res.setHeader('x-span-id', spanId);
-
-    res.on('finish', () => {
-      tracingService.addTag(spanId, 'http.status_code', String(res.statusCode));
-      tracingService.endSpan(spanId);
-    });
+    // Inject trace context into response headers
+    propagation.inject(context.active(), res.getHeaders());
 
     next();
-  };
+  });
 }

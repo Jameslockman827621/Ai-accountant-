@@ -1,0 +1,50 @@
+name: Nightly Regression
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # 2 AM UTC daily
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  regression:
+    name: Nightly Regression Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:14
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '18.x'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run test -- --testPathPattern="golden-dataset|integration|e2e"
+      - name: Generate HTML report
+        run: |
+          npm run test -- --coverage --coverageReporters=html
+      - name: Upload report
+        uses: actions/upload-artifact@v3
+        with:
+          name: nightly-regression-report
+          path: coverage/
+      - name: Send Slack notification
+        if: always()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Nightly regression tests completed'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK_URL }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
