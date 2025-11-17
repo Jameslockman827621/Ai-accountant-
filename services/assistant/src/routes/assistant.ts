@@ -474,7 +474,7 @@ router.post('/evaluations/run', async (req: AuthRequest, res: Response) => {
     }
 
     const limit = req.body?.limit as number | undefined;
-    const report = await runAssistantEvaluation(req.user.tenantId, limit);
+    const report = await runAssistantEvaluation(req.user.tenantId, limit, req.user.userId);
     res.json({ report });
   } catch (error) {
     logger.error('Assistant evaluation failed', error instanceof Error ? error : new Error(String(error)));
@@ -483,6 +483,117 @@ router.post('/evaluations/run', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to run assistant evaluation' });
+  }
+});
+
+// Get tool action logs (for compliance mode)
+router.get('/actions/logs', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const limit = parseInt(req.query.limit as string) || 50;
+    const result = await db.query<{
+      id: string;
+      tool_name: string;
+      tool_args: unknown;
+      tool_result: unknown;
+      status: string;
+      approved_by: string | null;
+      approved_at: Date | null;
+      created_at: Date;
+    }>(
+      `SELECT id, tool_name, tool_args, tool_result, status, approved_by, approved_at, created_at
+       FROM assistant_actions
+       WHERE tenant_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2`,
+      [req.user.tenantId, limit]
+    );
+
+    const logs = result.rows.map((row) => ({
+      id: row.id,
+      toolName: row.tool_name,
+      args: row.tool_args as Record<string, unknown>,
+      result: row.tool_result as unknown,
+      status: row.status,
+      approvedBy: row.approved_by,
+      approvedAt: row.approved_at,
+      timestamp: row.created_at,
+    }));
+
+    res.json({ logs });
+  } catch (error) {
+    logger.error('Get action logs failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get action logs' });
+  }
+});
+
+// Get conversation transcript (for compliance mode)
+router.get('/conversations/:conversationId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { conversationId } = req.params;
+
+    // Get conversation messages from audit logs
+    const messagesResult = await db.query<{
+      prompt: string;
+      response: string;
+      reasoning_trace: unknown;
+      created_at: Date;
+    }>(
+      `SELECT prompt, response, reasoning_trace, created_at
+       FROM assistant_audit_log
+       WHERE tenant_id = $1 AND conversation_id = $2
+       ORDER BY created_at ASC`,
+      [req.user.tenantId, conversationId]
+    );
+
+    // Get tool calls for this conversation
+    const toolCallsResult = await db.query<{
+      tool_name: string;
+      tool_args: unknown;
+      tool_result: unknown;
+      status: string;
+      created_at: Date;
+    }>(
+      `SELECT tool_name, tool_args, tool_result, status, created_at
+       FROM assistant_actions
+       WHERE tenant_id = $1 AND conversation_id = $2
+       ORDER BY created_at ASC`,
+      [req.user.tenantId, conversationId]
+    );
+
+    const messages = messagesResult.rows.map((row, idx) => ({
+      id: `${conversationId}-${idx}`,
+      role: 'assistant' as const,
+      content: row.response || '',
+      timestamp: row.created_at,
+      reasoningTrace: (row.reasoning_trace as Array<{ step: string; details: unknown }>) || [],
+      toolCalls: toolCallsResult.rows
+        .filter((tc) => {
+          const tcTime = new Date(tc.created_at).getTime();
+          const msgTime = new Date(row.created_at).getTime();
+          return Math.abs(tcTime - msgTime) < 5000; // Within 5 seconds
+        })
+        .map((tc) => ({
+          toolName: tc.tool_name,
+          args: tc.tool_args as Record<string, unknown>,
+          result: tc.tool_result as unknown,
+          status: tc.status,
+        })),
+    }));
+
+    res.json({ conversationId, messages });
+  } catch (error) {
+    logger.error('Get conversation failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get conversation' });
   }
 });
 
