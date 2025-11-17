@@ -28,7 +28,7 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').re
 
 interface ComplianceCalendarProps {
   token: string;
-  tenantId: string;
+  tenantId?: string;
 }
 
 export default function ComplianceCalendar({ token, tenantId }: ComplianceCalendarProps) {
