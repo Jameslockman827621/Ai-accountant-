@@ -3,6 +3,8 @@ import { db } from '@ai-accountant/database';
 import { randomUUID } from 'crypto';
 import { rulepackManager } from '../../../rules-engine/src/services/rulepackDSL';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
+import { authorityAdapterRegistry } from './authorityAdapters';
+import { initiateAuthorityPayment } from './paymentOrchestration';
 
 const logger = createLogger('filing-lifecycle');
 
@@ -174,7 +176,7 @@ export class FilingLifecycleService {
     filingId: string,
     tenantId: TenantId,
     submittedBy: UserId,
-    adapter: string // 'hmrc_vat', 'hmrc_paye', 'taxjar', etc.
+    adapter: string // 'hmrc_vat', 'hmrc_paye', etc.
   ): Promise<FilingSubmission> {
     // Get filing
     const filingResult = await db.query<{
@@ -195,27 +197,39 @@ export class FilingLifecycleService {
 
     const filing = filingResult.rows[0];
 
-    // Submit via adapter (would call actual adapter service)
-    const submissionReference = await this.submitViaAdapter(
-      adapter,
-      filing,
-      tenantId
-    );
+    const submission = await authorityAdapterRegistry.submit({
+      filingId,
+      tenantId,
+      filingType: filing.filing_type,
+      jurisdiction: filing.jurisdiction,
+      payload: filing.filing_data || {},
+      adapterHint: adapter,
+    });
+
+    if (submission.requiresPayment && submission.amountDue && submission.amountDue > 0) {
+      await initiateAuthorityPayment({
+        filingId,
+        tenantId,
+        authority: submission.authority,
+        amount: submission.amountDue,
+        currency: submission.currency || 'GBP',
+      });
+    }
 
     // Update filing status
     await db.query(
       `UPDATE filing_ledger
        SET status = 'submitted',
            submitted_at = NOW(),
-           submitted_by = $1,
-           submission_reference = $2
-       WHERE id = $3`,
-      [submittedBy, submissionReference, filingId]
+            submitted_by = $1,
+            submission_reference = $2
+        WHERE id = $3`,
+      [submittedBy, submission.submissionReference, filingId]
     );
 
     return {
       filingId,
-      submissionReference,
+      submissionReference: submission.submissionReference,
       submittedAt: new Date().toISOString(),
       submittedBy,
     };
@@ -356,21 +370,6 @@ export class FilingLifecycleService {
     return data;
   }
 
-  private async submitViaAdapter(
-    adapter: string,
-    filing: { filing_type: string; jurisdiction: string; filing_data: unknown; calculated_values: unknown },
-    tenantId: TenantId
-  ): Promise<string> {
-    // In production, would call actual adapter service
-    // For now, simulate submission
-    logger.info('Submitting filing via adapter', { adapter, filingType: filing.filing_type });
-    
-    // Simulate API call delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Return mock submission reference
-    return `SUB-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-  }
 }
 
 export const filingLifecycleService = new FilingLifecycleService();

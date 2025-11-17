@@ -26,6 +26,10 @@ import ErrorRecoveryCenter from './ErrorRecoveryCenter';
 import BankConnectionHealth from './BankConnectionHealth';
 import ReconciliationReport from './ReconciliationReport';
 import FilingReviewPanel from './FilingReviewPanel';
+import RulepackConsole from './RulepackConsole';
+import FilingReadinessPanel from './FilingReadinessPanel';
+import SubmissionWorkflowPanel from './SubmissionWorkflowPanel';
+import ClientCommunicationPanel from './ClientCommunicationPanel';
 
 interface DashboardStats {
   period: {
@@ -321,8 +325,12 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             <ValidationDashboard />
             <ReviewQueue />
             <ErrorRecoveryCenter />
-            <BankConnectionHealth />
-            <ReconciliationReport />
+              <BankConnectionHealth />
+              <ReconciliationReport />
+              <RulepackConsole token={token} />
+              <FilingReadinessPanel token={token} />
+              <SubmissionWorkflowPanel token={token} />
+              <ClientCommunicationPanel token={token} />
           </div>
         </div>
       );

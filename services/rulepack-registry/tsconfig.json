@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "baseUrl": ".",
+    "paths": {
+      "@ai-accountant/shared-utils": ["../../packages/shared-utils/src"],
+      "@ai-accountant/shared-utils/*": ["../../packages/shared-utils/src/*"],
+      "@ai-accountant/shared-types": ["../../packages/shared-types/src"],
+      "@ai-accountant/shared-types/*": ["../../packages/shared-types/src/*"],
+      "@ai-accountant/database": ["../../services/database/src"],
+      "@ai-accountant/database/*": ["../../services/database/src/*"],
+      "@ai-accountant/monitoring-service": ["../../services/monitoring/src"],
+      "@ai-accountant/monitoring-service/*": ["../../services/monitoring/src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
