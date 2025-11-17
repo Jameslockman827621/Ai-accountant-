@@ -9,6 +9,7 @@ import { DocumentStatus, DocumentType, DocumentUploadSource } from '@ai-accounta
 import { AuthRequest } from '../middleware/auth';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { assessDocumentQuality } from '../services/qualityAssessment';
+import { guidanceService } from '../services/guidanceService';
 
 const router = Router();
 const logger = createLogger('document-ingest-service');
@@ -196,25 +197,30 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
 
     logger.info('Document uploaded', { documentId, tenantId: req.user.tenantId });
 
-      res.status(201).json({
-        document: {
-          id: document.id,
-          fileName: document.file_name,
-          fileType: document.file_type,
-          fileSize: document.file_size,
-          status: document.status,
-          documentType: document.document_type,
-          createdAt: document.created_at,
-          qualityScore: document.quality_score,
-          qualityIssues: document.quality_issues,
-          uploadChecklist: document.upload_checklist,
-          pageCount: document.page_count,
-          uploadSource: document.upload_source,
-          uploadNotes: document.upload_notes,
-          suggestedDocumentType: document.suggested_document_type,
-        },
-        guidance: quality,
-      });
+    // Evaluate and attach guidance (async, don't block response)
+    guidanceService.evaluateGuidance(documentId).catch((err) => {
+      logger.warn('Failed to evaluate guidance', { documentId, error: err instanceof Error ? err.message : String(err) });
+    });
+
+    res.status(201).json({
+      document: {
+        id: document.id,
+        fileName: document.file_name,
+        fileType: document.file_type,
+        fileSize: document.file_size,
+        status: document.status,
+        documentType: document.document_type,
+        createdAt: document.created_at,
+        qualityScore: document.quality_score,
+        qualityIssues: document.quality_issues,
+        uploadChecklist: document.upload_checklist,
+        pageCount: document.page_count,
+        uploadSource: document.upload_source,
+        uploadNotes: document.upload_notes,
+        suggestedDocumentType: document.suggested_document_type,
+      },
+      guidance: quality,
+    });
   } catch (error) {
     logger.error('Upload failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {
