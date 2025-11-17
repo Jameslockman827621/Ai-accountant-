@@ -1,61 +1,193 @@
-# Reconciliation Split Transactions – Implementation Plan
+# Reconciliation Split Transactions – World‑Class Implementation Blueprint
 
-## Overview
-- Build full support for splitting a single bank transaction across multiple ledger entries/documents to resolve partial matches in the reconciliation cockpit.
-- Current UI stub lives in `apps/web/src/components/ReconciliationCockpit.tsx` and simply shows an alert (`splitTransaction()`), so accountants cannot clear partially matched transactions.
-- Service layer (`services/reconciliation`) only allows single `bankTransactionId` ⇒ `documentId|ledgerEntryId` matches; there is no API to create/update split allocations.
+## 1. Problem Statement
+- Accountants frequently receive aggregated bank transactions (batch payouts, combined deposits, expense card settlements) that must be allocated across several invoices or ledger entries.
+- The current reconciliation cockpit (`apps/web/src/components/ReconciliationCockpit.tsx`) cannot split transactions; `splitTransaction()` simply alerts “coming soon.” Users must leave the product to adjust CSVs manually, creating audit risk and delaying close.
+- Backend (`services/reconciliation`) supports only 1:1 matches via `reconcileTransaction`. There is no persistence model, API, or workflow for partial matches, exception handling, or audit logging of split allocations.
 
-## Frontend Scope (Next.js dashboard)
-1. **UI affordance**
-   - Replace the `alert('Split transaction feature coming soon')` stub with a modal or drawer that:
-     - Lists the selected bank transaction details + amount.
-     - Allows adding multiple split rows (amount, target document/ledger entry, memo, confidence).
-     - Validates that the sum of split amounts equals the transaction total (show remaining amount indicator).
-     - Supports attachment lookup (search existing documents/ledger entries via existing `/api/reconciliation/matches/:transactionId` endpoint) or manual ledger entry creation (optional future).
-   - Highlight splits visually in the transaction list (badge “Split”).
-2. **State management**
-   - Extend local state to cache splits fetched from backend (`GET /api/reconciliation/splits/:transactionId`).
-   - After saving, optimistically update the transaction’s status counters (reconciled/suggested) to keep dashboard KPIs accurate.
-3. **API integration**
-   - Add `POST /api/reconciliation/splits` + `PUT /api/reconciliation/splits/:splitId` + `DELETE …` calls via `fetch` helper.
-   - Handle backend validation errors (e.g., sum mismatch) and expose them inline near split rows.
-4. **Testing**
-   - Add React Testing Library test that ensures the modal enforces sum = total and calls the API with structured payload.
-   - E2E test (Playwright `__tests__/e2e/ledger-reconciliation.test.ts`) covering creation + reconciliation of a split transaction.
+## 2. Goals & Success Metrics
+| Goal | KPI / Target |
+| --- | --- |
+| Enable precise allocation of aggregated bank transactions across multiple documents/entries | 95% of multi-invoice payouts reconciled within the product |
+| Preserve auditability & controls | 100% of splits logged with actor, timestamp, rationale |
+| Maintain performance | < 300 ms API latency (P95) for split CRUD, < 1s UI actions |
+| Delight accountants | NPS improvement for reconciliation module (+5 points) backed by qualitative interviews |
 
-## Backend Scope (services/reconciliation)
-1. **Data model**
-   - New table `transaction_splits` (tenant-scoped) storing:
-     - `id`, `tenant_id`, `bank_transaction_id`, `split_amount`, `currency`, `document_id` nullable, `ledger_entry_id` nullable, `notes`, `status`, `created_by`, timestamps.
-   - Migration in `services/database/src/migrations` + typed accessors in `transactionSplitRepository`.
-2. **API layer**
-   - Routes under `routes/reconciliation.ts`:
-     - `GET /splits/:transactionId` – list splits (filtered by tenant).
-     - `POST /splits` – create splits in a single tx; validates total equals bank transaction amount, prevents overlap with fully reconciled state.
-     - `PUT /splits/:id` – update allocations/notes prior to final reconciliation.
-     - `DELETE /splits/:id` – remove a split (re-open transaction amount).
-     - `POST /splits/:id/apply` – finalize a split by creating ledger reconciliation entries (optional if reuse existing `reconcileTransaction` w/ array payload).
-3. **Matching logic**
-   - Update `matcher`/`reconcileTransaction` to accept payload `{ splits: Array<{ splitId | tempId, documentId | ledgerEntryId, amount } > }`.
-   - Ensure anomaly detection + exception workflows treat split children as individual reconciliation events (update `reconciliation_events` insert logic).
-4. **Bank transaction status**
-   - Add derived fields: `split_remaining_amount`, `is_split` boolean for UI.
-   - Adjust existing `findMatches` to consider remaining amount per split when suggesting matches.
-5. **Validation & audit**
-   - Enforce currency consistency between bank transaction and splits (use exchange rates if cross-currency support is enabled).
-   - Write audit entries (`audit_logs`) whenever splits are created/modified (include actor + diff).
+## 3. Functional Requirements
+1. **Create/Edit/Delete Split Lines**
+   - Users can create up to 50 splits per bank transaction.
+   - Each split includes: amount, currency (defaulted from transaction), optional document ref, optional ledger entry, memo, tags.
+   - Running balance indicator shows “Remaining amount” in real time.
+   - Validation ensures sum of active splits equals bank transaction total before commit.
+2. **Auto-Suggest Split Candidates**
+   - For each split row, user can search documents/entries via existing `/matches/:transactionId` endpoint filtered by amount thresholds.
+   - Provide quick actions (“Allocate evenly”, “Use historical pattern” based on prior splits for same vendor).
+3. **State Transitions**
+   - `draft` (in progress) → `pending_review` (optional two-person control) → `applied`.
+   - Configurable approval requirement per tenant; integrate with workflow service if approval is enabled.
+4. **Audit & Controls**
+   - Every action writes to `audit_logs` with diff (old/new amount, target doc, user, IP).
+   - Splits support attachments/notes for supporting evidence.
+5. **Exception Handling**
+   - If a split is applied but ledger posting fails, system rolls back to `draft` and raises reconciliation exception.
+6. **UX polish**
+   - Badges (Split, Partially matched) on transaction rows.
+   - Keyboard shortcuts to add/remove rows.
+   - Accessible form fields (WCAG 2.1 AA).
+
+## 4. Architecture & Data Model
+### 4.1 New Table: `transaction_splits`
+| Column | Type | Notes |
+| --- | --- | --- |
+| `id` | UUID PK |
+| `tenant_id` | UUID FK (tenants) |
+| `bank_transaction_id` | UUID FK (bank_transactions) |
+| `status` | enum (`draft`, `pending_review`, `applied`, `void`) |
+| `split_amount` | numeric(18,4) |
+| `currency` | char(3) |
+| `document_id` | UUID FK (documents) nullable |
+| `ledger_entry_id` | UUID FK (ledger_entries) nullable |
+| `memo` | text |
+| `tags` | jsonb |
+| `confidence_score` | numeric(5,4) optional |
+| `created_by` / `updated_by` | UUID |
+| timestamps |
+
+### 4.2 Derived Fields on `bank_transactions`
+- `is_split` (boolean)
+- `split_remaining_amount` (numeric)
+- `split_status` (enum `not_split`, `in_progress`, `balanced`, `applied`)
+
+### 4.3 Services & Modules
+- `transactionSplitRepository` (CRUD, locking).
+- `splitAllocationService` (validation, aggregate updates, workflow triggers).
+- `splitReconciliationService` (invokes existing `reconcileTransaction` per split, ensures atomicity).
+
+## 5. API Design (services/reconciliation)
+| Endpoint | Method | Purpose |
+| --- | --- | --- |
+| `/api/reconciliation/splits/:transactionId` | GET | List splits + remaining amount |
+| `/api/reconciliation/splits` | POST | Create/replace split set (accepts array) |
+| `/api/reconciliation/splits/:splitId` | PUT | Update memo/document reference/amount (draft only) |
+| `/api/reconciliation/splits/:splitId` | DELETE | Remove split (draft) |
+| `/api/reconciliation/splits/:transactionId/submit` | POST | Move to `pending_review` or apply if approvals disabled |
+| `/api/reconciliation/splits/:transactionId/approve` | POST | Approver finalizes; triggers posting |
+| `/api/reconciliation/splits/:transactionId/reject` | POST | Reviewer rejects with reason |
+
+### Request Contracts
+```json
+POST /api/reconciliation/splits
+{
+  "transactionId": "uuid",
+  "splits": [
+    {
+      "tempId": "client-generated uuid",
+      "amount": "120.45",
+      "currency": "GBP",
+      "documentId": "uuid | null",
+      "ledgerEntryId": "uuid | null",
+      "memo": "May SaaS payout",
+      "tags": ["Stripe", "Subscription"],
+      "confidenceScore": 0.92
+    }
+  ]
+}
+```
+
+## 6. Frontend Implementation (Next.js / Tailwind)
+1. **Split Drawer Component**
+   - Create `SplitTransactionDrawer.tsx` housing:
+     - Transaction summary (vendor, date, total, existing matches).
+     - Editable table (amount, target, memo, actions).
+     - Summary footer showing “Allocated vs Remaining”.
+   - Use `react-hook-form` with field arrays for robust validation.
+2. **Integration Points**
+   - `ReconciliationCockpit`:
+     - Add “Split” CTA for eligible transactions.
+     - Display aggregated status in list row.
+   - Possibly update `BankTransactionDetailsPanel` if exists.
+3. **State & Data Hooks**
+   - `useTransactionSplits(transactionId)` hook to load/update splits via SWR or React Query for caching and optimistic updates.
+4. **Error UX**
+   - Inline error rows when backend rejects (e.g., concurrency conflict, currency mismatch).
+   - Gracefully handle 409 (transaction updated elsewhere) by refetching.
+5. **Accessibility & UX polish**
+   - Keyboard nav (Tab, Enter to add row, Shift+Delete to remove).
+   - Screenreader labels for sums and row-level errors.
+   - Dark mode support if rest of dashboard supports it.
 6. **Testing**
-   - Unit tests for repository + service validations.
-   - Extend `__tests__/integration/ledger-reconciliation.test.ts` to cover multi-split workflows (create splits ⇒ reconcile ⇒ ensure remaining amount zero).
-7. **Performance/locking**
-   - Wrap create/update/delete in DB transaction with `SELECT … FOR UPDATE` on the bank transaction row to avoid race conditions when multiple accountants edit the same transaction.
+   - Unit tests for `SplitTransactionDrawer` verifying validation.
+   - Cypress/Playwright scenario: open drawer, add 3 splits, submit, ensure table updates.
 
-## Infrastructure / DevOps
-- Apply migration (`npm run db:migrate`).
-- Add feature flag/env (e.g., `ENABLE_RECON_SPLITS`) to gate release.
-- Update API Gateway mapping if new routes added (already proxies `/api/reconciliation`, no extra work).
+## 7. Backend Implementation Steps
+1. **Migrations**
+   - Add `transaction_splits` table + new columns on `bank_transactions`.
+   - Update views/materialized reports if referencing totals.
+2. **Repositories & Services**
+   - Implement `TransactionSplitRepository` with methods:
+     - `findByTransaction(tenantId, transactionId)`
+     - `upsertSplits(tenantId, transactionId, splits, actorId)` (wrapped in DB transaction, `FOR UPDATE` on bank transaction row)
+     - `deleteSplit(...)`
+   - `SplitAllocationService` handles validation (sum check, currency, duplicates).
+   - `SplitApprovalService` integrates with workflow service if approvals enabled.
+3. **Reconciliation Engine**
+   - Update `reconcileTransaction` to accept arrays or new service `applySplits` to loop through splits:
+     - For each split: call existing posting pipeline, attach metadata indicating split origin.
+     - Ensure partial failures rollback entire batch (DB transaction + saga pattern if external calls).
+4. **Events & Notifications**
+   - Emit events (`reconciliation.split.applied`, etc.) via RabbitMQ for downstream analytics.
+   - Send notification to reviewers when splits submitted (reuse notification service).
+5. **Performance & Concurrency**
+   - Use optimistic locking (version column) or DB locks to prevent overlapping edits.
+   - Index `transaction_splits` on (`tenant_id`, `bank_transaction_id`).
+6. **Observability**
+   - Metrics: number of splits created, average splits per transaction, time-to-approval.
+   - Log structured data for each state change.
+7. **Security**
+   - Enforce RBAC: only users with `accountant` or custom permission can edit splits; reviewers need `review_split` permission.
+   - Validate tenant IDs at every layer.
+8. **Testing**
+   - Unit tests for validation logic (sum mismatch, currency mismatch).
+   - Integration tests building on existing `ledger-reconciliation` suite:
+     - Scenario: create splits → apply → verify ledger entries + bank transaction status.
+   - Load tests with synthetic data to ensure DB operations scale (simulate 10k splits).
 
-## Risks / Open Questions
-- How to handle taxes/fees automatically when a split is created? Need UX guidance.
-- Should splits permit both documents and manual ledger entries simultaneously? (Design decision).
+## 8. Deployment & Rollout
+1. **Feature Flag**
+   - Introduce `RECON_SPLITS_ENABLED` (per-tenant toggle). Default off in production until pilot tenants vetted.
+2. **Data Backfill**
+   - For existing partially reconciled transactions, set `is_split = false` initially; migration script can backfill if spreadsheets exist.
+3. **Docs & Training**
+   - Update help center article + in-app walkthrough (coach marks) when feature turns on.
+4. **Pilot & Gradual Rollout**
+   - Stage 1: internal QA & accounting SMEs.
+   - Stage 2: pilot accounting firms (3–5 tenants).
+   - Stage 3: GA after collecting feedback + metrics.
+
+## 9. Open Questions / Decisions Needed
+1. Should split lines support tax codes (VAT allocation) or rely on document-level tax? (Likely yes; need product decision.)
+2. For multi-currency: do we allow splits in mixed currencies? Proposed approach: require same currency as bank transaction; for others, force creation of FX adjustment entry.
+3. Approval workflow: Should it integrate with existing workflow service or have dedicated lightweight approvals? (Recommendation: reuse workflow service for consistency.)
+4. Auto-allocation rules: we scoped basic suggestions—future phase could learn from historical splits via ML.
+
+## 10. Timeline & Work Breakdown (estimates)
+| Workstream | Owner | Est. Time |
+| --- | --- | --- |
+| DB migrations + repositories | Backend | 3 days |
+| Split services & API endpoints | Backend | 4 days |
+| Reconciliation engine updates | Backend | 3 days |
+| Frontend drawer + UX polish | Frontend | 5 days |
+| Approvals + notifications integration | Backend/Full-stack | 2 days |
+| Testing (unit, integration, e2e) | QA/Eng | 4 days |
+| Docs, rollout, feature flagging | PM/Enablement | 2 days |
+
+## 11. Acceptance Criteria
+- ✅ Users can create/edit/delete splits, with validation preventing imbalance.
+- ✅ Applying splits posts ledger entries, reduces remaining amount to zero, and marks transaction reconciled.
+- ✅ Audit log shows full history including approvals.
+- ✅ Attempting to split an already fully reconciled transaction returns 409.
+- ✅ Automated tests cover happy path + error scenarios; CI green.
+- ✅ Monitoring dashboard shows split metrics; alerts fire on repeated failures.
+
+Once these deliverables are met, the split-transaction experience will be world-class—fast, controlled, auditable, and pleasant for accountants tackling complex reconciliations.
 
