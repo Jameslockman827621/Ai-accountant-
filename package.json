@@ -20,6 +20,10 @@
     "clean": "turbo run clean && rm -rf node_modules",
     "db:migrate": "cd services/database && npm run migrate",
     "db:seed": "cd services/database && npm run seed",
+    "db:migrate:ledger-reconciliation": "ts-node -r tsconfig-paths/register scripts/run-ledger-reconciliation-migration.ts",
+    "init:ledger-reconciliation": "ts-node -r tsconfig-paths/register scripts/initialize-ledger-reconciliation.ts",
+    "test:integration:ledger": "jest --runInBand __tests__/integration/ledger-reconciliation.test.ts",
+    "load-test:reconciliation": "ts-node -r tsconfig-paths/register scripts/performance/load-test-reconciliation.ts",
     "rulepacks:regress": "ts-node -r tsconfig-paths/register scripts/rulepacks/run-regression.ts"
   },
   "devDependencies": {

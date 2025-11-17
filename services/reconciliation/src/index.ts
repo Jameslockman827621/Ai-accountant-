@@ -7,7 +7,6 @@ import { reconciliationRouter } from './routes/reconciliation';
 import { reconciliationCockpitRouter } from './routes/reconciliationCockpit';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
-import { reconciliationWorker } from './workers/reconciliationWorker';
 
 config();
 
@@ -33,7 +32,29 @@ app.use('/api/reconciliation', authenticate, reconciliationCockpitRouter);
 app.use(errorHandler);
 
 // Start background reconciliation worker
-reconciliationWorker.start();
+// Use BullMQ if Redis is available, otherwise use simple worker
+const useBullMQ = process.env.USE_BULLMQ === 'true' && process.env.REDIS_HOST;
+
+(async () => {
+  if (useBullMQ) {
+    logger.info('Starting BullMQ reconciliation worker...');
+    try {
+      const { createReconciliationWorker } = await import('./workers/bullReconciliationWorker');
+      const worker = createReconciliationWorker();
+      logger.info('BullMQ reconciliation worker started');
+    } catch (error) {
+      logger.error('Failed to start BullMQ worker, falling back to simple worker', {
+        error: error instanceof Error ? error : new Error(String(error)),
+      });
+      const { reconciliationWorker } = await import('./workers/reconciliationWorker');
+      reconciliationWorker.start();
+    }
+  } else {
+    logger.info('Starting simple reconciliation worker...');
+    const { reconciliationWorker } = await import('./workers/reconciliationWorker');
+    reconciliationWorker.start();
+  }
+})();
 
 app.listen(PORT, () => {
   logger.info(`Reconciliation service listening on port ${PORT}`);
