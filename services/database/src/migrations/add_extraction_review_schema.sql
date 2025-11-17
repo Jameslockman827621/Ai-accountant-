@@ -243,3 +243,16 @@ CREATE TRIGGER update_reviewer_skills_updated_at BEFORE UPDATE ON reviewer_skill
 
 CREATE TRIGGER update_model_training_jobs_updated_at BEFORE UPDATE ON model_training_jobs
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Review Queue Autosave table (for optimistic locking and draft saving)
+CREATE TABLE IF NOT EXISTS review_queue_autosave (
+    document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    field_edits JSONB NOT NULL DEFAULT '{}'::jsonb,
+    notes TEXT,
+    saved_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (document_id, tenant_id)
+);
+
+CREATE INDEX idx_review_queue_autosave_tenant ON review_queue_autosave(tenant_id);
+CREATE INDEX idx_review_queue_autosave_saved_at ON review_queue_autosave(saved_at);
