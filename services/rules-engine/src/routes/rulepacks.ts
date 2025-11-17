@@ -106,21 +106,19 @@ router.patch('/:rulepackId/activate', async (req: AuthRequest, res: Response) =>
       return;
     }
 
-    if (!isComplianceAdmin(req)) {
-      res.status(403).json({ error: 'Only compliance admins can activate rulepacks' });
-      return;
-    }
+      if (!isComplianceAdmin(req)) {
+        res.status(403).json({ error: 'Only compliance admins can activate rulepacks' });
+        return;
+      }
 
-    const { rulepackId } = req.params;
-    const { effectiveFrom } = req.body;
+      const { rulepackId } = req.params;
+      const { effectiveFrom } = req.body;
 
-    await rulepackRegistryService.activateRulepack(
-      rulepackId,
-      req.user.userId,
-      effectiveFrom ? new Date(effectiveFrom) : undefined
-    );
+      await rulepackRegistryService.activateRulepack(rulepackId, req.user.userId, {
+        effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : undefined,
+      });
 
-    res.json({ message: 'Rulepack activated' });
+      res.json({ message: 'Rulepack activated' });
   } catch (error) {
     logger.error('Activate rulepack failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: error instanceof Error ? error.message : 'Failed to activate rulepack' });

@@ -10,6 +10,7 @@ import { startFilingScheduler } from './scheduler';
 import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
 import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
 import { initializeReceiptBucket } from './storage/receiptStorage';
+import { initializeEvidenceBucket } from './storage/evidenceStorage';
 
 config();
 
@@ -37,6 +38,9 @@ app.use(errorHandler);
 
 initializeReceiptBucket().catch(error => {
   logger.warn('Receipt bucket initialization skipped', error instanceof Error ? error : new Error(String(error)));
+});
+initializeEvidenceBucket().catch(error => {
+  logger.warn('Evidence bucket initialization skipped', error instanceof Error ? error : new Error(String(error)));
 });
 
 app.listen(PORT, () => {

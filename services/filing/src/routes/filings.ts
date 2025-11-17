@@ -7,12 +7,6 @@ import { FilingType, FilingStatus } from '@ai-accountant/shared-types';
 import { generateVATFiling } from '../services/hmrc';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import {
-  createFilingReview,
-  getFilingReviewChecklist,
-  approveFilingReview,
-  rejectFilingReview,
-} from '../services/filingReview';
-import {
   submitTenantVatReturn,
   SubmissionType,
 } from '../services/hmrcSubmission';
@@ -48,6 +42,10 @@ import {
 } from '../services/deadlineManager';
 import { VATReturnPayload } from '@ai-accountant/hmrc';
 import { getReceiptDownloadUrl } from '../storage/receiptStorage';
+import { filingReadinessService } from '../services/filingReadiness';
+import { evidenceBundlerService } from '../services/evidenceBundler';
+import { getEvidenceDownloadUrl } from '../storage/evidenceStorage';
+import { generateClientSummary } from '../services/clientSummary';
 import { filingLifecycleService } from '../services/filingLifecycle';
 import { filingWorkflowService } from '../services/filingWorkflows';
 
@@ -332,6 +330,154 @@ router.get('/:filingId', async (req: AuthRequest, res: Response) => {
   }
 });
 
+  router.get('/:filingId/readiness', async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { filingId } = req.params;
+      const readiness =
+        (await filingReadinessService.getReadiness(filingId)) ||
+        (await filingReadinessService.calculateReadiness(filingId, req.user.tenantId));
+      res.json({ readiness });
+    } catch (error) {
+      logger.error('Get readiness failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to get readiness snapshot' });
+    }
+  });
+
+  router.post('/:filingId/readiness/recalculate', async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const readiness = await filingReadinessService.calculateReadiness(
+        req.params.filingId,
+        req.user.tenantId
+      );
+      res.json({ readiness, message: 'Readiness recalculated' });
+    } catch (error) {
+      logger.error('Recalculate readiness failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to recalculate readiness' });
+    }
+  });
+
+  router.post('/:filingId/evidence', async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const bundle = await evidenceBundlerService.generateBundle(req.params.filingId, req.user.tenantId);
+      res.status(201).json({ bundle });
+    } catch (error) {
+      logger.error('Generate evidence bundle failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to generate evidence bundle' });
+    }
+  });
+
+  router.get('/:filingId/evidence', async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const result = await db.query<{
+        evidence_bundles: Array<{
+          id: string;
+          storageKey: string;
+          createdAt: string;
+          checksum: string;
+          contentLength: number;
+        }> | null;
+      }>(
+        `SELECT filing_data -> 'evidenceBundles' as evidence_bundles
+           FROM filings
+          WHERE id = $1 AND tenant_id = $2`,
+        [req.params.filingId, req.user.tenantId]
+      );
+      const bundles = (result.rows[0]?.evidence_bundles as Array<Record<string, unknown>> | undefined) || [];
+      res.json({ bundles });
+    } catch (error) {
+      logger.error('List evidence bundles failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to fetch evidence bundles' });
+    }
+  });
+
+  router.get('/:filingId/evidence/:bundleId/download', async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const result = await db.query<{
+        evidence_bundles: Array<{
+          id: string;
+          storageKey: string;
+        }> | null;
+      }>(
+        `SELECT filing_data -> 'evidenceBundles' as evidence_bundles
+           FROM filings
+          WHERE id = $1 AND tenant_id = $2`,
+        [req.params.filingId, req.user.tenantId]
+      );
+
+      const bundles = (result.rows[0]?.evidence_bundles as Array<{ id: string; storageKey: string }> | undefined) || [];
+      const bundle = bundles.find(b => b.id === req.params.bundleId);
+      if (!bundle) {
+        res.status(404).json({ error: 'Bundle not found' });
+        return;
+      }
+      const url = getEvidenceDownloadUrl(bundle.storageKey);
+      res.json({ downloadUrl: url });
+    } catch (error) {
+      logger.error('Evidence download link failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to generate download link' });
+    }
+  });
+
+  router.get('/:filingId/client-summary', async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const summary = await generateClientSummary(req.params.filingId, req.user.tenantId);
+      res.json({ summary });
+    } catch (error) {
+      logger.error('Generate client summary failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to build client summary' });
+    }
+  });
+
+  router.put('/:filingId/notifications', async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+      const { preferences } = req.body;
+      await db.query(
+        `UPDATE filings
+            SET filing_data = jsonb_set(
+                  COALESCE(filing_data, '{}'::jsonb),
+                  '{notificationPreferences}',
+                  $3::jsonb,
+                  true
+                ),
+                updated_at = NOW()
+          WHERE id = $1 AND tenant_id = $2`,
+        [req.params.filingId, req.user.tenantId, JSON.stringify(preferences || {})]
+      );
+      res.json({ message: 'Notification preferences updated' });
+    } catch (error) {
+      logger.error('Update filing notifications failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to update notification preferences' });
+    }
+  });
+
 // Get filing audit trail (Chunk 2)
 router.get('/:filingId/audit-trail', async (req: AuthRequest, res: Response) => {
   try {
@@ -411,7 +557,14 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
         throw new ValidationError('Validation checks failed. Please resolve issues before submission.');
       }
 
-    const filingData = filing.filing_data as unknown as VATReturnPayload;
+      const readinessSnapshot =
+        (await filingReadinessService.getReadiness(filingId)) ||
+        (await filingReadinessService.calculateReadiness(filingId, req.user.tenantId));
+      if ((readinessSnapshot?.overall ?? 0) < 90) {
+        throw new ValidationError('Readiness score must be at least 90% before submission');
+      }
+
+      const filingData = filing.filing_data as unknown as VATReturnPayload;
 
     const amendmentDraft = await getDraftAmendmentSubmission(
       req.user.tenantId,
