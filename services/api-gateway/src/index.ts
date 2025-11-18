@@ -41,8 +41,8 @@ const BACKUP_SERVICE = process.env.BACKUP_SERVICE_URL || 'http://localhost:3023'
 const ERROR_HANDLING_SERVICE = process.env.ERROR_HANDLING_SERVICE_URL || 'http://localhost:3024';
 
 // Security middleware
-app.use(tracingMiddleware('api-gateway'));
-app.use(metricsMiddleware('api-gateway'));
+app.use(tracingMiddleware);
+app.use(metricsMiddleware);
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
@@ -102,6 +102,8 @@ app.use('/api/analytics', createServiceProxy(ANALYTICS_SERVICE, { '^/api/analyti
 app.use('/api/automation', createServiceProxy(AUTOMATION_SERVICE, { '^/api/automation': '/api/automation' }));
 app.use('/api/integrations', createServiceProxy(INTEGRATIONS_SERVICE, { '^/api/integrations': '/api/integrations' }));
 app.use('/api/bank-feed', createServiceProxy(BANK_FEED_SERVICE, { '^/api/bank-feed': '/api/bank-feed' }));
+app.use('/api/classification', createServiceProxy(CLASSIFICATION_SERVICE, { '^/api/classification': '/api/classification' }));
+app.use('/api/ocr', createServiceProxy(OCR_SERVICE, { '^/api/ocr': '/api/ocr' }));
 app.use('/api/validation', createServiceProxy(VALIDATION_SERVICE, { '^/api/validation': '/api/validation' }));
 app.use('/api/support', createServiceProxy(SUPPORT_SERVICE, { '^/api/support': '/api/support' }));
 app.use('/api/onboarding', createServiceProxy(ONBOARDING_SERVICE, { '^/api/onboarding': '/api/onboarding' }));
@@ -139,6 +141,8 @@ app.listen(PORT, () => {
     automation: AUTOMATION_SERVICE,
     integrations: INTEGRATIONS_SERVICE,
     bankFeed: BANK_FEED_SERVICE,
+    classification: CLASSIFICATION_SERVICE,
+    ocr: OCR_SERVICE,
     validation: VALIDATION_SERVICE,
     support: SUPPORT_SERVICE,
     onboarding: ONBOARDING_SERVICE,

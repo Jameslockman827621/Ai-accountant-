@@ -140,11 +140,12 @@ export class ErrorRecoveryEngine {
       [retryId]
     );
 
-    if (result.rows.length === 0) {
+    const row = result.rows[0];
+    if (!row) {
       throw new Error('Retry not found');
     }
 
-    const { retry_count, max_retries } = result.rows[0];
+    const { retry_count, max_retries } = row;
     const newRetryCount = retry_count + 1;
 
     if (newRetryCount >= max_retries) {
@@ -187,6 +188,17 @@ export class ErrorRecoveryEngine {
     );
 
     logger.info('Retry cancelled', { retryId });
+  }
+
+  async markFailed(retryId: string): Promise<void> {
+    await db.query(
+      `UPDATE error_retries
+       SET status = 'failed', updated_at = NOW()
+       WHERE id = $1`,
+      [retryId]
+    );
+
+    logger.warn('Retry marked as failed', { retryId });
   }
 
   /**

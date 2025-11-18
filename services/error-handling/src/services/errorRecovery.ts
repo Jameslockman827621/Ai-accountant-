@@ -94,11 +94,11 @@ export async function retryError(errorId: string, tenantId: TenantId): Promise<b
     [errorId, tenantId]
   );
 
-  if (error.rows.length === 0) {
+  const errorData = error.rows[0];
+
+  if (!errorData) {
     throw new Error('Error record not found');
   }
-
-  const errorData = error.rows[0];
 
   if (!errorData.retryable) {
     throw new Error('Error is not retryable');

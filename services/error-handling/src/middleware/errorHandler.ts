@@ -4,12 +4,7 @@ import { ValidationError } from '@ai-accountant/shared-utils';
 
 const logger = createLogger('error-handling-service');
 
-export function errorHandler(
-  err: Error,
-  req: Request,
-  res: Response,
-  next: NextFunction
-): void {
+export function errorHandler(err: Error, _req: Request, res: Response, _next: NextFunction): void {
   logger.error('Request error', err);
 
   if (err instanceof ValidationError) {

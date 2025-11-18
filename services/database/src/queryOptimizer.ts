@@ -7,6 +7,34 @@ import { db } from './index';
 
 const logger = createLogger('query-optimizer');
 
+function normalizeError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  if (typeof error === 'string') {
+    return new Error(error);
+  }
+
+  try {
+    return new Error(JSON.stringify(error));
+  } catch {
+    return new Error(String(error));
+  }
+}
+
+function errorMetadata(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return { error };
+}
+
 export interface QueryPlan {
   query: string;
   executionTime: number;
@@ -43,17 +71,24 @@ export async function analyzeQuery(query: string, params?: unknown[]): Promise<Q
     // Execute actual query to get row counts
     const result = await db.query(query, params);
 
-    return {
+    const indexUsed = extractIndexUsed(planText);
+    const plan: QueryPlan = {
       query,
       executionTime,
       rowsExamined: estimateRowsExamined(planText),
       rowsReturned: result.rowCount || 0,
-      indexUsed: extractIndexUsed(planText),
       recommendations,
     };
+
+    if (indexUsed) {
+      plan.indexUsed = indexUsed;
+    }
+
+    return plan;
   } catch (error) {
-    logger.error('Query analysis failed', error);
-    throw error;
+    const normalizedError = normalizeError(error);
+    logger.error('Query analysis failed', normalizedError);
+    throw normalizedError;
   }
 }
 
@@ -90,7 +125,7 @@ export async function getIndexRecommendations(
 
     return recommendations;
   } catch (error) {
-    logger.warn('pg_stat_statements not available', error);
+    logger.warn('pg_stat_statements not available', errorMetadata(error));
     return [];
   }
 }
@@ -106,13 +141,11 @@ export async function createRecommendedIndexes(
       const indexName = `idx_${rec.table}_${rec.columns.join('_')}`;
       const columns = rec.columns.join(', ');
 
-      await db.query(
-        `CREATE INDEX IF NOT EXISTS ${indexName} ON ${rec.table} USING ${rec.type} (${columns})`
-      );
+      await db.query(`CREATE INDEX IF NOT EXISTS ${indexName} ON ${rec.table} USING ${rec.type} (${columns})`);
 
       logger.info('Index created', { indexName, table: rec.table });
     } catch (error) {
-      logger.error('Failed to create index', error, { recommendation: rec });
+      logger.error('Failed to create index', normalizeError(error), { recommendation: rec });
     }
   }
 }
@@ -125,7 +158,7 @@ export async function optimizeTable(tableName: string): Promise<void> {
     await db.query(`VACUUM ANALYZE ${tableName}`);
     logger.info('Table optimized', { table: tableName });
   } catch (error) {
-    logger.error('Failed to optimize table', error, { table: tableName });
+    logger.error('Failed to optimize table', normalizeError(error), { table: tableName });
   }
 }
 
@@ -154,15 +187,17 @@ export async function getTableStats(tableName: string): Promise<{
     [tableName]
   );
 
-  if (result.rows.length === 0) {
+  const stats = result.rows[0];
+
+  if (!stats) {
     throw new Error(`Table ${tableName} not found`);
   }
 
   return {
-    rowCount: parseInt(result.rows[0].row_count, 10),
-    tableSize: result.rows[0].table_size,
-    indexSize: result.rows[0].index_size,
-    totalSize: result.rows[0].total_size,
+    rowCount: parseInt(stats.row_count, 10),
+    tableSize: stats.table_size,
+    indexSize: stats.index_size,
+    totalSize: stats.total_size,
   };
 }
 
@@ -176,8 +211,9 @@ function parsePlanForRecommendations(planText: string): string[] {
 
   // Check for high cost
   const costMatch = planText.match(/cost=(\d+\.\d+)\.\.(\d+\.\d+)/);
-  if (costMatch) {
-    const maxCost = parseFloat(costMatch[2]);
+  const maxCostText = costMatch?.[2];
+  if (maxCostText) {
+    const maxCost = parseFloat(maxCostText);
     if (maxCost > 1000) {
       recommendations.push(`High query cost (${maxCost.toFixed(2)}). Consider optimization.`);
     }
@@ -192,11 +228,12 @@ function parsePlanForRecommendations(planText: string): string[] {
 }
 
 function estimateRowsExamined(planText: string): number {
-  const rowsMatch = planText.match(/rows=(\d+)/);
-  if (rowsMatch) {
-    return parseInt(rowsMatch[1], 10);
+  const rowsValue = planText.match(/rows=(\d+)/)?.[1];
+  if (!rowsValue) {
+    return 0;
   }
-  return 0;
+
+  return parseInt(rowsValue, 10);
 }
 
 function extractIndexUsed(planText: string): string | undefined {
@@ -209,16 +246,17 @@ function analyzeQueryForIndexes(query: string): IndexRecommendation[] {
 
   // Simple heuristic: look for WHERE clauses
   const whereMatch = query.match(/WHERE\s+(\w+)\s*[=<>]/i);
-  if (whereMatch) {
-    const tableMatch = query.match(/FROM\s+(\w+)/i);
-    if (tableMatch) {
-      recommendations.push({
-        table: tableMatch[1],
-        columns: [whereMatch[1]],
-        type: 'btree',
-        reason: 'Frequently filtered column',
-      });
-    }
+  const tableMatch = query.match(/FROM\s+(\w+)/i);
+  const column = whereMatch?.[1];
+  const table = tableMatch?.[1];
+
+  if (column && table) {
+    recommendations.push({
+      table,
+      columns: [column],
+      type: 'btree',
+      reason: 'Frequently filtered column',
+    });
   }
 
   return recommendations;

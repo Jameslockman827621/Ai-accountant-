@@ -451,7 +451,7 @@ function getStepsForJurisdiction(
     {
       stepName: 'complete',
       title: 'All Set',
-      description: 'Review what's ready and head to the dashboard.',
+      description: "Review what's ready and head to the dashboard.",
       enabled: true,
       required: true,
       fields: [],

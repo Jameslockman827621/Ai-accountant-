@@ -53,7 +53,11 @@ describe('ErrorRecoveryEngine', () => {
     );
 
     expect(retries.length).toBe(1);
-    expect(retries[0].status).toBe('pending');
+    const firstRetry = retries[0];
+    if (!firstRetry) {
+      throw new Error('Expected retry record to exist');
+    }
+    expect(firstRetry.status).toBe('pending');
   });
 
   it('should get pending retries', async () => {
@@ -89,6 +93,10 @@ describe('ErrorRecoveryEngine', () => {
       'doc-123'
     );
 
-    expect(retries[0].status).toBe('succeeded');
+    const firstRetry = retries[0];
+    if (!firstRetry) {
+      throw new Error('Expected retry record to exist');
+    }
+    expect(firstRetry.status).toBe('succeeded');
   });
 });

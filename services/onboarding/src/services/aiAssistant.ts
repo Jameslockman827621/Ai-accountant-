@@ -1,7 +1,4 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-
-const logger = createLogger('ai-assistant-service');
 
 export interface QuestionnaireResponse {
   question: string;
@@ -23,7 +20,7 @@ export class AIAssistantService {
   async clarifyQuestion(
     question: string,
     answer: string,
-    context?: Record<string, unknown>
+    _context?: Record<string, unknown>
   ): Promise<{
     isAmbiguous: boolean;
     clarificationQuestions?: string[];
@@ -52,7 +49,7 @@ export class AIAssistantService {
   }
 
   async summarizeIntent(
-    tenantId: TenantId,
+    _tenantId: TenantId,
     questionnaireResponses: QuestionnaireResponse[],
     uploadedDocuments?: Array<{ type: string; content: string }>
   ): Promise<IntentSummary> {
@@ -82,7 +79,7 @@ export class AIAssistantService {
   }
 
   async assessRiskScore(
-    tenantId: TenantId,
+    _tenantId: TenantId,
     intentProfile: Record<string, unknown>
   ): Promise<{
     score: number;
@@ -156,7 +153,7 @@ export class AIAssistantService {
     return 0.9;
   }
 
-  private generateClarificationQuestions(question: string, answer: string): string[] {
+  private generateClarificationQuestions(_question: string, answer: string): string[] {
     const questions: string[] = [];
 
     if (answer.toLowerCase().includes('maybe') || answer.toLowerCase().includes('not sure')) {
@@ -173,7 +170,7 @@ export class AIAssistantService {
 
   private generateSummary(
     responses: QuestionnaireResponse[],
-    documents?: Array<{ type: string; content: string }>
+    _documents?: Array<{ type: string; content: string }>
   ): string {
     const businessInfo = responses
       .filter(r => r.question.includes('business'))

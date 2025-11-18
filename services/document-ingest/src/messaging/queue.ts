@@ -1,7 +1,7 @@
 import amqp from 'amqplib';
 import { randomUUID } from 'crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { ProcessingQueues, ProcessingQueueConfig, ProcessingQueueName } from '@ai-accountant/shared-types';
+import { ProcessingQueues, ProcessingQueueConfig } from '@ai-accountant/shared-types';
 import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
 
 const logger = createLogger('document-ingest-service');
@@ -13,11 +13,10 @@ const OCR_QUEUE = ProcessingQueues.OCR.primary;
 const CLASSIFICATION_QUEUE = ProcessingQueues.CLASSIFICATION.primary;
 const LEDGER_QUEUE = ProcessingQueues.LEDGER.primary;
 
-type QueueBinding = (typeof ProcessingQueues)[ProcessingQueueName];
-const QUEUE_BINDINGS: QueueBinding[] = Object.values(ProcessingQueues) as ProcessingQueueConfig[];
+const QUEUE_BINDINGS: ProcessingQueueConfig[] = Object.values(ProcessingQueues);
 type JobPayload = Record<string, unknown> & { documentId?: string };
 
-let connection: amqp.Connection | null = null;
+let connection: amqp.ChannelModel | null = null;
 let channel: amqp.Channel | null = null;
 let connectingPromise: Promise<void> | null = null;
 
@@ -31,7 +30,7 @@ export interface PublishMetadata {
 
 async function assertProcessingQueue(
   ch: amqp.Channel,
-  config: QueueBinding,
+  config: ProcessingQueueConfig,
   retryDelayMs: number
 ): Promise<void> {
   await ch.assertQueue(config.dlq, { durable: true });

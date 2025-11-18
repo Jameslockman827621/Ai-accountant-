@@ -1,5 +1,5 @@
 import { createLogger } from '@ai-accountant/shared-utils';
-import { errorRecoveryEngine } from '../services/errorRecoveryEngine';
+import { errorRecoveryEngine, RetryableOperation } from '../services/errorRecoveryEngine';
 import { db } from '@ai-accountant/database';
 
 const logger = createLogger('error-recovery-worker');
@@ -47,7 +47,7 @@ async function executeRetry(retry: {
   id: string;
   tenantId: string;
   userId: string;
-  operationType: string;
+  operationType: RetryableOperation['operationType'];
   operationId: string;
   metadata?: Record<string, unknown>;
 }): Promise<void> {
@@ -67,9 +67,20 @@ async function executeRetry(retry: {
       case 'document_processing': {
         // Retry document processing by republishing to OCR queue
         const { publishOCRJob } = await import('@ai-accountant/document-ingest-service/messaging/queue');
-        await publishOCRJob(retry.operationId, retry.metadata?.storageKey as string, {
-          retry: true,
-          retryId: retry.id,
+        const storageKey =
+          typeof retry.metadata?.storageKey === 'string' ? retry.metadata.storageKey : undefined;
+
+        if (!storageKey) {
+          logger.warn('Missing storage key for document retry', { retryId: retry.id });
+          break;
+        }
+
+        await publishOCRJob(retry.operationId, storageKey, {
+          source: 'error-recovery.retry',
+          headers: {
+            'x-retry': 'true',
+            'x-retry-id': retry.id,
+          },
         });
         success = true;
         break;
@@ -98,7 +109,6 @@ async function executeRetry(retry: {
         );
 
         if (filingResult.rows.length > 0) {
-          const filing = filingResult.rows[0];
           // In production, would resubmit to HMRC
           logger.info('Filing submission retry', { filingId: retry.operationId });
           success = true;
@@ -130,7 +140,7 @@ async function executeRetry(retry: {
         await errorRecoveryEngine.scheduleRetry(
           retry.tenantId,
           retry.userId,
-          retry.operationType as any,
+          retry.operationType,
           retry.operationId,
           'Retry execution failed',
           retry.metadata
@@ -143,18 +153,23 @@ async function executeRetry(retry: {
     }
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
-    logger.error('Error retry failed', {
-      retryId: retry.id,
-      operationType: retry.operationType,
-      error: errorMessage,
-    });
+    const normalizedError = error instanceof Error ? error : new Error(errorMessage);
+    logger.error(
+      'Error retry failed',
+      normalizedError,
+      {
+        retryId: retry.id,
+        operationType: retry.operationType,
+        error: errorMessage,
+      }
+    );
 
     // Schedule another retry if not at max
     try {
       await errorRecoveryEngine.scheduleRetry(
         retry.tenantId,
         retry.userId,
-        retry.operationType as any,
+        retry.operationType,
         retry.operationId,
         errorMessage,
         retry.metadata
