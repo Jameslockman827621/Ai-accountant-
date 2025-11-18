@@ -1,9 +1,6 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
 import { filingLifecycleService } from '../../../filing/src/services/filingLifecycle';
-
-const logger = createLogger('compliance-calendar');
 
 export interface ComplianceObligation {
   id: string;
@@ -36,6 +33,57 @@ export interface ReadinessScore {
     unhealthyConnectors: string[];
     pendingTasks: number;
   };
+}
+
+type CalendarRow = {
+  id: string;
+  obligation_type: string;
+  jurisdiction: string;
+  filing_type: string | null;
+  due_date: string;
+  period_start: string | null;
+  period_end: string | null;
+  status: string;
+  filing_id: string | null;
+  readiness_score: number | null;
+  readiness_details: unknown;
+};
+
+const defaultReadinessDetails: ComplianceObligation['readinessDetails'] = {
+  dataCompleteness: 0,
+  reconciliationStatus: 'unknown',
+  connectorHealth: {},
+  outstandingTasks: [],
+};
+
+function mapCalendarRowToObligation(row: CalendarRow): ComplianceObligation {
+  const readinessDetails =
+    (row.readiness_details as ComplianceObligation['readinessDetails']) ?? defaultReadinessDetails;
+
+  const obligation: ComplianceObligation = {
+    id: row.id,
+    obligationType: row.obligation_type as ComplianceObligation['obligationType'],
+    jurisdiction: row.jurisdiction,
+    dueDate: row.due_date,
+    status: row.status as ComplianceObligation['status'],
+    readinessScore: row.readiness_score ?? 0,
+    readinessDetails,
+  };
+
+  if (row.filing_type) {
+    obligation.filingType = row.filing_type;
+  }
+  if (row.period_start) {
+    obligation.periodStart = row.period_start;
+  }
+  if (row.period_end) {
+    obligation.periodEnd = row.period_end;
+  }
+  if (row.filing_id) {
+    obligation.filingId = row.filing_id;
+  }
+
+  return obligation;
 }
 
 export class ComplianceCalendarService {
@@ -73,7 +121,7 @@ export class ComplianceCalendarService {
       let calendarId: string;
       let filingId: string | null = null;
 
-      if (existingResult.rows.length > 0) {
+      if (existingResult.rows.length > 0 && existingResult.rows[0]) {
         calendarId = existingResult.rows[0].id;
         filingId = existingResult.rows[0].filing_id;
       } else {
@@ -101,7 +149,11 @@ export class ComplianceCalendarService {
             JSON.stringify(readiness.details),
           ]
         );
-        calendarId = insertResult.rows[0].id;
+        const insertedRow = insertResult.rows[0];
+        if (!insertedRow) {
+          continue;
+        }
+        calendarId = insertedRow.id;
       }
 
       // Get full entry
@@ -127,24 +179,10 @@ export class ComplianceCalendarService {
       );
 
       const entry = entryResult.rows[0];
-      calendarEntries.push({
-        id: entry.id,
-        obligationType: entry.obligation_type as 'filing' | 'payment' | 'deadline',
-        jurisdiction: entry.jurisdiction,
-        filingType: entry.filing_type || undefined,
-        dueDate: entry.due_date,
-        periodStart: entry.period_start || undefined,
-        periodEnd: entry.period_end || undefined,
-        status: entry.status as ComplianceObligation['status'],
-        filingId: entry.filing_id || undefined,
-        readinessScore: entry.readiness_score || 0,
-        readinessDetails: (entry.readiness_details as ComplianceObligation['readinessDetails']) || {
-          dataCompleteness: 0,
-          reconciliationStatus: 'unknown',
-          connectorHealth: {},
-          outstandingTasks: [],
-        },
-      });
+      if (!entry) {
+        continue;
+      }
+      calendarEntries.push(mapCalendarRowToObligation(entry));
     }
 
     return calendarEntries;
@@ -165,11 +203,7 @@ export class ComplianceCalendarService {
     };
 
     // Check data completeness
-    const dataCompleteness = await this.checkDataCompleteness(
-      tenantId,
-      obligation,
-      details
-    );
+    const dataCompleteness = await this.checkDataCompleteness(tenantId, obligation, details);
 
     // Check reconciliation status
     const reconciliationStatus = await this.checkReconciliationStatus(
@@ -187,9 +221,9 @@ export class ComplianceCalendarService {
     // Calculate overall score (weighted average)
     const overall = Math.round(
       dataCompleteness * 0.4 +
-      reconciliationStatus * 0.3 +
-      connectorHealth * 0.2 +
-      taskCompletion * 0.1
+        reconciliationStatus * 0.3 +
+        connectorHealth * 0.2 +
+        taskCompletion * 0.1
     );
 
     return {
@@ -271,24 +305,7 @@ export class ComplianceCalendarService {
       [tenantId]
     );
 
-    return result.rows.map(entry => ({
-      id: entry.id,
-      obligationType: entry.obligation_type as 'filing' | 'payment' | 'deadline',
-      jurisdiction: entry.jurisdiction,
-      filingType: entry.filing_type || undefined,
-      dueDate: entry.due_date,
-      periodStart: entry.period_start || undefined,
-      periodEnd: entry.period_end || undefined,
-      status: entry.status as ComplianceObligation['status'],
-      filingId: entry.filing_id || undefined,
-      readinessScore: entry.readiness_score || 0,
-      readinessDetails: (entry.readiness_details as ComplianceObligation['readinessDetails']) || {
-        dataCompleteness: 0,
-        reconciliationStatus: 'unknown',
-        connectorHealth: {},
-        outstandingTasks: [],
-      },
-    }));
+    return result.rows.map((entry) => mapCalendarRowToObligation(entry));
   }
 
   private async checkDataCompleteness(
@@ -407,7 +424,7 @@ export class ComplianceCalendarService {
     details.pendingTasks = pending;
 
     // Score: 100 if no tasks, decreases with more tasks
-    return Math.max(0, 100 - (pending * 10));
+    return Math.max(0, 100 - pending * 10);
   }
 }
 

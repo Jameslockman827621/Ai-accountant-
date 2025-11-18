@@ -131,6 +131,7 @@ export interface TaxCredit {
   phaseoutStart: number;
   phaseoutEnd: number;
   eligibilityCriteria: string[];
+  notes?: string;
 }
 
 export const TAX_CREDITS: TaxCredit[] = [

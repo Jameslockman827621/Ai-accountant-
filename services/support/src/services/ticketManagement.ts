@@ -130,7 +130,6 @@ export async function getTickets(
         status: row.status as SupportTicket['status'],
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        resolvedAt: row.resolved_at || undefined,
         messages: messagesResult.rows.map(msg => ({
           id: msg.id,
           userId: msg.user_id as UserId,
@@ -139,6 +138,10 @@ export async function getTickets(
           createdAt: msg.created_at,
         })),
       };
+
+      if (row.resolved_at) {
+        ticket.resolvedAt = row.resolved_at;
+      }
 
       if (row.assigned_to) {
         ticket.assignedTo = row.assigned_to as UserId;

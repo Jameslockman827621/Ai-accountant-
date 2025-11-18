@@ -96,14 +96,26 @@ export class HMRCAdapter {
     // const result = await response.json();
     // return result.processingDate;
 
-    logger.info('Submitting HMRC VAT return', { tenantId, periodKey, sandboxMode: this.sandboxMode });
+    logger.info('Submitting HMRC VAT return', {
+      tenantId,
+      periodKey,
+      sandboxMode: this.sandboxMode,
+      summary: {
+        netVatDue: vatReturn.netVatDue,
+        totalValueSalesExVAT: vatReturn.totalValueSalesExVAT,
+        totalValuePurchasesExVAT: vatReturn.totalValuePurchasesExVAT,
+      },
+    });
     return `HMRC-${Date.now()}`;
   }
 
   /**
    * Get submission status
    */
-  async getSubmissionStatus(tenantId: TenantId, submissionReference: string): Promise<{
+  async getSubmissionStatus(
+    tenantId: TenantId,
+    submissionReference: string
+  ): Promise<{
     status: string;
     processingDate?: string;
     paymentIndicator?: string;

@@ -1,5 +1,6 @@
 import {
   TaxFilingSchema,
+  TaxNexusThreshold,
   TaxRegressionCase,
   TaxRule,
 } from '@ai-accountant/shared-types';
@@ -17,7 +18,7 @@ function createStateRulepack(
   hasLocalTax: boolean,
   filingSchemas: TaxFilingSchema[],
   regressionTests: TaxRegressionCase[],
-  nexusThresholds: Array<{ type: 'revenue' | 'transactions'; amount?: number; transactions?: number; currency?: string; period?: string; description?: string }>
+  nexusThresholds: TaxNexusThreshold[]
 ): InstallableTaxRulepack {
   const isProgressive = Array.isArray(incomeBrackets) || (incomeBrackets && typeof incomeBrackets === 'object' && !Array.isArray(incomeBrackets));
   

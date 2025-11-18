@@ -4,7 +4,7 @@ import { convertCurrency, getExchangeRate } from './fxConversion';
 
 const logger = createLogger('multi-currency-ledger');
 
-export interface MultiCurrencyEntry {
+export interface MultiCurrencyEntry extends Record<string, unknown> {
   id: string;
   accountId: string;
   amount: number;
@@ -53,7 +53,7 @@ export async function createMultiCurrencyEntry(
     exchangeRate: rate.rate,
     baseAmount,
     transactionDate,
-    description,
+    ...(description ? { description } : {}),
   };
 
   // Store in database
@@ -61,17 +61,17 @@ export async function createMultiCurrencyEntry(
     `INSERT INTO multi_currency_entries 
      (id, account_id, amount, currency, base_currency, exchange_rate, base_amount, transaction_date, description)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [
-      entry.id,
-      entry.accountId,
-      entry.amount,
-      entry.currency,
-      entry.baseCurrency,
-      entry.exchangeRate,
-      entry.baseAmount,
-      entry.transactionDate,
-      entry.description,
-    ]
+      [
+        entry.id,
+        entry.accountId,
+        entry.amount,
+        entry.currency,
+        entry.baseCurrency,
+        entry.exchangeRate,
+        entry.baseAmount,
+        entry.transactionDate,
+        entry.description ?? null,
+      ]
   );
 
   return entry;

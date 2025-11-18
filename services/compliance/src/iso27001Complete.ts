@@ -1,4 +1,3 @@
-import { iso27001Controls } from './iso27001';
 import { createLogger } from '@ai-accountant/shared-utils';
 
 const logger = createLogger('compliance-service');

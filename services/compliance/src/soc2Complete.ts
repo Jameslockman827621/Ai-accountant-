@@ -1,4 +1,3 @@
-import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { soc2Controls } from './soc2';
 

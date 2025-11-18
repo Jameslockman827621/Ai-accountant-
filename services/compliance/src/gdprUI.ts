@@ -12,6 +12,7 @@ export class GDPRConsentUI {
     dataSharing: boolean;
     lastUpdated: Date | null;
   }> {
+    logger.info('Fetching consent status', { userId });
     // In production, fetch from database
     return {
       marketing: true,

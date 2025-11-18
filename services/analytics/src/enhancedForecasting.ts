@@ -2,10 +2,7 @@
  * Enhanced Forecasting with Machine Learning
  */
 
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
-
-const logger = createLogger('enhanced-forecasting');
 
 export interface ForecastInput {
   tenantId: string;
@@ -123,7 +120,7 @@ export class EnhancedForecaster {
     const x = Array.from({ length: n }, (_, i) => i);
     const sumX = x.reduce((a, b) => a + b, 0);
     const sumY = data.reduce((a, b) => a + b, 0);
-    const sumXY = x.reduce((sum, xi, i) => sum + xi * data[i], 0);
+    const sumXY = x.reduce((sum, xi, i) => sum + xi * (data[i] ?? 0), 0);
     const sumX2 = x.reduce((sum, xi) => sum + xi * xi, 0);
 
     const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
@@ -154,10 +151,11 @@ export class EnhancedForecaster {
   ): ForecastResult['periods'] {
     // Simple exponential smoothing
     const alpha = 0.3; // Smoothing factor
-    let forecastValue = data[0];
+    let forecastValue = data[0] ?? 0;
 
     for (let i = 1; i < data.length; i++) {
-      forecastValue = alpha * data[i] + (1 - alpha) * forecastValue;
+      const point = data[i] ?? forecastValue;
+      forecastValue = alpha * point + (1 - alpha) * forecastValue;
     }
 
     const forecast: ForecastResult['periods'] = [];

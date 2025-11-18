@@ -157,14 +157,19 @@ export class BenchmarkingService {
         recommendation = this.generateRecommendation(metric, userValue, benchmark.value);
       }
 
-      comparisons.push({
+      const comparison: BenchmarkComparison = {
         metric,
         userValue,
         industryAverage: benchmark.value,
         percentile,
         performance,
-        recommendation,
-      });
+      };
+
+      if (recommendation) {
+        comparison.recommendation = recommendation;
+      }
+
+      comparisons.push(comparison);
     }
 
     return comparisons;

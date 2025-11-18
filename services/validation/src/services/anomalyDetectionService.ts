@@ -67,7 +67,6 @@ export async function detectAnomaliesML(
 
   const avgAmount = parseFloat(String(baseline.avg_amount || 0));
   const stddevAmount = parseFloat(String(baseline.stddev_amount || 0));
-  const threshold = avgAmount + (3 * stddevAmount); // 3-sigma rule
 
   // Detect amount anomalies (outliers)
   const outlierResult = await db.query<{

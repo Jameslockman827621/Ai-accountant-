@@ -96,25 +96,56 @@ export class AccessReviewService {
     }
 
     const row = result.rows[0];
-    return {
+    if (!row) {
+      throw new Error(`Access review not found: ${id}`);
+    }
+
+    const review: AccessReview = {
       id: row.id,
       reviewType: row.review_type as AccessReview['reviewType'],
-      tenantId: row.tenant_id as TenantId | undefined,
-      userId: row.user_id as UserId | undefined,
-      resourceType: row.resource_type || undefined,
-      resourceId: row.resource_id || undefined,
       reviewedBy: row.reviewed_by as UserId,
       reviewedAt: row.reviewed_at,
       reviewStatus: row.review_status as AccessReview['reviewStatus'],
-      currentPermissions: row.current_permissions as Record<string, unknown> | undefined,
-      recommendedChanges: row.recommended_changes as Record<string, unknown> | undefined,
-      justification: row.justification || undefined,
-      reviewNotes: row.review_notes || undefined,
-      actionTaken: row.action_taken || undefined,
-      actionTakenAt: row.action_taken_at || undefined,
-      actionTakenBy: row.action_taken_by as UserId | undefined,
-      metadata: row.metadata as Record<string, unknown> | undefined,
     };
+
+    if (row.tenant_id) {
+      review.tenantId = row.tenant_id as TenantId;
+    }
+    if (row.user_id) {
+      review.userId = row.user_id as UserId;
+    }
+    if (row.resource_type) {
+      review.resourceType = row.resource_type;
+    }
+    if (row.resource_id) {
+      review.resourceId = row.resource_id;
+    }
+    if (row.current_permissions) {
+      review.currentPermissions = row.current_permissions as Record<string, unknown>;
+    }
+    if (row.recommended_changes) {
+      review.recommendedChanges = row.recommended_changes as Record<string, unknown>;
+    }
+    if (row.justification) {
+      review.justification = row.justification;
+    }
+    if (row.review_notes) {
+      review.reviewNotes = row.review_notes;
+    }
+    if (row.action_taken) {
+      review.actionTaken = row.action_taken;
+    }
+    if (row.action_taken_at) {
+      review.actionTakenAt = row.action_taken_at;
+    }
+    if (row.action_taken_by) {
+      review.actionTakenBy = row.action_taken_by as UserId;
+    }
+    if (row.metadata) {
+      review.metadata = row.metadata as Record<string, unknown>;
+    }
+
+    return review;
   }
 
   async updateReviewStatus(
@@ -145,20 +176,25 @@ export class AccessReviewService {
     }
 
     params.push(id);
-    await db.query(`UPDATE access_reviews SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
+    await db.query(
+      `UPDATE access_reviews SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
+      params
+    );
 
     logger.info('Access review status updated', { id, reviewStatus });
     return this.getReview(id);
   }
 
-  async getReviews(filters: {
-    tenantId?: TenantId;
-    userId?: UserId;
-    reviewType?: AccessReview['reviewType'];
-    reviewStatus?: AccessReview['reviewStatus'];
-    limit?: number;
-    offset?: number;
-  } = {}): Promise<{ reviews: AccessReview[]; total: number }> {
+  async getReviews(
+    filters: {
+      tenantId?: TenantId;
+      userId?: UserId;
+      reviewType?: AccessReview['reviewType'];
+      reviewStatus?: AccessReview['reviewStatus'];
+      limit?: number;
+      offset?: number;
+    } = {}
+  ): Promise<{ reviews: AccessReview[]; total: number }> {
     let query = 'SELECT * FROM access_reviews WHERE 1=1';
     const params: unknown[] = [];
     let paramIndex = 1;
@@ -183,7 +219,8 @@ export class AccessReviewService {
     // Count total
     const countQuery = query.replace('SELECT *', 'SELECT COUNT(*)');
     const countResult = await db.query<{ count: string }>(countQuery, params);
-    const total = parseInt(countResult.rows[0].count, 10);
+    const totalRow = countResult.rows[0];
+    const total = totalRow ? parseInt(totalRow.count, 10) : 0;
 
     query += ' ORDER BY reviewed_at DESC';
     if (filters.limit) {
@@ -216,25 +253,56 @@ export class AccessReviewService {
     }>(query, params);
 
     return {
-      reviews: result.rows.map((row) => ({
-        id: row.id,
-        reviewType: row.review_type as AccessReview['reviewType'],
-        tenantId: row.tenant_id as TenantId | undefined,
-        userId: row.user_id as UserId | undefined,
-        resourceType: row.resource_type || undefined,
-        resourceId: row.resource_id || undefined,
-        reviewedBy: row.reviewed_by as UserId,
-        reviewedAt: row.reviewed_at,
-        reviewStatus: row.review_status as AccessReview['reviewStatus'],
-        currentPermissions: row.current_permissions as Record<string, unknown> | undefined,
-        recommendedChanges: row.recommended_changes as Record<string, unknown> | undefined,
-        justification: row.justification || undefined,
-        reviewNotes: row.review_notes || undefined,
-        actionTaken: row.action_taken || undefined,
-        actionTakenAt: row.action_taken_at || undefined,
-        actionTakenBy: row.action_taken_by as UserId | undefined,
-        metadata: row.metadata as Record<string, unknown> | undefined,
-      })),
+      reviews: result.rows
+        .filter((row): row is NonNullable<typeof row> => Boolean(row))
+        .map((row) => {
+          const review: AccessReview = {
+            id: row.id,
+            reviewType: row.review_type as AccessReview['reviewType'],
+            reviewedBy: row.reviewed_by as UserId,
+            reviewedAt: row.reviewed_at,
+            reviewStatus: row.review_status as AccessReview['reviewStatus'],
+          };
+
+          if (row.tenant_id) {
+            review.tenantId = row.tenant_id as TenantId;
+          }
+          if (row.user_id) {
+            review.userId = row.user_id as UserId;
+          }
+          if (row.resource_type) {
+            review.resourceType = row.resource_type;
+          }
+          if (row.resource_id) {
+            review.resourceId = row.resource_id;
+          }
+          if (row.current_permissions) {
+            review.currentPermissions = row.current_permissions as Record<string, unknown>;
+          }
+          if (row.recommended_changes) {
+            review.recommendedChanges = row.recommended_changes as Record<string, unknown>;
+          }
+          if (row.justification) {
+            review.justification = row.justification;
+          }
+          if (row.review_notes) {
+            review.reviewNotes = row.review_notes;
+          }
+          if (row.action_taken) {
+            review.actionTaken = row.action_taken;
+          }
+          if (row.action_taken_at) {
+            review.actionTakenAt = row.action_taken_at;
+          }
+          if (row.action_taken_by) {
+            review.actionTakenBy = row.action_taken_by as UserId;
+          }
+          if (row.metadata) {
+            review.metadata = row.metadata as Record<string, unknown>;
+          }
+
+          return review;
+        }),
       total,
     };
   }

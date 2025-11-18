@@ -119,6 +119,9 @@ export async function verifyAuditLogIntegrity(tenantId: TenantId): Promise<{
 
   for (let i = 0; i < logs.rows.length; i++) {
     const log = logs.rows[i];
+    if (!log) {
+      continue;
+    }
     const prevLog = i > 0 ? logs.rows[i - 1] : null;
 
     // Verify previous hash matches
@@ -146,6 +149,9 @@ export async function verifyAuditLogIntegrity(tenantId: TenantId): Promise<{
 
     if (logData.rows.length > 0) {
       const data = logData.rows[0];
+      if (!data) {
+        continue;
+      }
       const expectedHash = crypto
         .createHash('sha256')
         .update(

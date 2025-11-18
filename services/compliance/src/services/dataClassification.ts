@@ -94,23 +94,40 @@ export class DataClassificationService {
     }
 
     const row = result.rows[0];
-    return {
+    if (!row) {
+      throw new Error(`Data classification not found: ${id}`);
+    }
+
+    const classification: DataClassification = {
       id: row.id,
       tenantId: row.tenant_id as TenantId,
       dataType: row.data_type as DataClassification['dataType'],
       sensitivityLevel: row.sensitivity_level as DataClassification['sensitivityLevel'],
-      jurisdiction: row.jurisdiction || undefined,
       dataResidencyRegion: row.data_residency_region as DataClassification['dataResidencyRegion'],
-      storageLocation: row.storage_location || undefined,
       encryptionAtRest: row.encryption_at_rest,
       encryptionInTransit: row.encryption_in_transit,
-      retentionPolicyDays: row.retention_policy_days || undefined,
       autoDeleteEnabled: row.auto_delete_enabled,
-      accessControls: row.access_controls as Record<string, unknown> | undefined,
-      allowedRegions: row.allowed_regions || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+
+    if (row.jurisdiction) {
+      classification.jurisdiction = row.jurisdiction;
+    }
+    if (row.storage_location) {
+      classification.storageLocation = row.storage_location;
+    }
+    if (row.retention_policy_days !== null) {
+      classification.retentionPolicyDays = row.retention_policy_days;
+    }
+    if (row.access_controls) {
+      classification.accessControls = row.access_controls as Record<string, unknown>;
+    }
+    if (row.allowed_regions) {
+      classification.allowedRegions = row.allowed_regions;
+    }
+
+    return classification;
   }
 
   async updateClassification(
@@ -169,7 +186,10 @@ export class DataClassificationService {
     }
 
     params.push(id);
-    await db.query(`UPDATE data_classification SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`, params);
+    await db.query(
+      `UPDATE data_classification SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`,
+      params
+    );
 
     logger.info('Data classification updated', { id });
     return this.getClassification(id);
@@ -192,25 +212,42 @@ export class DataClassificationService {
       allowed_regions: string[] | null;
       created_at: Date;
       updated_at: Date;
-    }>('SELECT * FROM data_classification WHERE tenant_id = $1 ORDER BY created_at DESC', [tenantId]);
+    }>('SELECT * FROM data_classification WHERE tenant_id = $1 ORDER BY created_at DESC', [
+      tenantId,
+    ]);
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      tenantId: row.tenant_id as TenantId,
-      dataType: row.data_type as DataClassification['dataType'],
-      sensitivityLevel: row.sensitivity_level as DataClassification['sensitivityLevel'],
-      jurisdiction: row.jurisdiction || undefined,
-      dataResidencyRegion: row.data_residency_region as DataClassification['dataResidencyRegion'],
-      storageLocation: row.storage_location || undefined,
-      encryptionAtRest: row.encryption_at_rest,
-      encryptionInTransit: row.encryption_in_transit,
-      retentionPolicyDays: row.retention_policy_days || undefined,
-      autoDeleteEnabled: row.auto_delete_enabled,
-      accessControls: row.access_controls as Record<string, unknown> | undefined,
-      allowedRegions: row.allowed_regions || undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    return result.rows.map((row) => {
+      const classification: DataClassification = {
+        id: row.id,
+        tenantId: row.tenant_id as TenantId,
+        dataType: row.data_type as DataClassification['dataType'],
+        sensitivityLevel: row.sensitivity_level as DataClassification['sensitivityLevel'],
+        dataResidencyRegion: row.data_residency_region as DataClassification['dataResidencyRegion'],
+        encryptionAtRest: row.encryption_at_rest,
+        encryptionInTransit: row.encryption_in_transit,
+        autoDeleteEnabled: row.auto_delete_enabled,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+
+      if (row.jurisdiction) {
+        classification.jurisdiction = row.jurisdiction;
+      }
+      if (row.storage_location) {
+        classification.storageLocation = row.storage_location;
+      }
+      if (row.retention_policy_days !== null) {
+        classification.retentionPolicyDays = row.retention_policy_days;
+      }
+      if (row.access_controls) {
+        classification.accessControls = row.access_controls as Record<string, unknown>;
+      }
+      if (row.allowed_regions) {
+        classification.allowedRegions = row.allowed_regions;
+      }
+
+      return classification;
+    });
   }
 }
 
