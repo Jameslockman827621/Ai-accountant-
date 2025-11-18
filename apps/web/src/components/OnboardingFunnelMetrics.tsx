@@ -25,11 +25,9 @@ interface OverallMetrics {
   kycApprovalRate: number;
 }
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
-
 export default function OnboardingFunnelMetrics({
-  token,
-  tenantId,
+  token: _token,
+  tenantId: _tenantId,
   timeframe = '30d',
 }: FunnelMetricsProps) {
   const [funnelData, setFunnelData] = useState<FunnelData[]>([]);
@@ -45,7 +43,7 @@ export default function OnboardingFunnelMetrics({
     try {
       // In production, this would call a dedicated metrics API
       // For now, simulate data
-      const simulatedData = generateSimulatedMetrics(timeframe);
+      const simulatedData = generateSimulatedMetrics();
       setFunnelData(simulatedData.funnel);
       setOverallMetrics(simulatedData.overall);
     } catch (error) {
@@ -55,7 +53,7 @@ export default function OnboardingFunnelMetrics({
     }
   };
 
-  const generateSimulatedMetrics = (tf: string) => {
+  const generateSimulatedMetrics = () => {
     const steps = [
       'welcome',
       'business_profile',
@@ -166,12 +164,10 @@ export default function OnboardingFunnelMetrics({
         </div>
 
         <div className="space-y-4">
-          {funnelData.map((step, index) => (
+          {funnelData.map((step) => (
             <FunnelStep
               key={step.step}
               data={step}
-              position={index}
-              totalSteps={funnelData.length}
             />
           ))}
         </div>
@@ -211,15 +207,7 @@ function MetricCard({
   );
 }
 
-function FunnelStep({
-  data,
-  position,
-  totalSteps,
-}: {
-  data: FunnelData;
-  position: number;
-  totalSteps: number;
-}) {
+function FunnelStep({ data }: { data: FunnelData }) {
   const widthPercentage = (data.completions / data.views) * 100;
   const dropoffPercentage = ((data.abandonments / data.views) * 100).toFixed(1);
 

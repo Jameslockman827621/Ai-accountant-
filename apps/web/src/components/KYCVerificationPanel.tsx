@@ -50,6 +50,7 @@ export default function KYCVerificationPanel({ token, variant = 'dashboard' }: K
       clearInterval(pollingInterval);
       setPollingInterval(null);
     }
+    return undefined;
   }, [activeSession, getVerification, refresh]);
 
   const handleStartVerification = useCallback(async () => {

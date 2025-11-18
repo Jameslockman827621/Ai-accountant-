@@ -100,9 +100,9 @@ export default function DocumentReview({
       critical: 'bg-red-100 text-red-800',
     };
 
-  const assistantPrompt = document
-    ? `Provide review guidance for document ${document.id} (${document.documentType || 'unknown type'})`
-    : 'Provide assistance with pending document review tasks.';
+    const assistantPrompt = document
+      ? `Provide review guidance for document ${document.id} (${document.documentType || 'unknown type'})`
+      : 'Provide assistance with pending document review tasks.';
 
   const formatCurrency = (value?: number | string | null): string => {
     if (typeof value === 'number') {

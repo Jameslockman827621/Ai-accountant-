@@ -170,21 +170,24 @@ export default function DocumentUpload({
       }
 
       const data: UploadResponse = await response.json();
-      const insight = data.guidance
-        ? {
-            score: data.guidance.score,
-            issues: data.guidance.issues,
-            checklist: data.guidance.checklist,
-            pageCount: data.guidance.pageCount,
-            suggestedType: data.guidance.suggestedType,
-          }
-        : {
-            score: data.document.qualityScore ?? 0,
-            issues: data.document.qualityIssues ?? [],
-            checklist: data.document.uploadChecklist ?? [],
-            pageCount: data.document.pageCount,
-            suggestedType: data.document.suggestedDocumentType,
-          };
+        const insight =
+          data.guidance !== undefined
+            ? {
+                score: data.guidance.score,
+                issues: data.guidance.issues,
+                checklist: data.guidance.checklist,
+                suggestedType: data.guidance.suggestedType,
+                ...(data.guidance.pageCount !== undefined ? { pageCount: data.guidance.pageCount } : {}),
+              }
+            : {
+                score: data.document.qualityScore ?? 0,
+                issues: data.document.qualityIssues ?? [],
+                checklist: data.document.uploadChecklist ?? [],
+                ...(data.document.pageCount !== undefined ? { pageCount: data.document.pageCount } : {}),
+                ...(data.document.suggestedDocumentType !== undefined
+                  ? { suggestedType: data.document.suggestedDocumentType }
+                  : {}),
+              };
 
       setQuality(insight);
       setStatus('Document uploaded successfully.');

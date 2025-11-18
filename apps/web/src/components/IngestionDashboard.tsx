@@ -46,7 +46,7 @@ interface EmailAlias {
   lastUsedAt: string | null;
 }
 
-export default function IngestionDashboard({ token, tenantId }: IngestionDashboardProps) {
+export default function IngestionDashboard({ token, tenantId: _tenantId }: IngestionDashboardProps) {
   const [stats, setStats] = useState<IngestionStats | null>(null);
   const [log, setLog] = useState<IngestionLogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -459,7 +459,7 @@ function CSVDropzone({ token }: { token: string }) {
         throw new Error('Failed to get signed URL');
       }
 
-      const { signedUrl, storageKey, documentId } = await signedUrlRes.json();
+      const { storageKey, documentId } = await signedUrlRes.json();
 
       // Upload to S3 (in production, would use signed URL)
       // For now, we'll use a direct upload endpoint

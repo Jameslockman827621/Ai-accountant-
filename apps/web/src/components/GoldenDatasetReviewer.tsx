@@ -1,12 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import {
-  DocumentTextIcon,
-  CheckCircleIcon,
-  XCircleIcon,
-  ExclamationTriangleIcon,
-} from '@heroicons/react/24/outline';
+import { DocumentTextIcon } from '@heroicons/react/24/outline';
 
 interface Document {
   id: string;
@@ -29,7 +24,7 @@ interface GoldenDatasetReviewerProps {
 }
 
 export default function GoldenDatasetReviewer({
-  tenantId,
+  tenantId: _tenantId,
   sampleId,
 }: GoldenDatasetReviewerProps) {
   const [document, setDocument] = useState<Document | null>(null);
@@ -143,13 +138,10 @@ export default function GoldenDatasetReviewer({
     return 'text-red-600 bg-red-50';
   };
 
-  const getConfidenceHeatmap = (confidence: number) => {
-    const intensity = Math.round(confidence * 100);
-    return {
-      backgroundColor: `rgba(59, 130, 246, ${confidence})`,
-      opacity: confidence,
-    };
-  };
+  const getConfidenceHeatmap = (confidence: number) => ({
+    backgroundColor: `rgba(59, 130, 246, ${confidence})`,
+    opacity: confidence,
+  });
 
   if (loading && !document) {
     return (

@@ -27,7 +27,7 @@ interface ExceptionQueueProps {
   tenantId: string;
 }
 
-export default function ExceptionQueue({ token, tenantId }: ExceptionQueueProps) {
+export default function ExceptionQueue({ token, tenantId: _tenantId }: ExceptionQueueProps) {
   const [exceptions, setExceptions] = useState<ExceptionItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'open' | 'in_review' | 'resolved'>('open');

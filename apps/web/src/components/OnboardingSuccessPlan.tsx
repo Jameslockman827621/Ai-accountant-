@@ -61,11 +61,19 @@ export default function OnboardingSuccessPlan({ token, tenantId }: SuccessPlanPr
     }
   };
 
-  const generatePlanItems = (
-    profile: Record<string, unknown> | null,
-    connectors: any[]
-  ): PlanItem[] => {
+    const generatePlanItems = (
+      profile: Record<string, unknown> | null,
+      connectors: any[]
+    ): PlanItem[] => {
     const items: PlanItem[] = [];
+      const typedProfile = profile as {
+        vatRegistered?: boolean;
+        taxObligations?: unknown[];
+      } | null;
+      const vatRegistered = Boolean(typedProfile?.vatRegistered);
+      const taxObligationCount = Array.isArray(typedProfile?.taxObligations)
+        ? typedProfile!.taxObligations!.length
+        : 0;
 
     // Chart of accounts
     items.push({
@@ -96,7 +104,7 @@ export default function OnboardingSuccessPlan({ token, tenantId }: SuccessPlanPr
     const hasTaxConnector = connectors.some(
       (c) => c.connectorType === 'tax_authority' && c.status === 'enabled'
     );
-    const needsTaxConnector = profile?.vatRegistered || profile?.taxObligations?.length > 0;
+      const needsTaxConnector = vatRegistered || taxObligationCount > 0;
     if (needsTaxConnector) {
       items.push({
         id: 'tax_authority',

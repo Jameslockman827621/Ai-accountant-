@@ -88,14 +88,16 @@ export default function DocumentReviewPanel({ token }: DocumentReviewPanelProps)
       const activeQueue = queueOverride || queue;
       const queueItem = activeQueue.find(item => item.documentId === documentId);
 
-      const nextDocument: ReviewDocumentData = {
+        const nextDocument: ReviewDocumentData = {
         id: doc.id,
         fileName: doc.file_name,
         documentType: doc.document_type,
         confidenceScore: doc.confidence_score,
-        extractedData: doc.extracted_data,
         status: doc.status,
       };
+        if (doc.extracted_data !== undefined) {
+          nextDocument.extractedData = doc.extracted_data ?? null;
+        }
       if (queueItem?.reason) {
         nextDocument.reason = queueItem.reason;
       }

@@ -43,7 +43,8 @@ interface FilingExplanation {
   sourceEntries: string[];
 }
 
-export default function ComplianceMode({ token, tenantId: _tenantId, userId: _userId }: ComplianceModeProps) {
+export default function ComplianceMode({ token, tenantId: tenantIdProp, userId: _userId }: ComplianceModeProps) {
+    const tenantId = tenantIdProp;
   const [conversations, setConversations] = useState<Array<{ id: string; messages: ConversationMessage[] }>>([]);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [toolActionLogs, setToolActionLogs] = useState<ToolActionLog[]>([]);
@@ -357,26 +358,30 @@ export default function ComplianceMode({ token, tenantId: _tenantId, userId: _us
                         </div>
                       )}
 
-                      {message.reasoningTrace && message.reasoningTrace.length > 0 && (
-                        <div className="mt-3 border-t pt-3">
-                          <div className="text-xs font-semibold mb-2">Reasoning Trace:</div>
-                          <div className="space-y-1">
-                            {message.reasoningTrace.map((trace, idx) => {
-                              const hasDetails = trace.details !== undefined && trace.details !== null;
-                              return (
-                                <div key={idx} className="bg-gray-50 rounded p-2 text-xs">
-                                  <div className="font-medium">{trace.step}</div>
-                                  {hasDetails ? (
-                                    <div className="text-gray-600 mt-1">
-                                      {JSON.stringify(trace.details, null, 2)}
-                                    </div>
-                                  ) : null}
-                                </div>
-                              );
-                            })}
-                          </div>
+              {message.reasoningTrace && message.reasoningTrace.length > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <div className="text-xs font-semibold mb-2">Reasoning Trace:</div>
+                  <div className="space-y-1">
+                    {message.reasoningTrace.map((trace, idx) => {
+                      const hasDetails = trace.details !== undefined && trace.details !== null;
+                      const renderedDetails: string | null =
+                        !hasDetails || typeof trace.details === 'string'
+                          ? (trace.details as string | null)
+                          : JSON.stringify(trace.details, null, 2);
+                      return (
+                        <div key={idx} className="bg-gray-50 rounded p-2 text-xs">
+                          <div className="font-medium">{trace.step}</div>
+                          {renderedDetails ? (
+                            <pre className="text-gray-600 mt-1 whitespace-pre-wrap break-words">
+                              {renderedDetails}
+                            </pre>
+                          ) : null}
                         </div>
-                      )}
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
                     </div>
                   </div>
                 ))}
