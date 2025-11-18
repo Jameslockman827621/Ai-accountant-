@@ -238,7 +238,8 @@ export class LineItemExtractor {
     // Extract date
     const rawDate = structuredData.date;
     if (rawDate instanceof Date) {
-      const dateValue = rawDate.toISOString().split('T')[0];
+      const isoString = rawDate.toISOString();
+      const dateValue: string = isoString.split('T')[0] ?? isoString;
       entities.push({
         entityType: 'date',
         entityValue: dateValue,
@@ -246,7 +247,7 @@ export class LineItemExtractor {
         normalizedValue: dateValue,
       });
     } else if (typeof rawDate === 'string' && rawDate.trim() !== '') {
-      const dateValue = rawDate;
+      const dateValue: string = rawDate.trim();
       entities.push({
         entityType: 'date',
         entityValue: dateValue,

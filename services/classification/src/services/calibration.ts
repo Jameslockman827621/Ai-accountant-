@@ -68,7 +68,7 @@ export class CalibrationService {
       };
     }
 
-    const params = calibration.calibration_params as CalibrationParams;
+    const params = (calibration.calibration_params as CalibrationParams) ?? {};
     const calibrationType = calibration.calibration_type as CalibrationType;
 
     // Apply calibration
@@ -84,11 +84,11 @@ export class CalibrationService {
         break;
       case 'isotonic':
         if (params.isotonic) {
-          calibratedConfidence = this.isotonicRegression(
-            rawConfidence,
-            params.isotonic.thresholds,
-            params.isotonic.values
-          );
+          const thresholds = params.isotonic.thresholds ?? [];
+          const values = params.isotonic.values ?? [];
+          if (thresholds.length > 0 && values.length > 0) {
+            calibratedConfidence = this.isotonicRegression(rawConfidence, thresholds, values);
+          }
         }
         break;
       case 'temperature':
@@ -122,19 +122,47 @@ export class CalibrationService {
    * Isotonic regression calibration
    */
   private isotonicRegression(confidence: number, thresholds: number[], values: number[]): number {
-    // Find the interval and interpolate
-    if (confidence <= thresholds[0]) {
-      return values[0];
-    }
-    if (confidence >= thresholds[thresholds.length - 1]) {
-      return values[values.length - 1];
+    if (thresholds.length === 0 || values.length === 0) {
+      return confidence;
     }
 
-    for (let i = 0; i < thresholds.length - 1; i++) {
-      if (confidence >= thresholds[i] && confidence <= thresholds[i + 1]) {
+    const upperBound = Math.min(thresholds.length, values.length) - 1;
+    if (upperBound <= 0) {
+      return values[0] ?? confidence;
+    }
+
+    const firstThreshold = thresholds[0] ?? confidence;
+    const lastThreshold = thresholds[upperBound] ?? confidence;
+    const firstValue = values[0] ?? confidence;
+    const lastValue = values[upperBound] ?? confidence;
+
+    // Find the interval and interpolate
+    if (confidence <= firstThreshold) {
+      return firstValue;
+    }
+    if (confidence >= lastThreshold) {
+      return lastValue;
+    }
+
+    const getValue = (index: number): number | undefined =>
+      index >= 0 && index < values.length ? values[index] : undefined;
+
+    for (let i = 0; i < upperBound; i++) {
+      const startThreshold = thresholds[i];
+      const endThreshold = thresholds[i + 1];
+      if (startThreshold === undefined || endThreshold === undefined) {
+        continue;
+      }
+      if (confidence >= startThreshold && confidence <= endThreshold) {
         // Linear interpolation
-        const t = (confidence - thresholds[i]) / (thresholds[i + 1] - thresholds[i]);
-        return values[i] + t * (values[i + 1] - values[i]);
+        const span = endThreshold - startThreshold || 1;
+        const t = (confidence - startThreshold) / span;
+        const startValue = getValue(i);
+        const endValue = getValue(i + 1) ?? startValue;
+        if (startValue === undefined || endValue === undefined) {
+          return confidence;
+        }
+        return startValue + t * (endValue - startValue);
       }
     }
 
@@ -147,7 +175,8 @@ export class CalibrationService {
   private temperatureScaling(confidence: number, temperature: number): number {
     // Softmax with temperature: exp(confidence / T) / sum(exp(confidences / T))
     // For binary: calibrated = sigmoid(confidence / T)
-    return 1 / (1 + Math.exp(-confidence / temperature));
+    const safeTemperature = temperature === 0 ? 1 : temperature;
+    return 1 / (1 + Math.exp(-confidence / safeTemperature));
   }
 
   /**
@@ -195,8 +224,8 @@ export class CalibrationService {
    * Compute calibration parameters from validation data
    */
   async computeCalibration(
-    modelId: string,
-    fieldName: string,
+    _modelId: string,
+    _fieldName: string,
     validationData: Array<{ predicted: number; actual: number }>
   ): Promise<{ type: CalibrationType; params: CalibrationParams; reliabilityScore: number }> {
     // Simplified calibration computation
@@ -204,6 +233,13 @@ export class CalibrationService {
 
     // Compute reliability score (correlation between predicted and actual)
     const n = validationData.length;
+    if (n === 0) {
+      return {
+        type: 'platt',
+        params: { platt: { a: 1, b: 0 } },
+        reliabilityScore: 0,
+      };
+    }
     const meanPred = validationData.reduce((sum, d) => sum + d.predicted, 0) / n;
     const meanActual = validationData.reduce((sum, d) => sum + d.actual, 0) / n;
 
@@ -217,7 +253,8 @@ export class CalibrationService {
       denomActual += Math.pow(d.actual - meanActual, 2);
     }
 
-    const correlation = numerator / Math.sqrt(denomPred * denomActual);
+    const denom = Math.sqrt(denomPred * denomActual);
+    const correlation = denom === 0 ? 0 : numerator / denom;
     const reliabilityScore = Math.max(0, Math.min(1, correlation));
 
     // Simple Platt scaling parameters (would be computed properly in production)

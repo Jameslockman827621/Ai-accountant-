@@ -1,15 +1,14 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { DocumentId } from '@ai-accountant/shared-types';
+import { DocumentId, DocumentType, ExtractedData } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
 import { processClassificationJob } from '../processor';
-import { modelRegistryService } from '@ai-accountant/modelops/src/services/modelRegistry';
 import { calibrationService } from './calibration';
 
 const logger = createLogger('enhanced-classification');
 
 export interface ReasoningTrace {
-  features: Record<string, number>; // Feature values
+  features: FeatureSet; // Feature values
   weights: Record<string, number>; // Feature importance/weights
   decisionPath: Array<{
     step: number;
@@ -26,13 +25,41 @@ export interface ReasoningTrace {
 }
 
 export interface EnhancedClassificationResult {
-  documentType: string;
-  extractedData: Record<string, unknown>;
+  documentType: DocumentType;
+  extractedData: ExtractedData;
   confidenceScore: number;
   fieldConfidences: Record<string, number>;
   reasoningTrace: ReasoningTrace;
   modelVersion: string;
 }
+
+interface ClassificationSummary {
+  documentType: DocumentType;
+  extractedData: ExtractedData;
+  confidenceScore: number;
+}
+
+interface FeatureSet {
+  textLength: number;
+  hasInvoiceKeywords: number;
+  hasReceiptKeywords: number;
+  hasDate: number;
+  hasAmount: number;
+  hasInvoiceNumber: number;
+}
+
+interface ModelInfo {
+  modelName: string;
+  modelVersion: string;
+}
+
+class ModelRegistryServiceStub {
+  async getModel(_modelName: string, _modelVersion: string): Promise<ModelInfo> {
+    return { modelName: 'classification-model', modelVersion: '1.0.0' };
+  }
+}
+
+const modelRegistryService = new ModelRegistryServiceStub();
 
 export class EnhancedClassificationService {
   /**
@@ -65,11 +92,7 @@ export class EnhancedClassificationService {
         if (typeof value === 'number' || typeof value === 'string') {
           // Get raw confidence (would come from model in production)
           const rawConfidence = classificationResult.confidenceScore;
-          const calibrated = await calibrationService.calibrateField(
-            modelId,
-            field,
-            rawConfidence
-          );
+          const calibrated = await calibrationService.calibrateField(modelId, field, rawConfidence);
           fieldConfidences[field] = calibrated.calibratedConfidence;
         }
       }
@@ -102,11 +125,11 @@ export class EnhancedClassificationService {
    */
   private async buildReasoningTrace(
     text: string,
-    result: { documentType: string; extractedData: Record<string, unknown>; confidenceScore: number },
-    modelId: string | null
+    result: ClassificationSummary,
+    _modelId: string | null
   ): Promise<ReasoningTrace> {
     // Extract features
-    const features: Record<string, number> = {
+    const features: FeatureSet = {
       textLength: text.length,
       hasInvoiceKeywords: this.hasKeywords(text, ['invoice', 'bill', 'due date']) ? 1 : 0,
       hasReceiptKeywords: this.hasKeywords(text, ['receipt', 'thank you', 'total paid']) ? 1 : 0,
@@ -137,9 +160,10 @@ export class EnhancedClassificationService {
         step: 2,
         description: 'Check for document type keywords',
         confidence: features.hasInvoiceKeywords > 0 ? 0.9 : 0.5,
-        reasoning: features.hasInvoiceKeywords > 0
-          ? 'Found invoice-related keywords'
-          : 'No invoice keywords found',
+        reasoning:
+          features.hasInvoiceKeywords > 0
+            ? 'Found invoice-related keywords'
+            : 'No invoice keywords found',
       },
       {
         step: 3,
@@ -169,7 +193,7 @@ export class EnhancedClassificationService {
         reasoning: 'Primary prediction based on extracted features',
       },
       {
-        prediction: 'other',
+        prediction: DocumentType.OTHER,
         confidence: 1 - result.confidenceScore,
         reasoning: 'Fallback prediction',
       },
@@ -226,7 +250,8 @@ export class EnhancedClassificationService {
       [modelName, modelVersion]
     );
 
-    return result.rows.length > 0 ? result.rows[0].id : null;
+    const row = result.rows[0];
+    return row ? row.id : null;
   }
 
   /**

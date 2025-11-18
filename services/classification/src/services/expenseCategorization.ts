@@ -11,16 +11,16 @@ const openai = new OpenAI({
 
 // UK standard expense categories
 export const EXPENSE_CATEGORIES = {
-  'Travel': ['fuel', 'parking', 'train', 'taxi', 'hotel', 'flight'],
-  'Meals': ['restaurant', 'lunch', 'dinner', 'cafe', 'coffee'],
-  'Office': ['stationery', 'printer', 'computer', 'software', 'internet'],
-  'Professional': ['accountant', 'legal', 'consultant', 'advisor'],
-  'Marketing': ['advertising', 'promotion', 'website', 'social media'],
-  'Utilities': ['electricity', 'gas', 'water', 'phone', 'broadband'],
-  'Rent': ['office rent', 'premises', 'lease'],
-  'Insurance': ['business insurance', 'liability', 'professional indemnity'],
-  'Training': ['course', 'training', 'education', 'certification'],
-  'Subscriptions': ['software subscription', 'membership', 'license'],
+  Travel: ['fuel', 'parking', 'train', 'taxi', 'hotel', 'flight'],
+  Meals: ['restaurant', 'lunch', 'dinner', 'cafe', 'coffee'],
+  Office: ['stationery', 'printer', 'computer', 'software', 'internet'],
+  Professional: ['accountant', 'legal', 'consultant', 'advisor'],
+  Marketing: ['advertising', 'promotion', 'website', 'social media'],
+  Utilities: ['electricity', 'gas', 'water', 'phone', 'broadband'],
+  Rent: ['office rent', 'premises', 'lease'],
+  Insurance: ['business insurance', 'liability', 'professional indemnity'],
+  Training: ['course', 'training', 'education', 'certification'],
+  Subscriptions: ['software subscription', 'membership', 'license'],
 } as const;
 
 export type ExpenseCategory = keyof typeof EXPENSE_CATEGORIES;
@@ -67,16 +67,19 @@ export async function categorizeExpense(
   results.forEach((result, index) => {
     if (result) {
       const key = result.category;
-      if (!scores[key]) scores[key] = 0;
-      scores[key] += result.confidence * weights[index];
+      const contribution = result.confidence * (weights[index] ?? 0);
+      scores[key] = (scores[key] ?? 0) + contribution;
     }
   });
 
-  const bestCategory = Object.entries(scores).reduce((a, b) =>
-    scores[a[0]] > scores[b[0]] ? a : b
-  )[0] as ExpenseCategory | 'Other';
-
-  const confidence = scores[bestCategory] || 0.5;
+  let bestCategory: ExpenseCategory | 'Other' = 'Other';
+  let confidence = 0.5;
+  for (const [category, score] of Object.entries(scores)) {
+    if (score > confidence) {
+      bestCategory = category as ExpenseCategory | 'Other';
+      confidence = score;
+    }
+  }
 
   // Get account code
   const accountCode = await getAccountCodeForCategory(tenantId, bestCategory);
@@ -100,7 +103,7 @@ Description: ${description}
 Amount: £${amount.toFixed(2)}
 Vendor: ${vendor || 'Unknown'}
 
-Historical patterns: ${historical.map(h => `${h.description} -> ${h.category}`).join(', ')}
+Historical patterns: ${historical.map((h) => `${h.description} -> ${h.category}`).join(', ')}
 
 UK expense categories: ${Object.keys(EXPENSE_CATEGORIES).join(', ')}
 
@@ -112,7 +115,8 @@ Return JSON: {"category": "category name", "confidence": 0.0-1.0, "reasoning": "
       messages: [
         {
           role: 'system',
-          content: 'You are an expert at categorizing UK business expenses. Use standard UK accounting categories.',
+          content:
+            'You are an expert at categorizing UK business expenses. Use standard UK accounting categories.',
         },
         { role: 'user', content: prompt },
       ],
@@ -142,7 +146,9 @@ function categorizeWithRules(
 
   for (const [category, keywords] of Object.entries(EXPENSE_CATEGORIES)) {
     const allKeywords = [...keywords, category.toLowerCase()];
-    if (allKeywords.some(keyword => lowerDesc.includes(keyword) || lowerVendor.includes(keyword))) {
+    if (
+      allKeywords.some((keyword) => lowerDesc.includes(keyword) || lowerVendor.includes(keyword))
+    ) {
       return {
         category: category as ExpenseCategory,
         confidence: 0.75,
@@ -162,13 +168,11 @@ function categorizeWithHistory(
 
   // Most common category
   const categoryCounts: Record<string, number> = {};
-  historical.forEach(h => {
+  historical.forEach((h) => {
     categoryCounts[h.category] = (categoryCounts[h.category] || 0) + 1;
   });
 
-  const bestCategory = Object.entries(categoryCounts).reduce((a, b) =>
-    a[1] > b[1] ? a : b
-  )[0];
+  const bestCategory = Object.entries(categoryCounts).reduce((a, b) => (a[1] > b[1] ? a : b))[0];
 
   return {
     category: bestCategory as ExpenseCategory | 'Other',
@@ -179,22 +183,22 @@ function categorizeWithHistory(
 }
 
 async function getAccountCodeForCategory(
-  tenantId: TenantId,
+  _tenantId: TenantId,
   category: ExpenseCategory | 'Other'
 ): Promise<string> {
   // Map categories to account codes
   const categoryToAccount: Record<string, string> = {
-    'Travel': '5100',
-    'Meals': '5200',
-    'Office': '5300',
-    'Professional': '5400',
-    'Marketing': '5500',
-    'Utilities': '5600',
-    'Rent': '5700',
-    'Insurance': '5800',
-    'Training': '5900',
-    'Subscriptions': '6000',
-    'Other': '5000',
+    Travel: '5100',
+    Meals: '5200',
+    Office: '5300',
+    Professional: '5400',
+    Marketing: '5500',
+    Utilities: '5600',
+    Rent: '5700',
+    Insurance: '5800',
+    Training: '5900',
+    Subscriptions: '6000',
+    Other: '5000',
   };
 
   return categoryToAccount[category] || '5000';

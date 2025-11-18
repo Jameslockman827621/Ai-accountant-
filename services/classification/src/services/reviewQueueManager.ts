@@ -42,7 +42,7 @@ export async function routeToReviewQueue(
     throw new Error('Document not found');
   }
 
-  const document = docResult.rows[0];
+  const document = docResult.rows[0]!;
   const confidenceScore = document.confidence_score ?? 0;
   const qualityScore = document.quality_score ?? 100;
 
