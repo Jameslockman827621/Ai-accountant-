@@ -152,22 +152,22 @@ async function persistComponent(params: PersistParams, runId?: string): Promise<
           warnings: params.warnings,
           metrics: params.metrics,
         });
-      } catch (error) {
-        logger.warn(
-          'Failed to record validation component run',
-          error instanceof Error ? error : new Error(String(error)),
-          { component: params.component, runId }
-        );
+        } catch (error) {
+          logger.warn('Failed to record validation component run', {
+            component: params.component,
+            runId,
+            error: error instanceof Error ? error.message : String(error),
+          });
       }
     }
 
     return recordId;
-    } catch (error) {
-      const err = error instanceof Error ? error : new Error(String(error));
-      logger.error('Failed to persist validation result', err, {
-        component: params.component,
-        entityId: params.entityId,
-      });
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        logger.error('Failed to persist validation result', err, {
+          component: params.component,
+          entityId: params.entityId,
+        });
     return null;
   }
 }
@@ -191,12 +191,13 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
       triggeredBy: options.triggeredBy,
     });
     runId = run.runId;
-  } catch (error) {
-    logger.warn(
-      'Unable to record validation run start',
-      error instanceof Error ? error : new Error(String(error)),
-      { tenantId, entityType, entityId }
-    );
+    } catch (error) {
+      logger.warn('Unable to record validation run start', {
+        tenantId,
+        entityType,
+        entityId,
+        error: error instanceof Error ? error.message : String(error),
+      });
   }
 
   const overallErrors: string[] = [];
@@ -429,11 +430,10 @@ export async function runValidationSuite(options: ValidationSuiteOptions): Promi
         },
       });
     } catch (error) {
-      logger.warn(
-        'Unable to record validation run completion',
-        error instanceof Error ? error : new Error(String(error)),
-        { runId }
-      );
+      logger.warn('Unable to record validation run completion', {
+        runId,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 

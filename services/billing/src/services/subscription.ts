@@ -1,12 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import {
-  createSubscription,
-  cancelSubscription,
-  updatePaymentMethod,
-  ensureStripeCustomer,
-} from './stripe';
+import { createSubscription, cancelSubscription, ensureStripeCustomer } from './stripe';
 
 const logger = createLogger('billing-service');
 
@@ -117,11 +112,12 @@ export async function cancelTenantSubscription(
     [tenantId]
   );
 
-  if (subscription.rows.length === 0) {
+  const subscriptionRow = subscription.rows[0];
+  if (!subscriptionRow) {
     throw new Error('No subscription found');
   }
 
-  const metadata = subscription.rows[0].metadata as Record<string, unknown> | null;
+  const metadata = subscriptionRow.metadata as Record<string, unknown> | null;
   const stripeSubscriptionId = metadata?.stripeSubscriptionId as string | undefined;
 
   if (stripeSubscriptionId) {

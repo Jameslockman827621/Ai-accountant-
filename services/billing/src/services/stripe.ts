@@ -57,12 +57,13 @@ export async function ensureStripeCustomer(tenantId: TenantId): Promise<string> 
     [tenantId]
   );
 
-  if (tenant.rows.length === 0) {
+  const tenantRow = tenant.rows[0];
+  if (!tenantRow) {
     throw new Error('Tenant not found');
   }
 
-  const metadata = tenant.rows[0].metadata as Record<string, unknown> | null;
-  const existingCustomerId = metadata?.stripeCustomerId as string | undefined;
+  const metadata = (tenantRow.metadata as Record<string, unknown> | null) ?? {};
+  const existingCustomerId = typeof metadata.stripeCustomerId === 'string' ? metadata.stripeCustomerId : undefined;
   if (existingCustomerId) {
     return existingCustomerId;
   }
@@ -72,11 +73,12 @@ export async function ensureStripeCustomer(tenantId: TenantId): Promise<string> 
     [tenantId]
   );
 
-  if (user.rows.length === 0) {
+  const userRow = user.rows[0];
+  if (!userRow) {
     throw new Error('No user found for tenant');
   }
 
-  return createCustomer(tenantId, user.rows[0].email, tenant.rows[0].name);
+  return createCustomer(tenantId, userRow.email, tenantRow.name);
 }
 
 export async function createSubscription(
@@ -210,10 +212,25 @@ export async function handleStripeWebhook(
       if (tenantId && invoice.subscription) {
         // Handle payment failure with dunning management
         const { handlePaymentFailure } = await import('./paymentFailureHandler');
+          let failureMessage = 'Payment failed';
+          if (invoice.payment_intent) {
+            try {
+              const paymentIntent =
+                typeof invoice.payment_intent === 'string'
+                  ? await client.paymentIntents.retrieve(invoice.payment_intent)
+                  : invoice.payment_intent;
+              failureMessage = paymentIntent.last_payment_error?.message ?? failureMessage;
+            } catch (intentError) {
+              logger.warn('Unable to retrieve payment intent for failure message', {
+                invoiceId: invoice.id,
+                error: intentError instanceof Error ? intentError.message : intentError,
+              });
+            }
+          }
         await handlePaymentFailure(
           tenantId,
           invoice.id,
-          invoice.last_payment_error?.message || 'Payment failed'
+            failureMessage
         );
         
         // Send notification to user
@@ -352,11 +369,12 @@ async function getTenantTier(tenantId: TenantId): Promise<BillingTier> {
     [tenantId]
   );
 
-  if (result.rows.length === 0) {
+  const row = result.rows[0];
+  if (!row) {
     return 'freelancer';
   }
 
-  return result.rows[0].subscription_tier;
+  return row.subscription_tier;
 }
 
 export async function createCheckoutSession(

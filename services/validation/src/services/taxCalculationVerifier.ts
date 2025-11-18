@@ -10,6 +10,8 @@ export interface TaxVerificationResult {
   periodEnd: Date;
   calculatedAmount: number;
   expectedAmount: number;
+  filedAmount: number;
+  isValid: boolean;
   verified: boolean;
   discrepancies: Array<{
     field: string;
@@ -186,6 +188,8 @@ async function verifyVATCalculation(
     periodEnd,
     calculatedAmount: calculatedNet,
     expectedAmount: expectedNet,
+    filedAmount: calculatedNet,
+    isValid: verified,
     verified,
     discrepancies,
     warnings,
@@ -241,6 +245,8 @@ async function verifyPAYECalculation(
     periodEnd,
     calculatedAmount: calculatedPAYE,
     expectedAmount: calculatedPAYE, // Would need payroll data for proper verification
+    filedAmount: calculatedPAYE,
+    isValid: verified,
     verified,
     discrepancies,
     warnings,
@@ -310,6 +316,8 @@ async function verifyCorporationTaxCalculation(
     periodEnd,
     calculatedAmount: calculatedCT,
     expectedAmount: expectedCT,
+    filedAmount: calculatedCT,
+    isValid: verified,
     verified,
     discrepancies,
     warnings,

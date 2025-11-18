@@ -1,6 +1,5 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('support-service');
 
@@ -49,7 +48,7 @@ export class KnowledgeBaseEngine {
     // Text search
     if (query) {
       const searchTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
-      const searchConditions = searchTerms.map((term, idx) => {
+        const searchConditions = searchTerms.map(term => {
         params.push(`%${term}%`);
         return `(LOWER(title) LIKE $${params.length} OR LOWER(content) LIKE $${params.length})`;
       });
@@ -160,11 +159,10 @@ export class KnowledgeBaseEngine {
       [articleId]
     );
 
-    if (result.rows.length === 0) {
+    const row = result.rows[0];
+    if (!row) {
       return null;
     }
-
-    const row = result.rows[0];
 
     // Increment views
     await db.query(

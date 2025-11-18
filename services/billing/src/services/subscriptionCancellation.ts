@@ -42,6 +42,9 @@ export async function cancelTenantSubscription(
   }
 
   const subscription = subResult.rows[0];
+  if (!subscription) {
+    throw new Error('Active subscription not found');
+  }
   const metadata = subscription.metadata ? JSON.parse(subscription.metadata) : {};
   const stripeSubscriptionId = metadata.stripeSubscriptionId as string | undefined;
 
@@ -95,12 +98,21 @@ export async function getCancellationHistory(tenantId: TenantId): Promise<Cancel
     [tenantId]
   );
 
-  return result.rows.map(row => ({
-    tenantId: row.tenant_id as TenantId,
-    userId: row.user_id as UserId,
-    reason: row.reason || undefined,
-    feedback: row.feedback || undefined,
-    cancelAtPeriodEnd: row.cancel_at_period_end,
-    requestedAt: row.created_at,
-  }));
+  return result.rows.map(row => {
+    const request: CancellationRequest = {
+      tenantId: row.tenant_id as TenantId,
+      userId: row.user_id as UserId,
+      cancelAtPeriodEnd: row.cancel_at_period_end,
+      requestedAt: row.created_at,
+    };
+
+    if (row.reason) {
+      request.reason = row.reason;
+    }
+    if (row.feedback) {
+      request.feedback = row.feedback;
+    }
+
+    return request;
+  });
 }

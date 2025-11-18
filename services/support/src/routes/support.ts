@@ -12,13 +12,6 @@ import {
 } from '../services/tickets';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { knowledgeBaseEngine } from '../services/knowledgeBaseEngine';
-import {
-  createHelpArticle,
-  updateHelpArticle,
-  deleteHelpArticle,
-  getAllHelpArticles,
-} from '../services/helpContentManager';
-
 const router = Router();
 const logger = createLogger('support-service');
 const TICKET_STATUSES: ReadonlyArray<SupportTicket['status']> = [
@@ -254,8 +247,12 @@ router.get('/knowledge-base/articles/:articleId', async (req: AuthRequest, res: 
       return;
     }
 
-    const { articleId } = req.params;
-    const article = await knowledgeBaseEngine.getArticle(articleId);
+      const { articleId } = req.params;
+      if (!articleId) {
+        res.status(400).json({ error: 'articleId is required' });
+        return;
+      }
+      const article = await knowledgeBaseEngine.getArticle(articleId);
 
     if (!article) {
       res.status(404).json({ error: 'Article not found' });
@@ -277,7 +274,11 @@ router.get('/knowledge-base/categories/:category', async (req: AuthRequest, res:
       return;
     }
 
-    const { category } = req.params;
+      const { category } = req.params;
+      if (!category) {
+        res.status(400).json({ error: 'category is required' });
+        return;
+      }
     const { limit } = req.query;
 
     const articles = await knowledgeBaseEngine.getArticlesByCategory(
@@ -300,7 +301,11 @@ router.post('/knowledge-base/articles/:articleId/feedback', async (req: AuthRequ
       return;
     }
 
-    const { articleId } = req.params;
+      const { articleId } = req.params;
+      if (!articleId) {
+        res.status(400).json({ error: 'articleId is required' });
+        return;
+      }
     const { helpful } = req.body;
 
     if (typeof helpful !== 'boolean') {
