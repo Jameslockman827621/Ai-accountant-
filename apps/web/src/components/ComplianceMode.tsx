@@ -286,7 +286,7 @@ export default function ComplianceMode({ token, tenantId, userId }: ComplianceMo
               <div className="max-w-4xl mx-auto space-y-4">
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-yellow-800 font-semibold">🔒 Immutable Transcript</div>
+                    <span className="text-yellow-800 font-semibold">🔒 Immutable Transcript</span>
                     <span className="text-xs text-yellow-600">
                       This conversation cannot be modified or deleted
                     </span>

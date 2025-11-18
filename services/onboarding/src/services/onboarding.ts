@@ -219,11 +219,15 @@ async function handleOnboardingCompletion(tenantId: TenantId, userId: UserId): P
 
     logger.info('Onboarding completion handled', { tenantId, userId, sessionId });
   } catch (error) {
-    logger.error('Failed to handle onboarding completion', {
-      tenantId,
-      userId,
-      error: error instanceof Error ? error.message : String(error),
-    });
+    const normalizedError = error instanceof Error ? error : new Error(String(error));
+    logger.error(
+      'Failed to handle onboarding completion',
+      normalizedError,
+      {
+        tenantId,
+        userId,
+      }
+    );
     // Don't throw - completion handling failure shouldn't block the user
   }
 }
@@ -259,12 +263,16 @@ export async function getOnboardingStepData(
 
     return null;
   } catch (error) {
-    logger.error('Failed to get onboarding step data', {
-      tenantId,
-      stepName,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
+    const normalizedError = error instanceof Error ? error : new Error(String(error));
+    logger.error(
+      'Failed to get onboarding step data',
+      normalizedError,
+      {
+        tenantId,
+        stepName,
+      }
+    );
+    throw normalizedError;
   }
 }
 
@@ -298,6 +306,9 @@ export async function recordOnboardingEvent(
       ]
     );
   } catch (error) {
-    logger.warn('Failed to record onboarding event', error instanceof Error ? error : new Error(String(error)));
+    const normalizedError = error instanceof Error ? error : new Error(String(error));
+    logger.warn('Failed to record onboarding event', {
+      error: normalizedError.message,
+    });
   }
 }

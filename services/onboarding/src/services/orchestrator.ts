@@ -105,9 +105,10 @@ class OnboardingOrchestrator extends EventEmitter {
         // await sendOnboardingWelcome(userResult.rows[0].email, userResult.rows[0].name, tenantResult.rows[0].name);
         logger.info('Welcome email queued', { email: userResult.rows[0].email });
       }
-    } catch (error) {
-      logger.warn('Failed to send welcome email', error instanceof Error ? error : new Error(String(error)));
-    }
+      } catch (error) {
+        const normalizedError = error instanceof Error ? error : new Error(String(error));
+        logger.warn('Failed to send welcome email', { error: normalizedError.message });
+      }
 
     return sessionId;
   }
@@ -489,7 +490,11 @@ This business is using the AI accountant to automate bookkeeping, tax compliance
       ]
     );
 
-    logger.error('Onboarding session error', { sessionId, error, retryCount });
+    logger.error(
+      'Onboarding session error',
+      undefined,
+      { sessionId, error, retryCount }
+    );
   }
 
   async completeSession(sessionId: string): Promise<void> {
@@ -519,11 +524,11 @@ This business is using the AI accountant to automate bookkeeping, tax compliance
       );
 
       // Get connector and filing calendar counts
-      const connectorResult = await db.query(
+        const connectorResult = await db.query<{ count: string }>(
         'SELECT COUNT(*) as count FROM connector_registry WHERE tenant_id = $1 AND is_enabled = true',
         [context.tenantId]
       );
-      const filingResult = await db.query(
+        const filingResult = await db.query<{ count: string }>(
         'SELECT COUNT(*) as count FROM filing_calendars WHERE tenant_id = $1 AND is_active = true',
         [context.tenantId]
       );
@@ -551,7 +556,8 @@ This business is using the AI accountant to automate bookkeeping, tax compliance
         });
       }
     } catch (error) {
-      logger.warn('Failed to send completion email', error instanceof Error ? error : new Error(String(error)));
+      const normalizedError = error instanceof Error ? error : new Error(String(error));
+      logger.warn('Failed to send completion email', { error: normalizedError.message });
     }
   }
 }

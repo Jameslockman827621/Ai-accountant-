@@ -41,6 +41,41 @@ export interface PersonaVerificationResult {
   }>;
 }
 
+interface PersonaErrorResponse {
+  errors?: Array<{ detail?: string }>;
+}
+
+interface PersonaInquiryAttributes {
+  status: string;
+  reference_id: string;
+  created_at: string;
+  completed_at?: string;
+  account_id: string;
+  verification_level?: string;
+  name_first?: string;
+  name_last?: string;
+  address_street_1?: string;
+  address_city?: string;
+  address_subdivision?: string;
+  address_postal_code?: string;
+  address_country_code?: string;
+  birthdate?: string;
+  phone_number?: string;
+  email_address?: string;
+  checks?: Array<{
+    type: string;
+    status: string;
+    details?: Record<string, unknown>;
+  }>;
+}
+
+interface PersonaInquiryResponse {
+  data: {
+    id: string;
+    attributes: PersonaInquiryAttributes;
+  };
+}
+
 export class PersonaKYCService {
   private config: PersonaConfig;
   private baseUrl: string;
@@ -84,28 +119,29 @@ export class PersonaKYCService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Persona API error: ${error.errors?.[0]?.detail || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as PersonaErrorResponse;
+          throw new Error(`Persona API error: ${errorBody.errors?.[0]?.detail || 'Unknown error'}`);
+        }
 
-      const data = await response.json();
-      const inquiry = data.data;
+        const data = (await response.json()) as PersonaInquiryResponse;
+        const inquiry = data.data;
+        const attributes = inquiry.attributes;
 
-      logger.info('Persona inquiry created', {
-        inquiryId: inquiry.id,
-        tenantId,
-        userId,
-        referenceId,
-      });
+        logger.info('Persona inquiry created', {
+          inquiryId: inquiry.id,
+          tenantId,
+          userId,
+          referenceId,
+        });
 
-      return {
-        id: inquiry.id,
-        status: inquiry.attributes.status,
-        reference_id: inquiry.attributes.reference_id,
-        created_at: inquiry.attributes.created_at,
-        account_id: inquiry.attributes.account_id,
-      };
+        return {
+          id: inquiry.id,
+          status: attributes.status,
+          reference_id: attributes.reference_id,
+          created_at: attributes.created_at,
+          account_id: attributes.account_id,
+        };
     } catch (error) {
       logger.error('Failed to create Persona inquiry', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -124,14 +160,14 @@ export class PersonaKYCService {
         },
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Persona API error: ${error.errors?.[0]?.detail || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as PersonaErrorResponse;
+          throw new Error(`Persona API error: ${errorBody.errors?.[0]?.detail || 'Unknown error'}`);
+        }
 
-      const data = await response.json();
-      const inquiry = data.data;
-      const attributes = inquiry.attributes;
+        const data = (await response.json()) as PersonaInquiryResponse;
+        const inquiry = data.data;
+        const attributes = inquiry.attributes;
 
       return {
         inquiryId: inquiry.id,
@@ -175,7 +211,7 @@ export class PersonaKYCService {
         };
       };
     },
-    signature: string
+    _signature: string
   ): Promise<void> {
     // Verify webhook signature in production
     if (this.config.webhookSecret) {

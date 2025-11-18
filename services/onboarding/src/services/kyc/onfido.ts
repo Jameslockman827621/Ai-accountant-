@@ -35,6 +35,24 @@ export interface OnfidoDocument {
   file_size: number;
 }
 
+interface OnfidoApplicantResponse {
+  applicant: OnfidoApplicant;
+}
+
+interface OnfidoDocumentResponse {
+  document: OnfidoDocument;
+}
+
+interface OnfidoCheckResponse {
+  check: OnfidoCheck;
+}
+
+interface OnfidoErrorResponse {
+  error?: {
+    message?: string;
+  };
+}
+
 export class OnfidoKYCService {
   private config: OnfidoConfig;
   private baseUrl: string;
@@ -74,24 +92,24 @@ export class OnfidoKYCService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Onfido API error: ${error.error?.message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as OnfidoErrorResponse;
+          throw new Error(`Onfido API error: ${errorBody.error?.message || 'Unknown error'}`);
+        }
 
-      const data = await response.json();
+        const data = (await response.json()) as OnfidoApplicantResponse;
       logger.info('Onfido applicant created', {
-        applicantId: data.applicant.id,
+          applicantId: data.applicant.id,
         tenantId,
         userId,
       });
 
       return {
-        id: data.applicant.id,
-        created_at: data.applicant.created_at,
-        first_name: data.applicant.first_name,
-        last_name: data.applicant.last_name,
-        email: data.applicant.email,
+          id: data.applicant.id,
+          created_at: data.applicant.created_at,
+          first_name: data.applicant.first_name,
+          last_name: data.applicant.last_name,
+          email: data.applicant.email,
       };
     } catch (error) {
       logger.error('Failed to create Onfido applicant', error instanceof Error ? error : new Error(String(error)));
@@ -128,25 +146,25 @@ export class OnfidoKYCService {
         body: formData,
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Onfido API error: ${error.error?.message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as OnfidoErrorResponse;
+          throw new Error(`Onfido API error: ${errorBody.error?.message || 'Unknown error'}`);
+        }
 
-      const data = await response.json();
+        const data = (await response.json()) as OnfidoDocumentResponse;
       logger.info('Onfido document uploaded', {
-        documentId: data.document.id,
+          documentId: data.document.id,
         applicantId,
         type: documentType,
       });
 
       return {
-        id: data.document.id,
-        type: data.document.type,
-        side: data.document.side,
-        file_name: data.document.file_name,
-        file_type: data.document.file_type,
-        file_size: data.document.file_size,
+          id: data.document.id,
+          type: data.document.type,
+          side: data.document.side,
+          file_name: data.document.file_name,
+          file_type: data.document.file_type,
+          file_size: data.document.file_size,
       };
     } catch (error) {
       logger.error('Failed to upload Onfido document', error instanceof Error ? error : new Error(String(error)));
@@ -174,25 +192,25 @@ export class OnfidoKYCService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Onfido API error: ${error.error?.message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as OnfidoErrorResponse;
+          throw new Error(`Onfido API error: ${errorBody.error?.message || 'Unknown error'}`);
+        }
 
-      const data = await response.json();
+        const data = (await response.json()) as OnfidoCheckResponse;
       logger.info('Onfido check created', {
-        checkId: data.check.id,
+          checkId: data.check.id,
         applicantId,
-        status: data.check.status,
+          status: data.check.status,
       });
 
       return {
-        id: data.check.id,
-        status: data.check.status,
-        type: data.check.type,
-        result: data.check.result,
-        created_at: data.check.created_at,
-        completed_at: data.check.completed_at,
+          id: data.check.id,
+          status: data.check.status,
+          type: data.check.type,
+          result: data.check.result,
+          created_at: data.check.created_at,
+          completed_at: data.check.completed_at,
       };
     } catch (error) {
       logger.error('Failed to create Onfido check', error instanceof Error ? error : new Error(String(error)));
@@ -211,19 +229,19 @@ export class OnfidoKYCService {
         },
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Onfido API error: ${error.error?.message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as OnfidoErrorResponse;
+          throw new Error(`Onfido API error: ${errorBody.error?.message || 'Unknown error'}`);
+        }
 
-      const data = await response.json();
-      return {
-        id: data.check.id,
-        status: data.check.status,
-        type: data.check.type,
-        result: data.check.result,
-        created_at: data.check.created_at,
-        completed_at: data.check.completed_at,
+        const data = (await response.json()) as OnfidoCheckResponse;
+        return {
+          id: data.check.id,
+          status: data.check.status,
+          type: data.check.type,
+          result: data.check.result,
+          created_at: data.check.created_at,
+          completed_at: data.check.completed_at,
       };
     } catch (error) {
       logger.error('Failed to get Onfido check', error instanceof Error ? error : new Error(String(error)));

@@ -262,101 +262,100 @@ export default function IngestionDashboard({ token, tenantId }: IngestionDashboa
       {/* Overview Tab */}
       {activeTab === 'overview' && (
         <>
-        <div className="flex items-center space-x-2">
-          {(['today', 'week', 'month'] as const).map(range => (
-            <button
-              key={range}
-              onClick={() => setDateRange(range)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${
-                dateRange === range
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-              }`}
-            >
-              {range.charAt(0).toUpperCase() + range.slice(1)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Stats Cards */}
-      {stats && (
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <StatCard
-            title="Total Ingested"
-            value={stats.totalIngested.toLocaleString()}
-            color="blue"
-          />
-          <StatCard
-            title="Processed"
-            value={stats.totalProcessed.toLocaleString()}
-            subtitle={`${stats.successRate.toFixed(1)}% success rate`}
-            color="green"
-          />
-          <StatCard
-            title="Failed"
-            value={stats.totalFailed.toLocaleString()}
-            color="red"
-          />
-          <StatCard
-            title="Avg Processing Time"
-            value={`${stats.averageProcessingTime.toFixed(1)}s`}
-            color="purple"
-          />
-        </div>
-      )}
-
-      {/* Source Type Breakdown */}
-      {stats && Object.keys(stats.bySourceType).length > 0 && (
-        <div className="rounded-lg border border-gray-200 bg-white p-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">By Source Type</h2>
-          <div className="space-y-3">
-            {Object.entries(stats.bySourceType).map(([sourceType, data]) => (
-              <div key={sourceType} className="flex items-center justify-between">
-                <div className="flex-1">
-                  <p className="font-medium text-gray-900 capitalize">{sourceType.replace('_', ' ')}</p>
-                  <div className="mt-1 flex items-center space-x-4 text-sm text-gray-600">
-                    <span>Ingested: {data.ingested}</span>
-                    <span>Processed: {data.processed}</span>
-                    <span className="text-red-600">Failed: {data.failed}</span>
-                  </div>
-                </div>
-                <div className="w-32 bg-gray-200 rounded-full h-2">
-                  <div
-                    className="bg-green-600 h-2 rounded-full"
-                    style={{ width: `${(data.processed / data.ingested) * 100}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Ingestion Log */}
-      <div className="rounded-lg border border-gray-200 bg-white p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold text-gray-900">Ingestion Log</h2>
           <div className="flex items-center space-x-2">
-            {(['all', 'pending', 'processing', 'completed', 'failed'] as const).map(f => (
+            {(['today', 'week', 'month'] as const).map(range => (
               <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-3 py-1 rounded text-xs font-medium ${
-                  filter === f
+                key={range}
+                onClick={() => setDateRange(range)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium ${
+                  dateRange === range
                     ? 'bg-blue-600 text-white'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                 }`}
               >
-                {f.charAt(0).toUpperCase() + f.slice(1)}
+                {range.charAt(0).toUpperCase() + range.slice(1)}
               </button>
             ))}
           </div>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
+          {/* Stats Cards */}
+          {stats && (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <StatCard
+                title="Total Ingested"
+                value={stats.totalIngested.toLocaleString()}
+                color="blue"
+              />
+              <StatCard
+                title="Processed"
+                value={stats.totalProcessed.toLocaleString()}
+                subtitle={`${stats.successRate.toFixed(1)}% success rate`}
+                color="green"
+              />
+              <StatCard
+                title="Failed"
+                value={stats.totalFailed.toLocaleString()}
+                color="red"
+              />
+              <StatCard
+                title="Avg Processing Time"
+                value={`${stats.averageProcessingTime.toFixed(1)}s`}
+                color="purple"
+              />
+            </div>
+          )}
+
+          {/* Source Type Breakdown */}
+          {stats && Object.keys(stats.bySourceType).length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-white p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">By Source Type</h2>
+              <div className="space-y-3">
+                {Object.entries(stats.bySourceType).map(([sourceType, data]) => (
+                  <div key={sourceType} className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <p className="font-medium text-gray-900 capitalize">{sourceType.replace('_', ' ')}</p>
+                      <div className="mt-1 flex items-center space-x-4 text-sm text-gray-600">
+                        <span>Ingested: {data.ingested}</span>
+                        <span>Processed: {data.processed}</span>
+                        <span className="text-red-600">Failed: {data.failed}</span>
+                      </div>
+                    </div>
+                    <div className="w-32 bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-green-600 h-2 rounded-full"
+                        style={{ width: `${(data.processed / data.ingested) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Ingestion Log */}
+          <div className="rounded-lg border border-gray-200 bg-white p-6">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-gray-900">Ingestion Log</h2>
+              <div className="flex items-center space-x-2">
+                {(['all', 'pending', 'processing', 'completed', 'failed'] as const).map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setFilter(f)}
+                    className={`px-3 py-1 rounded text-xs font-medium ${
+                      filter === f
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Provider</th>
@@ -410,6 +409,7 @@ export default function IngestionDashboard({ token, tenantId }: IngestionDashboa
           </table>
         </div>
       </div>
+      </>
       )}
     </div>
   );

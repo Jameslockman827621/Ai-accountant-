@@ -64,8 +64,8 @@ export interface OnboardingSchemaResponse {
  */
 export async function getOnboardingSchema(
   jurisdictionCode: string,
-  entityType?: string,
-  industry?: string
+    entityType?: string,
+    industry?: string
 ): Promise<OnboardingSchemaResponse> {
   try {
     // Get jurisdiction info
@@ -86,20 +86,6 @@ export async function getOnboardingSchema(
     }
 
     const jurisdiction = jurisdictionResult.rows[0];
-
-    // Get entity type info if provided
-    let entityTypeInfo = null;
-    if (entityType) {
-      const entityResult = await db.query<{
-        code: string;
-        name: string;
-        required_fields: unknown;
-      }>(
-        'SELECT code, name, required_fields FROM entity_types WHERE jurisdiction_code = $1 AND code = $2 AND enabled = true',
-        [jurisdictionCode, entityType]
-      );
-      entityTypeInfo = entityResult.rows[0] || null;
-    }
 
     // Build localization config
     const localization: LocalizationConfig = {
@@ -152,8 +138,8 @@ function getNumberFormat(jurisdictionCode: string): { decimalSeparator: string; 
  */
 function getStepsForJurisdiction(
   jurisdictionCode: string,
-  entityType?: string | null,
-  industry?: string
+  _entityType?: string | null,
+  _industry?: string
 ): OnboardingStepSchema[] {
   const baseSteps: OnboardingStepSchema[] = [
     {
@@ -611,7 +597,7 @@ function getBankProviderOptions(jurisdictionCode: string): Array<{ value: string
  * Validate step data against schema
  */
 export async function validateStepData(
-  stepName: string,
+  _stepName: string,
   stepData: Record<string, unknown>,
   schema: OnboardingStepSchema
 ): Promise<{ valid: boolean; errors: Array<{ field: string; message: string }> }> {

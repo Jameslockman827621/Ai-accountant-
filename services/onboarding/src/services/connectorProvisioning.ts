@@ -16,32 +16,32 @@ export class ConnectorProvisioningWorker {
    * Handle onboarding completed event
    */
   async handleOnboardingCompleted(tenantId: TenantId): Promise<void> {
-      try {
-        logger.info('Processing onboarding completion for connector provisioning', { tenantId });
+    try {
+      logger.info('Processing onboarding completion for connector provisioning', { tenantId });
 
-        // Get tenant's jurisdiction and entity type from intent profile
-        const intentResult = await db.query<{
-          primary_jurisdiction: string;
-          entity_type: string;
-          industry: string | null;
-        }>(
-          'SELECT primary_jurisdiction, entity_type, industry FROM intent_profiles WHERE tenant_id = $1',
-          [tenantId]
-        );
+      // Get tenant's jurisdiction and entity type from intent profile
+      const intentResult = await db.query<{
+        primary_jurisdiction: string;
+        entity_type: string;
+        industry: string | null;
+      }>(
+        'SELECT primary_jurisdiction, entity_type, industry FROM intent_profiles WHERE tenant_id = $1',
+        [tenantId]
+      );
 
-        if (intentResult.rows.length === 0) {
-          logger.warn('No intent profile found for tenant', { tenantId });
-          return;
-        }
+      if (intentResult.rows.length === 0) {
+        logger.warn('No intent profile found for tenant', { tenantId });
+        return;
+      }
 
-        const intent = intentResult.rows[0];
-        const jurisdiction = intent.primary_jurisdiction;
-        const entityType = intent.entity_type;
+      const intent = intentResult.rows[0];
+      const jurisdiction = intent.primary_jurisdiction;
+      const entityType = intent.entity_type;
 
-        // Get recommended connectors from catalog
-        const catalog = await getConnectorCatalog(jurisdiction, entityType);
+      // Get recommended connectors from catalog
+      const catalog = await getConnectorCatalog(jurisdiction, entityType);
 
-        // Prioritize connectors by category and priority
+      // Prioritize connectors by category and priority
       const prioritizedConnectors = catalog
         .filter(c => c.category === 'primary')
         .sort((a, b) => b.priority - a.priority);
