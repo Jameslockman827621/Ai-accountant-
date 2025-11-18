@@ -386,6 +386,31 @@ export interface BankTransaction {
   reconciledWith?: DocumentId | LedgerEntryId;
   metadata?: Record<string, unknown>;
   createdAt: Date;
+  updatedAt?: Date;
+  isSplit?: boolean;
+  splitStatus?: BankTransactionSplitStatus;
+  splitRemainingAmount?: number | null;
+}
+
+export type BankTransactionSplitStatus = 'not_split' | 'draft' | 'balanced' | 'pending_review' | 'applied';
+export type TransactionSplitStatus = 'draft' | 'pending_review' | 'applied' | 'void';
+
+export interface TransactionSplit {
+  id: string;
+  tenantId: TenantId;
+  bankTransactionId: string;
+  status: TransactionSplitStatus;
+  amount: number;
+  currency: string;
+  documentId?: DocumentId | null;
+  ledgerEntryId?: LedgerEntryId | null;
+  memo?: string | null;
+  tags?: string[];
+  confidenceScore?: number | null;
+  createdBy?: UserId | null;
+  updatedBy?: UserId | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface Subscription {

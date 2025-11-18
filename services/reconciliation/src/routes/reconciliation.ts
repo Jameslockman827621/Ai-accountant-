@@ -11,11 +11,182 @@ import {
   getReconciliationSummary,
   getReconciliationTrends,
 } from '../services/summary';
+import {
+  getTransactionSplits,
+  replaceTransactionSplits,
+  deleteTransactionSplits,
+  submitTransactionSplits,
+  approveTransactionSplits,
+  rejectTransactionSplits,
+} from '../services/transactionSplits';
 
 const router = Router();
 const logger = createLogger('reconciliation-service');
 
 // Find matches for a bank transaction
+router.get('/transactions/:transactionId/splits', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { transactionId } = req.params;
+    if (!transactionId) {
+      res.status(400).json({ error: 'Transaction ID is required' });
+      return;
+    }
+
+    const summary = await getTransactionSplits(req.user.tenantId, transactionId);
+    res.json(summary);
+  } catch (error) {
+    logger.error('Get transaction splits failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to fetch transaction splits' });
+  }
+});
+
+router.put('/transactions/:transactionId/splits', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { transactionId } = req.params;
+    const { splits } = req.body ?? {};
+
+    if (!transactionId) {
+      throw new ValidationError('Transaction ID is required');
+    }
+    if (!Array.isArray(splits)) {
+      throw new ValidationError('splits array is required');
+    }
+
+    const summary = await replaceTransactionSplits(
+      req.user.tenantId,
+      transactionId,
+      req.user.userId,
+      splits
+    );
+
+    res.json(summary);
+  } catch (error) {
+    logger.error('Replace transaction splits failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to save transaction splits' });
+  }
+});
+
+router.delete('/transactions/:transactionId/splits', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { transactionId } = req.params;
+    if (!transactionId) {
+      throw new ValidationError('Transaction ID is required');
+    }
+
+    await deleteTransactionSplits(req.user.tenantId, transactionId);
+    res.status(204).send();
+  } catch (error) {
+    logger.error('Delete transaction splits failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to delete transaction splits' });
+  }
+});
+
+router.post('/transactions/:transactionId/splits/submit', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { transactionId } = req.params;
+    if (!transactionId) {
+      throw new ValidationError('Transaction ID is required');
+    }
+
+    const summary = await submitTransactionSplits(req.user.tenantId, transactionId, req.user.userId);
+    res.json(summary);
+  } catch (error) {
+    logger.error('Submit transaction splits failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to submit transaction splits' });
+  }
+});
+
+router.post('/transactions/:transactionId/splits/approve', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { transactionId } = req.params;
+    const { notes } = req.body ?? {};
+
+    if (!transactionId) {
+      throw new ValidationError('Transaction ID is required');
+    }
+
+    const summary = await approveTransactionSplits(req.user.tenantId, transactionId, req.user.userId, {
+      reviewerNotes: notes || null,
+    });
+
+    res.json(summary);
+  } catch (error) {
+    logger.error('Approve transaction splits failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to approve transaction splits' });
+  }
+});
+
+router.post('/transactions/:transactionId/splits/reject', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { transactionId } = req.params;
+    const { reason } = req.body ?? {};
+
+    if (!transactionId) {
+      throw new ValidationError('Transaction ID is required');
+    }
+
+    const summary = await rejectTransactionSplits(req.user.tenantId, transactionId, req.user.userId, reason);
+    res.json(summary);
+  } catch (error) {
+    logger.error('Reject transaction splits failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to reject transaction splits' });
+  }
+});
+
 router.get('/matches/:transactionId', async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {

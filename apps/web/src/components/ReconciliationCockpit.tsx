@@ -11,6 +11,7 @@ import {
   MagnifyingGlassIcon,
   ArrowPathIcon,
 } from '@heroicons/react/24/outline';
+import { SplitTransactionDrawer } from './SplitTransactionDrawer';
 
 interface MatchCandidate {
   documentId?: string;
@@ -37,6 +38,9 @@ interface BankTransaction {
   category: string | null;
   reconciled: boolean;
   suggestedMatch?: MatchCandidate;
+  isSplit?: boolean;
+  splitStatus?: string;
+  splitRemainingAmount?: number | null;
 }
 
 interface ReconciliationEvent {
@@ -69,6 +73,7 @@ export default function ReconciliationCockpit({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedTransaction, setSelectedTransaction] = useState<string | null>(null);
+  const [splitDrawerTransaction, setSplitDrawerTransaction] = useState<BankTransaction | null>(null);
   const [filter, setFilter] = useState<'all' | 'auto_matched' | 'in_review' | 'exceptions'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -199,9 +204,11 @@ export default function ReconciliationCockpit({
     }
   }
 
-  async function splitTransaction(transactionId: string) {
-    // TODO: Implement split transaction UI
-    alert('Split transaction feature coming soon');
+  function openSplitDrawer(transaction: BankTransaction) {
+    setSplitDrawerTransaction(transaction);
+  }
+  function closeSplitDrawer() {
+    setSplitDrawerTransaction(null);
   }
 
   if (loading && transactions.length === 0) {
@@ -386,7 +393,7 @@ export default function ReconciliationCockpit({
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                splitTransaction(tx.id);
+                                  openSplitDrawer(tx);
                               }}
                               className="px-3 py-1 bg-gray-600 text-white rounded text-sm hover:bg-gray-700 transition-colors"
                             >
@@ -436,11 +443,20 @@ export default function ReconciliationCockpit({
         )}
       </div>
 
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
-          {error}
-        </div>
-      )}
+        {error && (
+          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800">
+            {error}
+          </div>
+        )}
+
+        <SplitTransactionDrawer
+          token={token}
+          transactionId={splitDrawerTransaction?.id ?? null}
+          transaction={splitDrawerTransaction}
+          open={Boolean(splitDrawerTransaction)}
+          onClose={closeSplitDrawer}
+          onChanged={fetchData}
+        />
     </div>
   );
 }

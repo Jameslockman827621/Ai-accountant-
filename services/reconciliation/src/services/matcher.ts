@@ -1,5 +1,5 @@
 import { db } from '@ai-accountant/database';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { resolveExceptionsForTransaction } from './exceptions';
 
@@ -170,12 +170,35 @@ export async function reconcileTransaction(
   }
 
   await db.transaction(async (client) => {
+    const transactionResult = await client.query<{
+      id: string;
+      is_split: boolean;
+    }>(
+      `SELECT id, is_split
+       FROM bank_transactions
+       WHERE id = $1 AND tenant_id = $2
+       FOR UPDATE`,
+      [bankTransactionId, tenantId]
+    );
+
+    const transaction = transactionResult.rows[0];
+    if (!transaction) {
+      throw new ValidationError('Bank transaction not found');
+    }
+
+    if (transaction.is_split) {
+      throw new ValidationError('Transaction has split allocations. Apply splits instead of direct reconciliation.');
+    }
+
     // Update bank transaction
     await client.query(
       `UPDATE bank_transactions
        SET reconciled = true,
            reconciled_with_document = $1,
            reconciled_with_ledger = $2,
+           is_split = false,
+           split_status = 'not_split',
+           split_remaining_amount = NULL,
            updated_at = NOW()
        WHERE id = $3 AND tenant_id = $4`,
       [documentId || null, ledgerEntryId || null, bankTransactionId, tenantId]
