@@ -1,6 +1,6 @@
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { getHMRCAccessToken } from '../../integrations/src/services/hmrc';
+import { getHMRCAccessToken } from '@ai-accountant/integrations-service/services/hmrc';
 import axios from 'axios';
 
 const logger = createLogger('compliance-service');
@@ -80,7 +80,12 @@ export async function validatePAYETaxCode(
       hmrcData: response.data,
     };
   } catch (error) {
-    logger.error('HMRC tax code validation failed', error);
+    logger.error('HMRC tax code validation failed', {
+      error,
+      tenantId,
+      employeeId,
+      taxCode,
+    });
     return {
       isValid: false,
       errors: ['Failed to validate tax code with HMRC'],

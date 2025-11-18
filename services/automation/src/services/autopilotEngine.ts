@@ -1,11 +1,7 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { randomUUID } from 'crypto';
-import { TenantId, UserId } from '@ai-accountant/shared-types';
+import { TenantId } from '@ai-accountant/shared-types';
 import { complianceCalendarService } from '../../../compliance/src/services/complianceCalendar';
-import { filingLifecycleService } from '../../../filing/src/services/filingLifecycle';
-
-const logger = createLogger('autopilot-engine');
 
 export interface AutopilotAgenda {
   id: string;
@@ -67,7 +63,10 @@ export class AutopilotEngine {
   /**
    * Generate daily agenda for tenant
    */
-  async generateDailyAgenda(tenantId: TenantId, date: string = new Date().toISOString().split('T')[0]): Promise<AutopilotAgenda> {
+  async generateDailyAgenda(
+    tenantId: TenantId,
+    date: string = formatISODate(new Date())
+  ): Promise<AutopilotAgenda> {
     // Check if agenda already exists
     const existingResult = await db.query<{ id: string }>(
       `SELECT id FROM autopilot_agenda
@@ -75,8 +74,9 @@ export class AutopilotEngine {
       [tenantId, date]
     );
 
-    if (existingResult.rows.length > 0) {
-      return this.getAgenda(existingResult.rows[0].id);
+    const existingAgenda = existingResult.rows[0];
+    if (existingAgenda?.id) {
+      return this.getAgenda(existingAgenda.id);
     }
 
     // Generate tasks from signals
@@ -112,7 +112,7 @@ export class AutopilotEngine {
         metrics.onTrack,
         metrics.atRisk,
         metrics.breached,
-        tasks.map(t => t.id),
+        tasks.map((t) => t.id),
       ]
     );
 
@@ -209,7 +209,10 @@ export class AutopilotEngine {
   /**
    * Create tasks from signals
    */
-  private async createTasksFromSignals(tenantId: TenantId, signals: TaskSignal[]): Promise<AutopilotTask[]> {
+  private async createTasksFromSignals(
+    tenantId: TenantId,
+    signals: TaskSignal[]
+  ): Promise<AutopilotTask[]> {
     const tasks: AutopilotTask[] = [];
 
     for (const signal of signals) {
@@ -223,11 +226,14 @@ export class AutopilotEngine {
   /**
    * Create task from signal
    */
-  private async createTaskFromSignal(tenantId: TenantId, signal: TaskSignal): Promise<AutopilotTask> {
+  private async createTaskFromSignal(
+    tenantId: TenantId,
+    signal: TaskSignal
+  ): Promise<AutopilotTask> {
     const taskId = randomUUID();
     const now = new Date();
     const dueDate = new Date(now);
-    
+
     // Set due date based on priority
     switch (signal.priority) {
       case 'urgent':
@@ -278,13 +284,7 @@ export class AutopilotEngine {
       `INSERT INTO sla_tracking (
         tenant_id, task_id, sla_type, sla_hours, sla_start_time, sla_due_time
       ) VALUES ($1, $2, $3, $4, NOW(), $5)`,
-      [
-        tenantId,
-        taskId,
-        'completion_time',
-        this.calculateSLAHours(signal.priority),
-        dueDate,
-      ]
+      [tenantId, taskId, 'completion_time', this.calculateSLAHours(signal.priority), dueDate]
     );
 
     return this.getTask(taskId);
@@ -311,16 +311,12 @@ export class AutopilotEngine {
       at_risk_count: number;
       breached_count: number;
       task_ids: string[];
-    }>(
-      `SELECT * FROM autopilot_agenda WHERE id = $1`,
-      [agendaId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new Error('Agenda not found');
-    }
+    }>(`SELECT * FROM autopilot_agenda WHERE id = $1`, [agendaId]);
 
     const row = result.rows[0];
+    if (!row) {
+      throw new Error('Agenda not found');
+    }
     return {
       id: row.id,
       tenantId: row.tenant_id as TenantId,
@@ -373,16 +369,12 @@ export class AutopilotEngine {
       execution_method: string | null;
       execution_result: unknown;
       created_at: string;
-    }>(
-      `SELECT * FROM autopilot_tasks WHERE id = $1`,
-      [taskId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new Error('Task not found');
-    }
+    }>(`SELECT * FROM autopilot_tasks WHERE id = $1`, [taskId]);
 
     const row = result.rows[0];
+    if (!row) {
+      throw new Error('Task not found');
+    }
     return {
       id: row.id,
       tenantId: row.tenant_id as TenantId,
@@ -492,30 +484,39 @@ export class AutopilotEngine {
     breached: number;
   } {
     const now = new Date();
-    
+
     return {
       total: tasks.length,
-      pending: tasks.filter(t => t.status === 'pending').length,
-      inProgress: tasks.filter(t => t.status === 'in_progress').length,
-      completed: tasks.filter(t => t.status === 'completed').length,
-      overdue: tasks.filter(t => t.dueDate && new Date(t.dueDate) < now && t.status !== 'completed').length,
-      urgent: tasks.filter(t => t.priority === 'urgent').length,
-      high: tasks.filter(t => t.priority === 'high').length,
-      medium: tasks.filter(t => t.priority === 'medium').length,
-      low: tasks.filter(t => t.priority === 'low').length,
-      onTrack: tasks.filter(t => {
+      pending: tasks.filter((t) => t.status === 'pending').length,
+      inProgress: tasks.filter((t) => t.status === 'in_progress').length,
+      completed: tasks.filter((t) => t.status === 'completed').length,
+      overdue: tasks.filter(
+        (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== 'completed'
+      ).length,
+      urgent: tasks.filter((t) => t.priority === 'urgent').length,
+      high: tasks.filter((t) => t.priority === 'high').length,
+      medium: tasks.filter((t) => t.priority === 'medium').length,
+      low: tasks.filter((t) => t.priority === 'low').length,
+      onTrack: tasks.filter((t) => {
         if (!t.dueDate) return false;
         const hoursUntilDue = (new Date(t.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60);
         return hoursUntilDue > (t.slaHours || 24) * 0.5;
       }).length,
-      atRisk: tasks.filter(t => {
+      atRisk: tasks.filter((t) => {
         if (!t.dueDate) return false;
         const hoursUntilDue = (new Date(t.dueDate).getTime() - now.getTime()) / (1000 * 60 * 60);
         return hoursUntilDue <= (t.slaHours || 24) * 0.5 && hoursUntilDue > 0;
       }).length,
-      breached: tasks.filter(t => t.dueDate && new Date(t.dueDate) < now && t.status !== 'completed').length,
+      breached: tasks.filter(
+        (t) => t.dueDate && new Date(t.dueDate) < now && t.status !== 'completed'
+      ).length,
     };
   }
 }
 
 export const autopilotEngine = new AutopilotEngine();
+
+function formatISODate(date: Date): string {
+  const [isoDate] = date.toISOString().split('T');
+  return isoDate ?? date.toISOString();
+}

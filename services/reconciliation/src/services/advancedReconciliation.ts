@@ -1,7 +1,6 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { getAccountBalance } from './reconciliation';
 
 const logger = createLogger('reconciliation-service');
 
@@ -50,6 +49,10 @@ export async function findAdvancedMatches(
   }
 
   const tx = transaction.rows[0];
+  if (!tx) {
+    throw new Error('Transaction not found');
+  }
+
   const matches: ReconciliationMatch[] = [];
 
   // 1. Exact amount matches (within tolerance)
@@ -59,7 +62,7 @@ export async function findAdvancedMatches(
     amount: number;
     description: string;
     date: Date;
-    account_code: string;
+    account_code: string | null;
   }>(
     `SELECT 
        le.id,
@@ -135,10 +138,8 @@ export async function findAdvancedMatches(
       confidence = 0.5;
     }
 
-    matches.push({
+    const matchObj: ReconciliationMatch = {
       transactionId: tx.id,
-      documentId: match.type === 'document' ? match.id : undefined,
-      ledgerEntryId: match.type === 'ledger_entry' ? match.id : undefined,
       matchScore: Math.max(0, Math.min(1, matchScore)),
       matchType,
       confidence,
@@ -147,11 +148,21 @@ export async function findAdvancedMatches(
         { field: 'date', transactionValue: tx.date, matchedValue: match.date },
       ],
       reasoning: `Matched by ${matchType} matching: amount difference ${amountDiff.toFixed(2)}, date difference ${dateDiff.toFixed(1)} days, description similarity ${(descSimilarity * 100).toFixed(1)}%`,
-    });
+    };
+
+    if (match.type === 'document') {
+      matchObj.documentId = match.id;
+    }
+    if (match.type === 'ledger_entry') {
+      matchObj.ledgerEntryId = match.id;
+    }
+
+    matches.push(matchObj);
   }
 
   // 2. Fuzzy matches (similar amount, similar description)
-  if (matches.length === 0 || matches[0].matchScore < 0.9) {
+  const firstMatch = matches[0];
+  if (matches.length === 0 || (firstMatch && firstMatch.matchScore < 0.9)) {
     const fuzzyMatches = await findFuzzyMatches(tenantId, tx, tolerance * 2);
     matches.push(...fuzzyMatches);
   }
@@ -174,7 +185,7 @@ export async function findAdvancedMatches(
 
 async function findFuzzyMatches(
   tenantId: TenantId,
-  transaction: { amount: number; description: string; date: Date },
+  transaction: { id: string; amount: number; description: string; date: Date },
   tolerance: number
 ): Promise<ReconciliationMatch[]> {
   const matches: ReconciliationMatch[] = [];
@@ -221,8 +232,8 @@ async function findFuzzyMatches(
     const confidence = matchScore >= 0.8 ? 0.7 : matchScore >= 0.6 ? 0.5 : 0.3;
 
     if (matchScore >= 0.6) {
-      matches.push({
-        transactionId: transaction as unknown as string,
+      const matchObj: ReconciliationMatch = {
+        transactionId: transaction.id,
         ledgerEntryId: match.id,
         matchScore,
         matchType: 'fuzzy',
@@ -233,7 +244,8 @@ async function findFuzzyMatches(
           { field: 'date', transactionValue: transaction.date, matchedValue: match.date },
         ],
         reasoning: `Fuzzy match: amount similarity ${(amountSimilarity * 100).toFixed(1)}%, description similarity ${(descSimilarity * 100).toFixed(1)}%, date similarity ${(dateSimilarity * 100).toFixed(1)}%`,
-      });
+      };
+      matches.push(matchObj);
     }
   }
 
@@ -259,24 +271,32 @@ function levenshteinDistance(str1: string, str2: string): number {
   }
 
   for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
+    const firstRow = matrix[0];
+    if (firstRow) {
+      firstRow[j] = j;
+    }
   }
 
   for (let i = 1; i <= str2.length; i++) {
+    const row = matrix[i];
+    if (!row) continue;
     for (let j = 1; j <= str1.length; j++) {
+      const prevRow = matrix[i - 1];
+      if (!prevRow) continue;
       if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
+        row[j] = prevRow[j - 1] ?? 0;
       } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
+        row[j] = Math.min(
+          (prevRow[j - 1] ?? 0) + 1,
+          (row[j - 1] ?? 0) + 1,
+          (prevRow[j] ?? 0) + 1
         );
       }
     }
   }
 
-  return matrix[str2.length][str1.length];
+  const finalRow = matrix[str2.length];
+  return finalRow?.[str1.length] ?? 0;
 }
 
 /**

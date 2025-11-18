@@ -10,7 +10,7 @@ export interface ChartData {
   datasets: Array<{
     label: string;
     data: number[];
-    backgroundColor?: string;
+    backgroundColor?: string | string[];
   }>;
 }
 
@@ -38,18 +38,22 @@ export async function generateRevenueChart(
   );
 
   return {
-    labels: result.rows.map(r => new Date(r.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })),
-    datasets: [{
-      label: 'Revenue',
-      data: result.rows.map(r => typeof r.revenue === 'number' ? r.revenue : parseFloat(String(r.revenue || '0'))),
-      backgroundColor: 'rgba(34, 197, 94, 0.5)',
-    }],
+    labels: result.rows.map((r) =>
+      new Date(r.month).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })
+    ),
+    datasets: [
+      {
+        label: 'Revenue',
+        data: result.rows.map((r) =>
+          typeof r.revenue === 'number' ? r.revenue : parseFloat(String(r.revenue || '0'))
+        ),
+        backgroundColor: 'rgba(34, 197, 94, 0.5)',
+      },
+    ],
   };
 }
 
-export async function generateExpenseBreakdown(
-  tenantId: TenantId
-): Promise<ChartData> {
+export async function generateExpenseBreakdown(tenantId: TenantId): Promise<ChartData> {
   logger.info('Generating expense breakdown', { tenantId });
 
   const result = await db.query<{
@@ -76,14 +80,19 @@ export async function generateExpenseBreakdown(
     'rgba(59, 130, 246, 0.5)',
   ];
 
+  const fallbackColor = colors[0] ?? 'rgba(107, 114, 128, 0.5)';
+  const backgroundColors = result.rows.map((_, i) => colors[i % colors.length] ?? fallbackColor);
+
   return {
-    labels: result.rows.map(r => r.account_name),
-    datasets: [{
-      label: 'Expenses',
-      data: result.rows.map((r, i) => ({
-        value: typeof r.total === 'number' ? r.total : parseFloat(String(r.total || '0')),
-        color: colors[i % colors.length],
-      })),
-    }],
+    labels: result.rows.map((r) => r.account_name),
+    datasets: [
+      {
+        label: 'Expenses',
+        data: result.rows.map((r) =>
+          typeof r.total === 'number' ? r.total : parseFloat(String(r.total || '0'))
+        ),
+        backgroundColor: backgroundColors,
+      },
+    ],
   };
 }

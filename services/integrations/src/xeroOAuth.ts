@@ -5,6 +5,39 @@ import crypto from 'crypto';
 
 const logger = createLogger('integrations-service');
 
+interface XeroTokenResponse {
+  access_token?: string | undefined;
+  refresh_token?: string | undefined;
+  expires_in?: number | undefined;
+  tenant_id?: string | undefined;
+  tenantId?: string | undefined;
+}
+
+function parseXeroTokenResponse(payload: unknown): XeroTokenResponse {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+
+  const record = payload as Record<string, unknown>;
+  const getString = (key: string): string | undefined => {
+    const value = record[key];
+    return typeof value === 'string' ? value : undefined;
+  };
+
+  const getNumber = (key: string): number | undefined => {
+    const value = record[key];
+    return typeof value === 'number' ? value : undefined;
+  };
+
+  return {
+    access_token: getString('access_token'),
+    refresh_token: getString('refresh_token'),
+    expires_in: getNumber('expires_in'),
+    tenant_id: getString('tenant_id'),
+    tenantId: getString('tenantId'),
+  };
+}
+
 // Complete Xero OAuth Flow (similar to QuickBooks)
 export class XeroOAuth {
   async initiateOAuth(tenantId: TenantId, redirectUri: string): Promise<string> {
@@ -67,13 +100,18 @@ export class XeroOAuth {
       throw new Error(`Xero token exchange failed: ${tokenResponse.status} ${errorText}`);
     }
 
-    const tokenData = await tokenResponse.json();
+    const tokenData = parseXeroTokenResponse(await tokenResponse.json());
     const accessToken = tokenData.access_token;
     const refreshToken = tokenData.refresh_token;
     const tenantIdXero = tokenData.tenant_id || tokenData.tenantId; // Xero tenant ID
 
+    if (!accessToken || !refreshToken || !tenantIdXero) {
+      throw new Error('Xero token exchange returned incomplete data');
+    }
+
     // Store tokens and tenant ID
-    const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+    const expiresInMs = (tokenData.expires_in ?? 1800) * 1000;
+    const expiresAt = new Date(Date.now() + expiresInMs);
     
     await db.query(
       `INSERT INTO xero_connections (

@@ -1,7 +1,23 @@
-import { Queue, Worker, Job } from 'bullmq';
+// Conditional import for bullmq - may not be installed
+// Using dynamic require to handle optional dependency
+import type { Queue as BullMQQueue, Worker as BullMQWorker, Job as BullMQJob } from 'bullmq';
+
+let Queue: typeof BullMQQueue | null = null;
+let Worker: typeof BullMQWorker | null = null;
+
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const bullmq = require('bullmq');
+  Queue = bullmq.Queue;
+  Worker = bullmq.Worker;
+} catch {
+  // bullmq not installed - will throw at runtime if used
+  // This is handled by the conditional import in index.ts
+}
+
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { intelligentMatchingService } from '../services/intelligentMatching';
+import { intelligentMatchingService, MatchSignals } from '../services/intelligentMatching';
 import { reconciliationExceptionService } from '../services/reconciliationExceptions';
 import { db } from '@ai-accountant/database';
 
@@ -15,24 +31,26 @@ const redisConnection = {
   maxRetriesPerRequest: null, // Required for BullMQ
 };
 
-// Create queue
-export const reconciliationQueue = new Queue('reconciliation', {
-  connection: redisConnection,
-  defaultJobOptions: {
-    attempts: 3,
-    backoff: {
-      type: 'exponential',
-      delay: 2000,
-    },
-    removeOnComplete: {
-      age: 3600, // Keep completed jobs for 1 hour
-      count: 1000, // Keep last 1000 completed jobs
-    },
-    removeOnFail: {
-      age: 86400, // Keep failed jobs for 24 hours
-    },
-  },
-});
+// Create queue (only if Queue is available)
+export const reconciliationQueue: BullMQQueue<ReconciliationJobData> | null = Queue
+  ? new Queue('reconciliation', {
+      connection: redisConnection,
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: {
+          type: 'exponential',
+          delay: 2000,
+        },
+        removeOnComplete: {
+          age: 3600, // Keep completed jobs for 1 hour
+          count: 1000, // Keep last 1000 completed jobs
+        },
+        removeOnFail: {
+          age: 86400, // Keep failed jobs for 24 hours
+        },
+      },
+    })
+  : null;
 
 interface ReconciliationJobData {
   tenantId: TenantId;
@@ -43,7 +61,7 @@ interface ReconciliationJobData {
 /**
  * Process a single reconciliation job
  */
-async function processReconciliationJob(job: Job<ReconciliationJobData>): Promise<void> {
+async function processReconciliationJob(job: BullMQJob<ReconciliationJobData>): Promise<void> {
   const { tenantId, bankTransactionId } = job.data;
 
   logger.info('Processing reconciliation job', {
@@ -64,8 +82,9 @@ async function processReconciliationJob(job: Job<ReconciliationJobData>): Promis
         [bankTransactionId]
       );
 
-      if (txResult.rows.length > 0) {
-        const daysOld = (Date.now() - txResult.rows[0].date.getTime()) / (1000 * 60 * 60 * 24);
+      const txRow = txResult.rows[0];
+      if (txRow) {
+        const daysOld = (Date.now() - txRow.date.getTime()) / (1000 * 60 * 60 * 24);
         if (daysOld > 7) {
           await reconciliationExceptionService.createException(tenantId, {
             exceptionType: 'unmatched',
@@ -82,6 +101,10 @@ async function processReconciliationJob(job: Job<ReconciliationJobData>): Promis
 
     // Get best match
     const bestMatch = matches[0];
+    if (!bestMatch) {
+      logger.info('No valid match found', { tenantId, bankTransactionId });
+      return;
+    }
 
     // Auto-match if confidence is high enough
     if (bestMatch.matchType === 'auto' && bestMatch.confidenceScore >= 0.85) {
@@ -115,7 +138,12 @@ async function processReconciliationJob(job: Job<ReconciliationJobData>): Promis
 async function autoMatch(
   tenantId: TenantId,
   bankTransactionId: string,
-  match: { documentId?: string; ledgerEntryId?: string; confidenceScore: number; signals: any }
+  match: {
+    documentId?: string;
+    ledgerEntryId?: string;
+    confidenceScore: number;
+    signals?: MatchSignals;
+  }
 ): Promise<void> {
   await db.transaction(async (client) => {
     await client.query(
@@ -147,20 +175,40 @@ async function autoMatch(
     }
   });
 
-  await intelligentMatchingService.recordEvent(tenantId, {
+  const eventPayload: {
+    bankTransactionId: string;
+    documentId?: string;
+    ledgerEntryId?: string;
+    eventType: 'auto_match';
+    reasonCode: string;
+    reasonDescription: string;
+    confidenceScore: number;
+    matchSignals?: MatchSignals;
+    metadata: Record<string, unknown>;
+  } = {
     bankTransactionId,
-    documentId: match.documentId,
-    ledgerEntryId: match.ledgerEntryId,
     eventType: 'auto_match',
     reasonCode: 'high_confidence_auto_match',
     reasonDescription: `Auto-matched with confidence ${(match.confidenceScore * 100).toFixed(1)}%`,
     confidenceScore: match.confidenceScore,
-    matchSignals: match.signals,
     metadata: {
       automated: true,
       worker: 'bull-reconciliation-worker',
     },
-  });
+  };
+
+  if (match.documentId) {
+    eventPayload.documentId = match.documentId;
+  }
+  if (match.ledgerEntryId) {
+    eventPayload.ledgerEntryId = match.ledgerEntryId;
+  }
+
+  if (match.signals) {
+    eventPayload.matchSignals = match.signals;
+  }
+
+  await intelligentMatchingService.recordEvent(tenantId, eventPayload);
 }
 
 /**
@@ -169,7 +217,12 @@ async function autoMatch(
 async function markAsSuggested(
   tenantId: TenantId,
   bankTransactionId: string,
-  match: { documentId?: string; ledgerEntryId?: string; confidenceScore: number; signals: any }
+  match: {
+    documentId?: string;
+    ledgerEntryId?: string;
+    confidenceScore: number;
+    signals?: MatchSignals;
+  }
 ): Promise<void> {
   await db.query(
     `UPDATE bank_transactions
@@ -186,7 +239,7 @@ async function markAsSuggested(
       match.documentId || null,
       match.ledgerEntryId || null,
       match.confidenceScore,
-      JSON.stringify(match.signals),
+      JSON.stringify(match.signals ?? {}),
       bankTransactionId,
       tenantId,
     ]
@@ -196,10 +249,13 @@ async function markAsSuggested(
 /**
  * Create BullMQ worker
  */
-export function createReconciliationWorker(): Worker<ReconciliationJobData> {
+export function createReconciliationWorker(): BullMQWorker<ReconciliationJobData> {
+  if (!Worker) {
+    throw new Error('BullMQ Worker is not available. Please install bullmq package.');
+  }
   const worker = new Worker<ReconciliationJobData>(
     'reconciliation',
-    async (job) => {
+    async (job: BullMQJob<ReconciliationJobData>) => {
       await processReconciliationJob(job);
     },
     {
@@ -212,28 +268,33 @@ export function createReconciliationWorker(): Worker<ReconciliationJobData> {
     }
   );
 
-  worker.on('completed', (job) => {
+  worker.on('completed', (...args: unknown[]) => {
+    const job = args[0] as BullMQJob<ReconciliationJobData> | undefined;
     logger.info('Job completed', {
-      jobId: job.id,
-      tenantId: job.data.tenantId,
-      duration: job.finishedOn && job.processedOn
-        ? job.finishedOn - job.processedOn
-        : undefined,
+      jobId: job?.id,
+      tenantId: job?.data?.tenantId,
+      duration:
+        job && job.finishedOn && job.processedOn ? job.finishedOn - job.processedOn : undefined,
     });
   });
 
-  worker.on('failed', (job, err) => {
+  worker.on('failed', (...args: unknown[]) => {
+    const job = args[0] as BullMQJob<ReconciliationJobData> | undefined;
+    const errArg = args[1];
+    const error = errArg instanceof Error ? errArg : new Error(String(errArg));
     logger.error('Job failed', {
       jobId: job?.id,
-      tenantId: job?.data.tenantId,
-      error: err instanceof Error ? err : new Error(String(err)),
+      tenantId: job?.data?.tenantId,
+      error,
       attempts: job?.attemptsMade,
     });
   });
 
-  worker.on('error', (err) => {
+  worker.on('error', (...args: unknown[]) => {
+    const errArg = args[0];
+    const error = errArg instanceof Error ? errArg : new Error(String(errArg));
     logger.error('Worker error', {
-      error: err instanceof Error ? err : new Error(String(err)),
+      error,
     });
   });
 
@@ -252,6 +313,9 @@ export async function addReconciliationJob(
   bankTransactionId: string,
   priority: 'high' | 'medium' | 'low' = 'medium'
 ): Promise<string> {
+  if (!reconciliationQueue) {
+    throw new Error('Reconciliation queue is not available. Please install bullmq package.');
+  }
   const job = await reconciliationQueue.add(
     'reconcile-transaction',
     {
@@ -272,7 +336,7 @@ export async function addReconciliationJob(
     priority,
   });
 
-  return job.id!;
+  return job.id ?? '';
 }
 
 /**

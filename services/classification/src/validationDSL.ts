@@ -1,7 +1,4 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { DocumentType } from '@ai-accountant/shared-types';
-
-const logger = createLogger('validation-dsl');
 
 export interface ValidationRule {
   field: string;

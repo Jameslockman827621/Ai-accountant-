@@ -50,15 +50,16 @@ export async function detectDuplicates(
     throw new Error('Document not found');
   }
 
-  const document = docResult.rows[0];
+  const document = docResult.rows[0]!;
   const extractedData = document.extracted_data || {};
 
   // Get potential duplicates (same type, similar date, similar amount)
-  const amount = typeof extractedData.total === 'number'
-    ? extractedData.total
-    : parseFloat(String(extractedData.total || '0'));
+  const amount =
+    typeof extractedData.total === 'number'
+      ? extractedData.total
+      : parseFloat(String(extractedData.total || '0'));
   const date = extractedData.date ? new Date(String(extractedData.date)) : document.created_at;
-  const vendor = (extractedData.vendor as string) || '';
+  const vendor = typeof extractedData.vendor === 'string' ? extractedData.vendor : '';
 
   // Find similar documents
   const similarDocs = await db.query<{
@@ -85,10 +86,11 @@ export async function detectDuplicates(
 
   for (const candidate of similarDocs.rows) {
     const candidateData = candidate.extracted_data || {};
-    const candidateAmount = typeof candidateData.total === 'number'
-      ? candidateData.total
-      : parseFloat(String(candidateData.total || '0'));
-    const candidateVendor = (candidateData.vendor as string) || '';
+    const candidateAmount =
+      typeof candidateData.total === 'number'
+        ? candidateData.total
+        : parseFloat(String(candidateData.total || '0'));
+    const candidateVendor = typeof candidateData.vendor === 'string' ? candidateData.vendor : '';
 
     // Calculate similarity
     let similarityScore = 0;
@@ -97,9 +99,8 @@ export async function detectDuplicates(
 
     // Amount similarity (within 1% or exact match)
     const amountDiff = Math.abs(amount - candidateAmount);
-    const amountSimilarity = amount > 0
-      ? 1 - Math.min(amountDiff / amount, 1)
-      : candidateAmount === amount ? 1 : 0;
+    const amountSimilarity =
+      amount > 0 ? 1 - Math.min(amountDiff / amount, 1) : candidateAmount === amount ? 1 : 0;
 
     if (amountSimilarity > 0.99) {
       similarityScore += 0.4;
@@ -113,7 +114,10 @@ export async function detectDuplicates(
     }
 
     // Vendor similarity (exact match or fuzzy)
-    const vendorSimilarity = calculateStringSimilarity(vendor.toLowerCase(), candidateVendor.toLowerCase());
+    const vendorSimilarity = calculateStringSimilarity(
+      vendor.toLowerCase(),
+      candidateVendor.toLowerCase()
+    );
     if (vendorSimilarity > 0.8) {
       similarityScore += 0.3;
       matchingFields.push('vendor');
@@ -126,7 +130,9 @@ export async function detectDuplicates(
     }
 
     // Date similarity (within 1 day)
-    const candidateDate = candidateData.date ? new Date(String(candidateData.date)) : candidate.created_at;
+    const candidateDate = candidateData.date
+      ? new Date(String(candidateData.date))
+      : candidate.created_at;
     const dateDiff = Math.abs(date.getTime() - candidateDate.getTime());
     const dateSimilarity = dateDiff < 24 * 60 * 60 * 1000 ? 1 : 0;
 
@@ -142,10 +148,15 @@ export async function detectDuplicates(
     }
 
     // Description similarity
-    const description = (extractedData.description as string) || '';
-    const candidateDescription = (candidateData.description as string) || '';
+    const description =
+      typeof extractedData.description === 'string' ? extractedData.description : '';
+    const candidateDescription =
+      typeof candidateData.description === 'string' ? candidateData.description : '';
     if (description && candidateDescription) {
-      const descSimilarity = calculateStringSimilarity(description.toLowerCase(), candidateDescription.toLowerCase());
+      const descSimilarity = calculateStringSimilarity(
+        description.toLowerCase(),
+        candidateDescription.toLowerCase()
+      );
       if (descSimilarity > 0.7) {
         similarityScore += 0.1;
         matchingFields.push('description');
@@ -167,15 +178,16 @@ export async function detectDuplicates(
   // Sort by similarity score
   matches.sort((a, b) => b.similarityScore - a.similarityScore);
 
-  const isDuplicate = matches.length > 0 && matches[0].similarityScore > 0.9;
+  const topMatch = matches[0];
+  const isDuplicate = Boolean(topMatch && topMatch.similarityScore > 0.9);
 
   // Determine recommended action
   let recommendedAction: DuplicateDetectionResult['recommendedAction'] = 'review';
-  if (isDuplicate && matches[0].similarityScore > 0.95) {
+  if (topMatch && topMatch.similarityScore > 0.95) {
     recommendedAction = 'delete_duplicate';
-  } else if (matches.length > 0 && matches[0].similarityScore > 0.85) {
+  } else if (topMatch && topMatch.similarityScore > 0.85) {
     recommendedAction = 'merge';
-  } else if (matches.length > 0) {
+  } else if (topMatch) {
     recommendedAction = 'keep_both';
   }
 
@@ -195,7 +207,6 @@ function calculateStringSimilarity(str1: string, str2: string): number {
   if (str1 === str2) return 1;
 
   const longer = str1.length > str2.length ? str1 : str2;
-  const shorter = str1.length > str2.length ? str2 : str1;
 
   if (longer.length === 0) return 1;
 
@@ -204,29 +215,30 @@ function calculateStringSimilarity(str1: string, str2: string): number {
 }
 
 function levenshteinDistance(str1: string, str2: string): number {
-  const matrix: number[][] = [];
-
-  for (let i = 0; i <= str2.length; i++) {
-    matrix[i] = [i];
+  if (str1 === str2) {
+    return 0;
+  }
+  if (str1.length === 0) {
+    return str2.length;
+  }
+  if (str2.length === 0) {
+    return str1.length;
   }
 
-  for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
-  }
+  let previousRow = Array.from({ length: str2.length + 1 }, (_, idx) => idx);
+  let currentRow = new Array<number>(str2.length + 1).fill(0);
 
-  for (let i = 1; i <= str2.length; i++) {
-    for (let j = 1; j <= str1.length; j++) {
-      if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
-        );
-      }
+  for (let i = 1; i <= str1.length; i++) {
+    currentRow[0] = i;
+    for (let j = 1; j <= str2.length; j++) {
+      const cost = str1.charAt(i - 1) === str2.charAt(j - 1) ? 0 : 1;
+      const deletion = previousRow[j]! + 1;
+      const insertion = currentRow[j - 1]! + 1;
+      const substitution = previousRow[j - 1]! + cost;
+      currentRow[j] = Math.min(deletion, insertion, substitution);
     }
+    [previousRow, currentRow] = [currentRow, previousRow];
   }
 
-  return matrix[str2.length][str1.length];
+  return previousRow[str2.length] ?? 0;
 }

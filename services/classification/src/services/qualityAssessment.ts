@@ -5,7 +5,13 @@ import { TenantId, DocumentId } from '@ai-accountant/shared-types';
 const logger = createLogger('classification-service');
 
 export interface QualityIssue {
-  type: 'blurry' | 'incomplete' | 'low_resolution' | 'poor_contrast' | 'missing_fields' | 'unreadable';
+  type:
+    | 'blurry'
+    | 'incomplete'
+    | 'low_resolution'
+    | 'poor_contrast'
+    | 'missing_fields'
+    | 'unreadable';
   severity: 'low' | 'medium' | 'high';
   description: string;
   field?: string;
@@ -48,8 +54,8 @@ export async function assessDocumentQuality(
     throw new Error('Document not found');
   }
 
-  const document = docResult.rows[0];
-  const extractedData = document.extracted_data || {};
+  const document = docResult.rows[0]!;
+  const extractedData = (document.extracted_data ?? {}) as Record<string, unknown>;
   const qualityIssues: QualityIssue[] = [];
 
   // Check confidence score
@@ -64,21 +70,33 @@ export async function assessDocumentQuality(
 
   // Check for missing critical fields
   const requiredFields = ['total', 'date', 'vendor'];
-  const missingFields = requiredFields.filter(
-    field => !extractedData[field] || (typeof extractedData[field] === 'string' && !extractedData[field].trim())
-  );
+  const missingFields = requiredFields.filter((field) => {
+    const value = extractedData[field];
+    if (value === null || value === undefined) {
+      return true;
+    }
+    if (typeof value === 'string') {
+      return value.trim() === '';
+    }
+    return false;
+  });
 
   if (missingFields.length > 0) {
-    qualityIssues.push({
+    const issue: QualityIssue = {
       type: 'missing_fields',
       severity: missingFields.length >= 2 ? 'high' : 'medium',
       description: `Missing required fields: ${missingFields.join(', ')}`,
-      field: missingFields[0],
-    });
+    };
+    const firstMissing = missingFields[0];
+    if (firstMissing) {
+      issue.field = firstMissing;
+    }
+    qualityIssues.push(issue);
   }
 
   // Check file size (very small files might be low quality)
-  if (document.file_size < 10000) { // Less than 10KB
+  if (document.file_size < 10000) {
+    // Less than 10KB
     qualityIssues.push({
       type: 'low_resolution',
       severity: 'medium',
@@ -87,9 +105,8 @@ export async function assessDocumentQuality(
   }
 
   // Check extracted data quality
-  const total = typeof extractedData.total === 'number'
-    ? extractedData.total
-    : parseFloat(String(extractedData.total || '0'));
+  const totalRaw = extractedData.total;
+  const total = typeof totalRaw === 'number' ? totalRaw : parseFloat(String(totalRaw ?? '0'));
 
   if (total <= 0) {
     qualityIssues.push({
@@ -101,8 +118,9 @@ export async function assessDocumentQuality(
   }
 
   // Check date validity
-  if (extractedData.date) {
-    const date = new Date(String(extractedData.date));
+  const rawDate = extractedData.date;
+  if (rawDate !== undefined) {
+    const date = rawDate instanceof Date ? rawDate : new Date(String(rawDate));
     if (Number.isNaN(date.getTime())) {
       qualityIssues.push({
         type: 'missing_fields',
@@ -125,12 +143,15 @@ export async function assessDocumentQuality(
   // Adjust based on confidence score
   overallScore = Math.min(overallScore, confidenceScore * 100);
 
-  const isAcceptable = overallScore >= 70 && qualityIssues.filter(i => i.severity === 'high').length === 0;
+  const isAcceptable =
+    overallScore >= 70 && qualityIssues.filter((i) => i.severity === 'high').length === 0;
 
   // Generate recommendations
   const recommendations: string[] = [];
   if (overallScore < 70) {
-    recommendations.push('Document quality is below acceptable threshold. Consider re-uploading with better image quality.');
+    recommendations.push(
+      'Document quality is below acceptable threshold. Consider re-uploading with better image quality.'
+    );
   }
   if (missingFields.length > 0) {
     recommendations.push(`Please manually enter missing fields: ${missingFields.join(', ')}`);
@@ -138,8 +159,10 @@ export async function assessDocumentQuality(
   if (confidenceScore < 0.7) {
     recommendations.push('OCR confidence is low. Please review and correct extracted data.');
   }
-  if (qualityIssues.some(i => i.type === 'low_resolution')) {
-    recommendations.push('Image resolution may be too low. Try scanning at a higher resolution (300 DPI recommended).');
+  if (qualityIssues.some((i) => i.type === 'low_resolution')) {
+    recommendations.push(
+      'Image resolution may be too low. Try scanning at a higher resolution (300 DPI recommended).'
+    );
   }
 
   // Update document with quality assessment

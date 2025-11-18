@@ -699,6 +699,93 @@ const MISSOURI_STANDARD_DEDUCTION_2024: Record<FilingStatus, number> = {
   head: 21900,
 };
 
+export const ENHANCED_STATE_DATA_REFERENCES = {
+  ALABAMA: {
+    incomeBrackets: ALABAMA_INCOME_BRACKETS_2024,
+    standardDeductions: ALABAMA_STANDARD_DEDUCTION_2024,
+    filingSchemas: ALABAMA_FILING_SCHEMAS,
+    regressionTests: ALABAMA_REGRESSION_TESTS,
+  },
+  ARIZONA: {
+    incomeBrackets: ARIZONA_INCOME_BRACKETS_2024,
+    standardDeductions: ARIZONA_STANDARD_DEDUCTION_2024,
+    filingSchemas: ARIZONA_FILING_SCHEMAS,
+    regressionTests: ARIZONA_REGRESSION_TESTS,
+  },
+  ARKANSAS: {
+    incomeBrackets: ARKANSAS_INCOME_BRACKETS_2024,
+    standardDeductions: ARKANSAS_STANDARD_DEDUCTION_2024,
+  },
+  COLORADO: {
+    incomeBrackets: COLORADO_INCOME_BRACKETS_2024,
+    standardDeductions: COLORADO_STANDARD_DEDUCTION_2024,
+  },
+  CONNECTICUT: {
+    incomeBrackets: CONNECTICUT_INCOME_BRACKETS_2024,
+    standardDeductions: CONNECTICUT_STANDARD_DEDUCTION_2024,
+  },
+  DELAWARE: {
+    incomeBrackets: DELAWARE_INCOME_BRACKETS_2024,
+    standardDeductions: DELAWARE_STANDARD_DEDUCTION_2024,
+  },
+  DISTRICT_OF_COLUMBIA: {
+    incomeBrackets: DC_INCOME_BRACKETS_2024,
+    standardDeductions: DC_STANDARD_DEDUCTION_2024,
+  },
+  HAWAII: {
+    incomeBrackets: HAWAII_INCOME_BRACKETS_2024,
+    standardDeductions: HAWAII_STANDARD_DEDUCTION_2024,
+  },
+  IDAHO: {
+    incomeBrackets: IDAHO_INCOME_BRACKETS_2024,
+    standardDeductions: IDAHO_STANDARD_DEDUCTION_2024,
+  },
+  INDIANA: {
+    incomeBrackets: INDIANA_INCOME_BRACKETS_2024,
+    standardDeductions: INDIANA_STANDARD_DEDUCTION_2024,
+  },
+  IOWA: {
+    incomeBrackets: IOWA_INCOME_BRACKETS_2024,
+    standardDeductions: IOWA_STANDARD_DEDUCTION_2024,
+  },
+  KANSAS: {
+    incomeBrackets: KANSAS_INCOME_BRACKETS_2024,
+    standardDeductions: KANSAS_STANDARD_DEDUCTION_2024,
+  },
+  KENTUCKY: {
+    incomeBrackets: KENTUCKY_INCOME_BRACKETS_2024,
+    standardDeductions: KENTUCKY_STANDARD_DEDUCTION_2024,
+  },
+  LOUISIANA: {
+    incomeBrackets: LOUISIANA_INCOME_BRACKETS_2024,
+    standardDeductions: LOUISIANA_STANDARD_DEDUCTION_2024,
+  },
+  MAINE: {
+    incomeBrackets: MAINE_INCOME_BRACKETS_2024,
+    standardDeductions: MAINE_STANDARD_DEDUCTION_2024,
+  },
+  MARYLAND: {
+    incomeBrackets: MARYLAND_INCOME_BRACKETS_2024,
+    standardDeductions: MARYLAND_STANDARD_DEDUCTION_2024,
+  },
+  MASSACHUSETTS: {
+    incomeBrackets: MASSACHUSETTS_INCOME_BRACKETS_2024,
+    standardDeductions: MASSACHUSETTS_STANDARD_DEDUCTION_2024,
+  },
+  MINNESOTA: {
+    incomeBrackets: MINNESOTA_INCOME_BRACKETS_2024,
+    standardDeductions: MINNESOTA_STANDARD_DEDUCTION_2024,
+  },
+  MISSISSIPPI: {
+    incomeBrackets: MISSISSIPPI_INCOME_BRACKETS_2024,
+    standardDeductions: MISSISSIPPI_STANDARD_DEDUCTION_2024,
+  },
+  MISSOURI: {
+    incomeBrackets: MISSOURI_INCOME_BRACKETS_2024,
+    standardDeductions: MISSOURI_STANDARD_DEDUCTION_2024,
+  },
+} as const;
+
 // Continue with remaining states...
 // Due to file size, I'll create a comprehensive helper function that generates
 // accurate rulepacks for all states using verified 2024 data

@@ -53,7 +53,19 @@ export async function createAuditLog(
     `INSERT INTO audit_logs (
       id, tenant_id, user_id, action, resource_type, resource_id, changes, ip_address, user_agent, timestamp, hash
     ) VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8, $9, $10, $11)`,
-    [logId, tenantId, userId, action, resourceType, resourceId, JSON.stringify(changes), ipAddress || null, userAgent || null, timestamp, hash]
+    [
+      logId,
+      tenantId,
+      userId,
+      action,
+      resourceType,
+      resourceId,
+      JSON.stringify(changes),
+      ipAddress || null,
+      userAgent || null,
+      timestamp,
+      hash,
+    ]
   );
 
   logger.info('Audit log created', { logId, tenantId, userId, action, resourceType, resourceId });
@@ -83,6 +95,9 @@ export async function verifyAuditLogIntegrity(logId: string): Promise<boolean> {
   }
 
   const log = result.rows[0];
+  if (!log) {
+    return false;
+  }
   const hashInput = JSON.stringify({
     logId,
     tenantId: log.tenant_id,
@@ -126,17 +141,28 @@ export async function getAuditTrail(
     [tenantId, resourceType, resourceId]
   );
 
-  return result.rows.map(row => ({
-    id: row.id,
-    tenantId: row.tenant_id,
-    userId: row.user_id,
-    action: row.action,
-    resourceType: row.resource_type as AuditLog['resourceType'],
-    resourceId: row.resource_id,
-    changes: row.changes as Record<string, { old: unknown; new: unknown }>,
-    ipAddress: row.ip_address || undefined,
-    userAgent: row.user_agent || undefined,
-    timestamp: row.timestamp,
-    hash: row.hash,
-  }));
+  return result.rows
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    .map((row) => {
+      const log: AuditLog = {
+        id: row.id,
+        tenantId: row.tenant_id,
+        userId: row.user_id,
+        action: row.action,
+        resourceType: row.resource_type as AuditLog['resourceType'],
+        resourceId: row.resource_id,
+        changes: row.changes as Record<string, { old: unknown; new: unknown }>,
+        timestamp: row.timestamp,
+        hash: row.hash,
+      };
+
+      if (row.ip_address) {
+        log.ipAddress = row.ip_address;
+      }
+      if (row.user_agent) {
+        log.userAgent = row.user_agent;
+      }
+
+      return log;
+    });
 }

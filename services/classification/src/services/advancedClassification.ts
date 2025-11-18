@@ -29,29 +29,28 @@ export async function classifyDocumentAdvanced(
 
   // Weighted ensemble
   const weights = [0.6, 0.2, 0.2];
-  const combined: Record<string, number> = {};
+  const combined = new Map<DocumentType, number>();
 
   results.forEach((result, index) => {
-    const weight = weights[index];
-    if (!combined[result.documentType]) {
-      combined[result.documentType] = 0;
-    }
-    combined[result.documentType] += result.confidence * weight;
+    const weight = weights[index] ?? 0;
+    combined.set(
+      result.documentType,
+      (combined.get(result.documentType) ?? 0) + result.confidence * weight
+    );
   });
 
-  const bestType = Object.entries(combined).reduce((a, b) => 
-    combined[a[0]] > combined[b[0]] ? a : b
-  )[0] as DocumentType;
-
-  const confidence = combined[bestType];
+  const [bestType, bestConfidence] = Array.from(combined.entries()).reduce<[DocumentType, number]>(
+    (best, entry) => (entry[1] > best[1] ? entry : best),
+    [DocumentType.OTHER, 0]
+  );
 
   return {
     documentType: bestType,
-    confidence: Math.min(confidence, 0.99),
-    reasoning: `Ensemble classification: ${results.map(r => `${r.documentType}(${r.confidence.toFixed(2)})`).join(', ')}`,
-    alternativeTypes: Object.entries(combined)
+    confidence: Math.min(bestConfidence, 0.99),
+    reasoning: `Ensemble classification: ${results.map((r) => `${r.documentType}(${r.confidence.toFixed(2)})`).join(', ')}`,
+    alternativeTypes: Array.from(combined.entries())
       .filter(([type]) => type !== bestType)
-      .map(([type, conf]) => ({ type: type as DocumentType, confidence: conf }))
+      .map(([type, conf]) => ({ type, confidence: conf }))
       .sort((a, b) => b.confidence - a.confidence)
       .slice(0, 3),
   };
@@ -74,7 +73,8 @@ Return JSON: {"type": "invoice|receipt|statement|payslip|tax_form|other", "confi
       messages: [
         {
           role: 'system',
-          content: 'You are an expert at classifying financial documents. Be precise and confident.',
+          content:
+            'You are an expert at classifying financial documents. Be precise and confident.',
         },
         { role: 'user', content: prompt },
       ],
@@ -84,19 +84,19 @@ Return JSON: {"type": "invoice|receipt|statement|payslip|tax_form|other", "confi
 
     const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
     return {
-      documentType: (result.type || 'other') as DocumentType,
+      documentType: normalizeDocumentTypeInput(result.type),
       confidence: Math.min(Math.max(result.confidence || 0.5, 0), 1),
     };
   } catch (error) {
     logger.error('GPT-4 classification failed', error);
-    return { documentType: 'other', confidence: 0.5 };
+    return { documentType: DocumentType.OTHER, confidence: 0.5 };
   }
 }
 
 function classifyWithHeuristics(
   text: string,
   fileName: string,
-  fileType: string
+  _fileType: string
 ): { documentType: DocumentType; confidence: number } {
   const lowerText = text.toLowerCase();
   const lowerFileName = fileName.toLowerCase();
@@ -109,7 +109,7 @@ function classifyWithHeuristics(
     lowerFileName.includes('invoice') ||
     (lowerText.includes('due date') && lowerText.includes('total'))
   ) {
-    return { documentType: 'invoice', confidence: 0.85 };
+    return { documentType: DocumentType.INVOICE, confidence: 0.85 };
   }
 
   // Receipt indicators
@@ -119,7 +119,7 @@ function classifyWithHeuristics(
     lowerFileName.includes('receipt') ||
     (lowerText.includes('payment method') && lowerText.includes('total'))
   ) {
-    return { documentType: 'receipt', confidence: 0.85 };
+    return { documentType: DocumentType.RECEIPT, confidence: 0.85 };
   }
 
   // Statement indicators
@@ -129,7 +129,7 @@ function classifyWithHeuristics(
     lowerText.includes('balance brought forward') ||
     lowerFileName.includes('statement')
   ) {
-    return { documentType: 'statement', confidence: 0.85 };
+    return { documentType: DocumentType.STATEMENT, confidence: 0.85 };
   }
 
   // Payslip indicators
@@ -140,7 +140,7 @@ function classifyWithHeuristics(
     lowerText.includes('net pay') ||
     lowerText.includes('tax code')
   ) {
-    return { documentType: 'payslip', confidence: 0.90 };
+    return { documentType: DocumentType.PAYSLIP, confidence: 0.9 };
   }
 
   // Tax form indicators
@@ -150,49 +150,63 @@ function classifyWithHeuristics(
     lowerText.includes('tax return') ||
     lowerText.includes('corporation tax')
   ) {
-    return { documentType: 'tax_form', confidence: 0.90 };
+    return { documentType: DocumentType.TAX_FORM, confidence: 0.9 };
   }
 
-  return { documentType: 'other', confidence: 0.5 };
+  return { documentType: DocumentType.OTHER, confidence: 0.5 };
 }
 
 function classifyWithKeywords(
   text: string,
-  fileName: string
+  _fileName: string
 ): { documentType: DocumentType; confidence: number } {
   const keywords: Record<DocumentType, string[]> = {
-    invoice: ['invoice', 'bill', 'charge', 'amount due', 'payment terms'],
-    receipt: ['receipt', 'paid', 'payment received', 'transaction'],
-    statement: ['statement', 'balance', 'account summary', 'transactions'],
-    payslip: ['payslip', 'salary', 'wages', 'deductions', 'ni'],
-    tax_form: ['tax', 'hmrc', 'return', 'liability', 'allowance'],
-    other: [],
+    [DocumentType.INVOICE]: ['invoice', 'bill', 'charge', 'amount due', 'payment terms'],
+    [DocumentType.RECEIPT]: ['receipt', 'paid', 'payment received', 'transaction'],
+    [DocumentType.STATEMENT]: ['statement', 'balance', 'account summary', 'transactions'],
+    [DocumentType.PAYSLIP]: ['payslip', 'salary', 'wages', 'deductions', 'ni'],
+    [DocumentType.TAX_FORM]: ['tax', 'hmrc', 'return', 'liability', 'allowance'],
+    [DocumentType.OTHER]: [],
   };
 
   const lowerText = text.toLowerCase();
   const scores: Record<DocumentType, number> = {
-    invoice: 0,
-    receipt: 0,
-    statement: 0,
-    payslip: 0,
-    tax_form: 0,
-    other: 0,
+    [DocumentType.INVOICE]: 0,
+    [DocumentType.RECEIPT]: 0,
+    [DocumentType.STATEMENT]: 0,
+    [DocumentType.PAYSLIP]: 0,
+    [DocumentType.TAX_FORM]: 0,
+    [DocumentType.OTHER]: 0,
   };
 
-  Object.entries(keywords).forEach(([type, words]) => {
-    words.forEach(word => {
+  (Object.entries(keywords) as Array<[DocumentType, string[]]>).forEach(([type, words]) => {
+    words.forEach((word) => {
       if (lowerText.includes(word)) {
-        scores[type as DocumentType] += 1;
+        scores[type] += 1;
       }
     });
   });
 
-  const bestType = Object.entries(scores).reduce((a, b) => 
-    scores[a[0] as DocumentType] > scores[b[0] as DocumentType] ? a : b
-  )[0] as DocumentType;
+  const bestType = (Object.keys(scores) as DocumentType[]).reduce(
+    (best, current) => (scores[current] > scores[best] ? current : best),
+    DocumentType.OTHER
+  );
 
   const maxScore = Math.max(...Object.values(scores));
   const confidence = maxScore > 0 ? Math.min(maxScore / 5, 0.8) : 0.3;
 
   return { documentType: bestType, confidence };
+}
+
+const DOCUMENT_TYPE_VALUES = Object.values(DocumentType);
+
+function normalizeDocumentTypeInput(value: unknown): DocumentType {
+  if (typeof value === 'string') {
+    const lower = value.toLowerCase();
+    const match = DOCUMENT_TYPE_VALUES.find((type) => type === lower);
+    if (match) {
+      return match as DocumentType;
+    }
+  }
+  return DocumentType.OTHER;
 }

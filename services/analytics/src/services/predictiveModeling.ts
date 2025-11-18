@@ -9,6 +9,63 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const sanitizeNumber = (value: unknown, fallback = 0): number =>
+  isFiniteNumber(value) ? value : fallback;
+
+const sanitizeConfidence = (value: unknown, fallback = 0.5): number =>
+  clamp01(isFiniteNumber(value) ? value : fallback);
+
+const sanitizeFactors = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+
+const sanitizeForecastEntries = (
+  entries: unknown
+): Array<{ date: Date; value: number; confidence: number }> => {
+  if (!Array.isArray(entries)) {
+    return [];
+  }
+
+  const sanitized: Array<{ date: Date; value: number; confidence: number }> = [];
+
+  for (const entry of entries) {
+    if (typeof entry !== 'object' || entry === null) {
+      continue;
+    }
+
+    const dateValue = (entry as { date?: string | Date }).date;
+    if (!dateValue) {
+      continue;
+    }
+
+    const parsedDate = new Date(dateValue);
+    if (Number.isNaN(parsedDate.getTime())) {
+      continue;
+    }
+
+    sanitized.push({
+      date: parsedDate,
+      value: sanitizeNumber((entry as { value?: unknown }).value),
+      confidence: sanitizeConfidence((entry as { confidence?: unknown }).confidence),
+    });
+  }
+
+  return sanitized;
+};
+
+const sanitizeTrend = (value: unknown): PredictiveForecast['trend'] => {
+  if (value === 'increasing' || value === 'decreasing' || value === 'stable') {
+    return value;
+  }
+  return 'stable';
+};
+
 export interface PredictiveForecast {
   metric: 'revenue' | 'expenses' | 'profit' | 'cashflow' | 'tax';
   period: { start: Date; end: Date };
@@ -58,7 +115,9 @@ Return JSON:
       response_format: { type: 'json_object' },
     });
 
-    const result = JSON.parse(completion.choices[0]?.message?.content || '{}');
+    const result = JSON.parse(
+      completion.choices[0]?.message?.content || '{}'
+    ) as Record<string, unknown>;
 
     const endDate = new Date();
     endDate.setMonth(endDate.getMonth() + months);
@@ -69,14 +128,10 @@ Return JSON:
         start: new Date(),
         end: endDate,
       },
-      forecast: (result.forecast || []).map((f: { date: string; value: number; confidence: number }) => ({
-        date: new Date(f.date),
-        value: f.value || 0,
-        confidence: f.confidence || 0.5,
-      })),
-      trend: (result.trend || 'stable') as PredictiveForecast['trend'],
-      factors: result.factors || [],
-      confidence: result.overallConfidence || 0.5,
+      forecast: sanitizeForecastEntries(result.forecast),
+      trend: sanitizeTrend(result.trend),
+      factors: sanitizeFactors(result.factors),
+      confidence: sanitizeConfidence(result.overallConfidence),
     };
   } catch (error) {
     logger.error('Predictive forecast failed', error);

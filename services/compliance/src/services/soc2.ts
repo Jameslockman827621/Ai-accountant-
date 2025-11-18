@@ -1,6 +1,6 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId, UserId } from '@ai-accountant/shared-types';
+import { UserId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('compliance-service');
 

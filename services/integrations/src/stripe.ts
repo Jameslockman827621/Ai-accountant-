@@ -4,14 +4,19 @@ import { TenantId } from '@ai-accountant/shared-types';
 const logger = createLogger('integrations-service');
 
 export class StripeIntegration {
-  private apiKey: string;
+  private readonly apiKey: string;
 
   constructor() {
     this.apiKey = process.env.STRIPE_SECRET_KEY || '';
   }
 
   async syncTransactions(tenantId: TenantId, startDate: Date, endDate: Date): Promise<void> {
-    logger.info('Syncing Stripe transactions', { tenantId, startDate, endDate });
+    logger.info('Syncing Stripe transactions', {
+      tenantId,
+      startDate,
+      endDate,
+      apiKeyConfigured: Boolean(this.apiKey),
+    });
     
     // In production, use Stripe SDK
     // const stripe = require('stripe')(this.apiKey);
@@ -19,7 +24,7 @@ export class StripeIntegration {
   }
 
   async handleWebhook(event: unknown): Promise<void> {
-    logger.info('Processing Stripe webhook', { event });
+    logger.info('Processing Stripe webhook', { event, apiKeyConfigured: Boolean(this.apiKey) });
     // Handle Stripe webhook events
   }
 }

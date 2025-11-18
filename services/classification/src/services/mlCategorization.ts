@@ -49,9 +49,10 @@ export async function categorizeExpenseAdvanced(
   );
 
   // Build context from historical data
-  const historicalContext = historical.rows.length > 0
-    ? `\nHistorical categorizations for similar expenses:\n${historical.rows.map(h => `- "${h.description}" → ${h.category}${h.sub_category ? ` / ${h.sub_category}` : ''}`).join('\n')}`
-    : '';
+  const historicalContext =
+    historical.rows.length > 0
+      ? `\nHistorical categorizations for similar expenses:\n${historical.rows.map((h) => `- "${h.description}" → ${h.category}${h.sub_category ? ` / ${h.sub_category}` : ''}`).join('\n')}`
+      : '';
 
   // Get tenant's chart of accounts for expense categories
   const chartOfAccounts = await db.query<{
@@ -68,7 +69,9 @@ export async function categorizeExpenseAdvanced(
     [tenantId]
   );
 
-  const availableCategories = chartOfAccounts.rows.map(acc => `${acc.account_code} - ${acc.account_name}`).join(', ');
+  const availableCategories = chartOfAccounts.rows
+    .map((acc) => `${acc.account_code} - ${acc.account_name}`)
+    .join(', ');
 
   const prompt = `Categorize this business expense with high accuracy.
 
@@ -105,7 +108,8 @@ Consider:
       messages: [
         {
           role: 'system',
-          content: 'You are an expert UK tax accountant. Categorize expenses accurately according to UK tax rules and HMRC guidelines. Always respond with valid JSON only.',
+          content:
+            'You are an expert UK tax accountant. Categorize expenses accurately according to UK tax rules and HMRC guidelines. Always respond with valid JSON only.',
         },
         { role: 'user', content: prompt },
       ],
@@ -144,11 +148,18 @@ Consider:
       ]
     );
 
-    logger.info('Expense categorized', { tenantId, category: category.code, confidence: category.confidence });
+    logger.info('Expense categorized', {
+      tenantId,
+      category: category.code,
+      confidence: category.confidence,
+    });
     return category;
   } catch (error) {
-    logger.error('Expense categorization failed', error instanceof Error ? error : new Error(String(error)));
-    
+    logger.error(
+      'Expense categorization failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
+
     // Fallback categorization
     return {
       code: '5900',
@@ -167,6 +178,7 @@ function determineVATRecoverability(
   amount: number
 ): boolean {
   const lowerDesc = description.toLowerCase();
+  const normalizedCode = categoryCode.trim();
 
   // VAT cannot be recovered on:
   // - Entertainment (except staff)
@@ -194,6 +206,16 @@ function determineVATRecoverability(
     return true;
   }
 
+  // Certain categories (e.g., rent/insurance) can be partially recoverable; use simple heuristics
+  if (normalizedCode.startsWith('57') && lowerDesc.includes('rent')) {
+    return false;
+  }
+
+  // Zero or negative amounts generally shouldn't claim VAT
+  if (amount <= 0) {
+    return false;
+  }
+
   // Most business expenses are VAT recoverable
   return true;
 }
@@ -207,7 +229,12 @@ export async function learnFromCategorizationCorrection(
   correctCategory: string,
   originalCategory: string
 ): Promise<void> {
-  logger.info('Learning from categorization correction', { tenantId, expenseId, correctCategory, originalCategory });
+  logger.info('Learning from categorization correction', {
+    tenantId,
+    expenseId,
+    correctCategory,
+    originalCategory,
+  });
 
   // Store correction
   await db.query(

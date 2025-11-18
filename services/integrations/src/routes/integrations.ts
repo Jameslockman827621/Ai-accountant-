@@ -1,92 +1,123 @@
-import { Router } from 'express';
+import { Router, type Response } from 'express';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { connectXero, syncXeroContacts, syncXeroTransactions } from '../services/xero';
-import { connectQuickBooks, syncQuickBooksAccounts, syncQuickBooksTransactions } from '../services/quickbooks';
 import { quickBooksOAuth } from '../quickbooksOAuth';
 import { xeroOAuth } from '../xeroOAuth';
+import type { AuthRequest } from '../middleware/auth';
 import quickbooksWebhooks from './quickbooksWebhooks';
 import xeroWebhooks from './xeroWebhooks';
 
 const logger = createLogger('integrations-routes');
 const router = Router();
 
+type AuthenticatedRequest = AuthRequest & {
+  user: NonNullable<AuthRequest['user']>;
+};
+
+function ensureAuthenticated(req: AuthRequest, res: Response): req is AuthenticatedRequest {
+  if (req.user?.tenantId) {
+    return true;
+  }
+
+  res.status(401).json({ error: 'Unauthorized' });
+  return false;
+}
+
+function getQueryString(value: string | string[] | undefined): string | null {
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value[0] ?? null;
+  }
+
+  return null;
+}
+
+function getAppBaseUrl(): string {
+  return process.env.APP_URL || 'http://localhost:3000';
+}
+
 // Mount webhook routes
 router.use(quickbooksWebhooks);
 router.use(xeroWebhooks);
 
 // QuickBooks OAuth routes
-router.get('/quickbooks/oauth/initiate', async (req, res) => {
+router.get('/quickbooks/oauth/initiate', async (req: AuthRequest, res: Response) => {
   try {
-    const tenantId = (req as any).user?.tenantId;
-    if (!tenantId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
+      return;
     }
 
-    const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/integrations/quickbooks/callback`;
-    const authUrl = await quickBooksOAuth.initiateOAuth(tenantId, redirectUri);
+    const redirectUri = `${getAppBaseUrl()}/integrations/quickbooks/callback`;
+    const authUrl = await quickBooksOAuth.initiateOAuth(req.user.tenantId, redirectUri);
     
-    res.json({ authUrl });
+    return res.json({ authUrl });
   } catch (error) {
-    logger.error('QuickBooks OAuth initiation failed', error);
-    res.status(500).json({ error: 'Failed to initiate OAuth' });
+    logger.error('QuickBooks OAuth initiation failed', { error });
+    return res.status(500).json({ error: 'Failed to initiate OAuth' });
   }
 });
 
-router.get('/quickbooks/oauth/callback', async (req, res) => {
+router.get('/quickbooks/oauth/callback', async (req: AuthRequest, res: Response) => {
   try {
-    const tenantId = (req as any).user?.tenantId;
-    const { code, state } = req.query;
+    if (!ensureAuthenticated(req, res)) {
+      return;
+    }
 
-    if (!tenantId || !code || !state) {
+    const code = getQueryString(req.query.code as string | string[] | undefined);
+    const state = getQueryString(req.query.state as string | string[] | undefined);
+
+    if (!code || !state) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
-    const tokens = await quickBooksOAuth.handleCallback(tenantId, code as string, state as string);
+    await quickBooksOAuth.handleCallback(req.user.tenantId, code, state);
     
-    res.redirect(`${process.env.APP_URL || 'http://localhost:3000'}/integrations?connected=quickbooks`);
+    return res.redirect(`${getAppBaseUrl()}/integrations?connected=quickbooks`);
   } catch (error) {
-    logger.error('QuickBooks OAuth callback failed', error);
-    res.redirect(`${process.env.APP_URL || 'http://localhost:3000'}/integrations?error=quickbooks_oauth_failed`);
+    logger.error('QuickBooks OAuth callback failed', { error });
+    return res.redirect(`${getAppBaseUrl()}/integrations?error=quickbooks_oauth_failed`);
   }
 });
 
 // Xero OAuth routes
-router.get('/xero/oauth/initiate', async (req, res) => {
+router.get('/xero/oauth/initiate', async (req: AuthRequest, res: Response) => {
   try {
-    const tenantId = (req as any).user?.tenantId;
-    if (!tenantId) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
+      return;
     }
 
-    const redirectUri = `${process.env.APP_URL || 'http://localhost:3000'}/integrations/xero/callback`;
-    const authUrl = await xeroOAuth.initiateOAuth(tenantId, redirectUri);
+    const redirectUri = `${getAppBaseUrl()}/integrations/xero/callback`;
+    const authUrl = await xeroOAuth.initiateOAuth(req.user.tenantId, redirectUri);
     
-    res.json({ authUrl });
+    return res.json({ authUrl });
   } catch (error) {
-    logger.error('Xero OAuth initiation failed', error);
-    res.status(500).json({ error: 'Failed to initiate OAuth' });
+    logger.error('Xero OAuth initiation failed', { error });
+    return res.status(500).json({ error: 'Failed to initiate OAuth' });
   }
 });
 
-router.get('/xero/oauth/callback', async (req, res) => {
+router.get('/xero/oauth/callback', async (req: AuthRequest, res: Response) => {
   try {
-    const tenantId = (req as any).user?.tenantId;
-    const { code, state } = req.query;
+    if (!ensureAuthenticated(req, res)) {
+      return;
+    }
 
-    if (!tenantId || !code || !state) {
+    const code = getQueryString(req.query.code as string | string[] | undefined);
+    const state = getQueryString(req.query.state as string | string[] | undefined);
+
+    if (!code || !state) {
       return res.status(400).json({ error: 'Missing required parameters' });
     }
 
-    const tokens = await xeroOAuth.handleCallback(tenantId, code as string, state as string);
+    await xeroOAuth.handleCallback(req.user.tenantId, code, state);
     
-    res.redirect(`${process.env.APP_URL || 'http://localhost:3000'}/integrations?connected=xero`);
+    return res.redirect(`${getAppBaseUrl()}/integrations?connected=xero`);
   } catch (error) {
-    logger.error('Xero OAuth callback failed', error);
-    res.redirect(`${process.env.APP_URL || 'http://localhost:3000'}/integrations?error=xero_oauth_failed`);
+    logger.error('Xero OAuth callback failed', { error });
+    return res.redirect(`${getAppBaseUrl()}/integrations?error=xero_oauth_failed`);
   }
 });
-
-// Existing integration routes (keep existing code)
-// ... (rest of the existing routes)
 
 export default router;

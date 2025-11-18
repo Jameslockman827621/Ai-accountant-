@@ -9,6 +9,22 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+const sanitizeNumber = (value: unknown, fallback = 0): number =>
+  isFiniteNumber(value) ? value : fallback;
+
+const sanitizeConfidence = (value: unknown, fallback = 0.5): number =>
+  clamp01(isFiniteNumber(value) ? value : fallback);
+
+const sanitizeFactors = (value: unknown): string[] =>
+  Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    : [];
+
 export interface Prediction {
   type: 'revenue' | 'expense' | 'cashflow' | 'tax';
   period: { start: Date; end: Date };
@@ -71,7 +87,9 @@ Provide prediction in JSON:
     response_format: { type: 'json_object' },
   });
 
-  const response = JSON.parse(completion.choices[0]?.message?.content || '{}');
+  const response = JSON.parse(
+    completion.choices[0]?.message?.content || '{}'
+  ) as Record<string, unknown>;
 
   const endDate = new Date();
   endDate.setMonth(endDate.getMonth() + months);
@@ -82,9 +100,9 @@ Provide prediction in JSON:
       start: new Date(),
       end: endDate,
     },
-    predictedValue: response.predictedValue || 0,
-    confidence: response.confidence || 0.5,
-    factors: response.factors || [],
+    predictedValue: sanitizeNumber(response.predictedValue),
+    confidence: sanitizeConfidence(response.confidence),
+    factors: sanitizeFactors(response.factors),
   };
 }
 

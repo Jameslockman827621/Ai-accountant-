@@ -28,16 +28,18 @@ export class SLATrackingService {
       id: string;
       sla_due_time: Date;
       status: string;
+      sla_hours: number;
     }>(
-      `SELECT id, sla_due_time, status
-       FROM sla_tracking
-       WHERE task_id = $1 AND status != 'on_track'`,
+      `SELECT id, sla_due_time, status, sla_hours
+         FROM sla_tracking
+         WHERE task_id = $1 AND status != 'on_track'`,
       [taskId]
     );
 
-    if (result.rows.length === 0) return;
-
     const tracking = result.rows[0];
+    if (!tracking) {
+      return;
+    }
     const now = new Date();
     const dueTime = new Date(tracking.sla_due_time);
     const hoursUntilDue = (dueTime.getTime() - now.getTime()) / (1000 * 60 * 60);
@@ -64,7 +66,10 @@ export class SLATrackingService {
   /**
    * Get SLA statistics for tenant
    */
-  async getSLAStats(tenantId: TenantId, days: number = 30): Promise<{
+  async getSLAStats(
+    tenantId: TenantId,
+    days: number = 30
+  ): Promise<{
     onTrack: number;
     atRisk: number;
     breached: number;
@@ -147,12 +152,17 @@ export class SLATrackingService {
   /**
    * Get tasks at risk or breached
    */
-  async getAtRiskTasks(tenantId: TenantId, limit: number = 50): Promise<Array<{
-    taskId: string;
-    status: SLAStatus;
-    hoursUntilDue: number;
-    slaHours: number;
-  }>> {
+  async getAtRiskTasks(
+    tenantId: TenantId,
+    limit: number = 50
+  ): Promise<
+    Array<{
+      taskId: string;
+      status: SLAStatus;
+      hoursUntilDue: number;
+      slaHours: number;
+    }>
+  > {
     const result = await db.query<{
       task_id: string;
       status: string;
@@ -170,7 +180,7 @@ export class SLATrackingService {
     );
 
     const now = new Date();
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       taskId: row.task_id,
       status: row.status as SLAStatus,
       hoursUntilDue: (new Date(row.sla_due_time).getTime() - now.getTime()) / (1000 * 60 * 60),

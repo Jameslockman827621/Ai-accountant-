@@ -42,15 +42,13 @@ export async function routeToReviewQueue(
     throw new Error('Document not found');
   }
 
-  const document = docResult.rows[0];
-  const confidenceScore = document.confidence_score || 0;
-  const qualityScore = document.quality_score || 100;
+  const document = docResult.rows[0]!;
+  const confidenceScore = document.confidence_score ?? 0;
+  const qualityScore = document.quality_score ?? 100;
 
   // Determine if needs review
   const needsReview =
-    confidenceScore < MIN_CONFIDENCE_THRESHOLD ||
-    qualityScore < 70 ||
-    document.status === 'error';
+    confidenceScore < MIN_CONFIDENCE_THRESHOLD || qualityScore < 70 || document.status === 'error';
 
   if (!needsReview) {
     return false;
@@ -142,9 +140,11 @@ export async function getReviewQueue(
   if (priority) {
     query += ' AND dq.priority = $2';
     params.push(priority);
-    query += ' ORDER BY CASE dq.priority WHEN \'urgent\' THEN 1 WHEN \'high\' THEN 2 WHEN \'medium\' THEN 3 ELSE 4 END, dq.created_at ASC';
+    query +=
+      " ORDER BY CASE dq.priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, dq.created_at ASC";
   } else {
-    query += ' ORDER BY CASE dq.priority WHEN \'urgent\' THEN 1 WHEN \'high\' THEN 2 WHEN \'medium\' THEN 3 ELSE 4 END, dq.created_at ASC';
+    query +=
+      " ORDER BY CASE dq.priority WHEN 'urgent' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END, dq.created_at ASC";
   }
 
   query += ` LIMIT $${params.length + 1}`;
@@ -160,15 +160,20 @@ export async function getReviewQueue(
     assigned_to: string | null;
   }>(query, params);
 
-  return result.rows.map(row => ({
-    documentId: row.document_id as DocumentId,
-    priority: row.priority as ReviewQueueItem['priority'],
-    reason: row.reason,
-    confidenceScore: row.confidence_score || 0,
-    qualityScore: row.quality_score || null,
-    createdAt: row.created_at,
-    assignedTo: row.assigned_to as UserId | undefined,
-  }));
+  return result.rows.map((row) => {
+    const item: ReviewQueueItem = {
+      documentId: row.document_id as DocumentId,
+      priority: row.priority as ReviewQueueItem['priority'],
+      reason: row.reason,
+      confidenceScore: row.confidence_score ?? 0,
+      qualityScore: row.quality_score ?? null,
+      createdAt: row.created_at,
+    };
+    if (row.assigned_to) {
+      item.assignedTo = row.assigned_to as UserId;
+    }
+    return item;
+  });
 }
 
 /**

@@ -1,7 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { intelligentMatchingService } from '../services/intelligentMatching';
+import { intelligentMatchingService, MatchSignals } from '../services/intelligentMatching';
 import { reconciliationExceptionService } from '../services/reconciliationExceptions';
 
 const logger = createLogger('reconciliation-worker');
@@ -72,14 +72,19 @@ export class ReconciliationWorker {
         }
       }
     } catch (error) {
-      logger.error('Failed to process reconciliation batch', error instanceof Error ? error : new Error(String(error)));
+      logger.error(
+        'Failed to process reconciliation batch',
+        error instanceof Error ? error : new Error(String(error))
+      );
     }
   }
 
   /**
    * Get unreconciled transactions with priority
    */
-  private async getUnreconciledTransactions(limit: number): Promise<Array<{ tenantId: TenantId; bankTransactionId: string }>> {
+  private async getUnreconciledTransactions(
+    limit: number
+  ): Promise<Array<{ tenantId: TenantId; bankTransactionId: string }>> {
     const result = await db.query<{
       tenant_id: string;
       id: string;
@@ -117,8 +122,9 @@ export class ReconciliationWorker {
         [bankTransactionId]
       );
 
-      if (txResult.rows.length > 0) {
-        const daysOld = (Date.now() - txResult.rows[0].date.getTime()) / (1000 * 60 * 60 * 24);
+      const txRow = txResult.rows[0];
+      if (txRow) {
+        const daysOld = (Date.now() - txRow.date.getTime()) / (1000 * 60 * 60 * 24);
         if (daysOld > 7) {
           // Transaction is more than 7 days old with no match
           await reconciliationExceptionService.createException(tenantId, {
@@ -134,6 +140,10 @@ export class ReconciliationWorker {
 
     // Get best match
     const bestMatch = matches[0];
+    if (!bestMatch) {
+      logger.info('No valid match found', { tenantId, bankTransactionId });
+      return;
+    }
 
     // Auto-match if confidence is high enough
     if (bestMatch.matchType === 'auto' && bestMatch.confidenceScore >= 0.85) {
@@ -150,7 +160,12 @@ export class ReconciliationWorker {
   private async autoMatch(
     tenantId: TenantId,
     bankTransactionId: string,
-    match: { documentId?: string; ledgerEntryId?: string; confidenceScore: number; signals: any }
+    match: {
+      documentId?: string;
+      ledgerEntryId?: string;
+      confidenceScore: number;
+      signals?: MatchSignals;
+    }
   ): Promise<void> {
     await db.transaction(async (client) => {
       // Update bank transaction
@@ -186,20 +201,47 @@ export class ReconciliationWorker {
     });
 
     // Record event
-    await intelligentMatchingService.recordEvent(tenantId, {
+    const eventPayload: {
+      bankTransactionId?: string;
+      documentId?: string;
+      ledgerEntryId?: string;
+      eventType:
+        | 'auto_match'
+        | 'match'
+        | 'unmatch'
+        | 'manual_match'
+        | 'split'
+        | 'merge'
+        | 'exception_created'
+        | 'exception_resolved';
+      reasonCode: string;
+      reasonDescription?: string;
+      confidenceScore?: number;
+      matchSignals?: MatchSignals;
+      metadata?: Record<string, unknown>;
+    } = {
       bankTransactionId,
-      documentId: match.documentId,
-      ledgerEntryId: match.ledgerEntryId,
       eventType: 'auto_match',
       reasonCode: 'high_confidence_auto_match',
       reasonDescription: `Auto-matched with confidence ${(match.confidenceScore * 100).toFixed(1)}%`,
       confidenceScore: match.confidenceScore,
-      matchSignals: match.signals,
       metadata: {
         automated: true,
         worker: 'reconciliation-worker',
       },
-    });
+    };
+
+    if (match.documentId) {
+      eventPayload.documentId = match.documentId;
+    }
+    if (match.ledgerEntryId) {
+      eventPayload.ledgerEntryId = match.ledgerEntryId;
+    }
+    if (match.signals) {
+      eventPayload.matchSignals = match.signals;
+    }
+
+    await intelligentMatchingService.recordEvent(tenantId, eventPayload);
 
     logger.info('Transaction auto-matched', {
       tenantId,
@@ -214,7 +256,12 @@ export class ReconciliationWorker {
   private async markAsSuggested(
     tenantId: TenantId,
     bankTransactionId: string,
-    match: { documentId?: string; ledgerEntryId?: string; confidenceScore: number; signals: any }
+    match: {
+      documentId?: string;
+      ledgerEntryId?: string;
+      confidenceScore: number;
+      signals?: MatchSignals;
+    }
   ): Promise<void> {
     // Store suggested match (would use a suggestions table or metadata)
     await db.query(
@@ -232,7 +279,7 @@ export class ReconciliationWorker {
         match.documentId || null,
         match.ledgerEntryId || null,
         match.confidenceScore,
-        JSON.stringify(match.signals),
+        JSON.stringify(match.signals ?? {}),
         bankTransactionId,
         tenantId,
       ]

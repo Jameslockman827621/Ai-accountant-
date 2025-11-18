@@ -5,7 +5,6 @@ import { ValidationError } from '@ai-accountant/shared-utils';
 import { detectDuplicates } from '../services/duplicateDetection';
 import { assessDocumentQuality } from '../services/qualityAssessment';
 import {
-  routeToReviewQueue,
   getReviewQueue,
   assignReviewItem,
   completeReviewItem,
@@ -23,11 +22,19 @@ router.post('/documents/:documentId/duplicates', async (req: AuthRequest, res: R
     }
 
     const { documentId } = req.params;
+    if (!documentId) {
+      res.status(400).json({ error: 'documentId is required' });
+      return;
+    }
+
     const result = await detectDuplicates(req.user.tenantId, documentId);
 
     res.json({ result });
   } catch (error) {
-    logger.error('Detect duplicates failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Detect duplicates failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
     res.status(500).json({ error: 'Failed to detect duplicates' });
   }
 });
@@ -41,11 +48,19 @@ router.post('/documents/:documentId/quality', async (req: AuthRequest, res: Resp
     }
 
     const { documentId } = req.params;
+    if (!documentId) {
+      res.status(400).json({ error: 'documentId is required' });
+      return;
+    }
+
     const assessment = await assessDocumentQuality(req.user.tenantId, documentId);
 
     res.json({ assessment });
   } catch (error) {
-    logger.error('Assess document quality failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Assess document quality failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
     res.status(500).json({ error: 'Failed to assess document quality' });
   }
 });
@@ -67,7 +82,10 @@ router.get('/review-queue', async (req: AuthRequest, res: Response) => {
 
     res.json({ queue });
   } catch (error) {
-    logger.error('Get review queue failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Get review queue failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
     res.status(500).json({ error: 'Failed to get review queue' });
   }
 });
@@ -81,11 +99,19 @@ router.post('/review-queue/:documentId/assign', async (req: AuthRequest, res: Re
     }
 
     const { documentId } = req.params;
-    await assignReviewItem(req.user.tenantId, documentId, req.user.userId);
+    if (!documentId) {
+      res.status(400).json({ error: 'documentId is required' });
+      return;
+    }
+
+    await assignReviewItem(req.user.tenantId, documentId, req.user.id);
 
     res.json({ message: 'Review item assigned' });
   } catch (error) {
-    logger.error('Assign review item failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Assign review item failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
     res.status(500).json({ error: 'Failed to assign review item' });
   }
 });
@@ -105,11 +131,19 @@ router.post('/review-queue/:documentId/complete', async (req: AuthRequest, res: 
       throw new ValidationError('approved (boolean) is required');
     }
 
+    if (!documentId) {
+      res.status(400).json({ error: 'documentId is required' });
+      return;
+    }
+
     await completeReviewItem(req.user.tenantId, documentId, approved, notes);
 
     res.json({ message: 'Review item completed' });
   } catch (error) {
-    logger.error('Complete review item failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Complete review item failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
     if (error instanceof ValidationError) {
       res.status(400).json({ error: error.message });
       return;

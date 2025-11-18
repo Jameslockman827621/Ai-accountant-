@@ -54,10 +54,15 @@ router.get('/dashboard', async (req: AuthRequest, res: Response) => {
 
     const { startDate, endDate } = req.query;
 
-    const stats = await getDashboardStats(req.user.tenantId, {
-      periodStart: startDate ? new Date(String(startDate)) : undefined,
-      periodEnd: endDate ? new Date(String(endDate)) : undefined,
-    });
+    const options: Parameters<typeof getDashboardStats>[1] = {};
+    if (startDate) {
+      options.periodStart = new Date(String(startDate));
+    }
+    if (endDate) {
+      options.periodEnd = new Date(String(endDate));
+    }
+
+    const stats = await getDashboardStats(req.user.tenantId, options);
 
     res.json({ stats });
   } catch (error) {

@@ -74,11 +74,16 @@ export async function runScenarioAnalysis(
     ? compareDividendsVsSalary(input.dividendPlan)
     : undefined;
 
-  return {
+  const result: ScenarioResult = {
     baseline,
     scenario,
-    dividendComparison,
   };
+
+  if (dividendComparison) {
+    result.dividendComparison = dividendComparison;
+  }
+
+  return result;
 }
 
 export async function getBaselineMetrics(tenantId: TenantId): Promise<BaselineMetrics> {
@@ -142,7 +147,8 @@ function buildScenario(
   const scenarioExpenses = roundCurrency(baseline.monthlyExpenses * expenseMultiplier + hiringCost);
   const monthlyBurn = Math.max(0, roundCurrency(scenarioExpenses - scenarioRevenue));
 
-  let cash = baseline.cashOnHand + (adjustments.cashInjection ?? 0) - (adjustments.oneTimeExpense ?? 0);
+  let cash =
+    baseline.cashOnHand + (adjustments.cashInjection ?? 0) - (adjustments.oneTimeExpense ?? 0);
   const projections: Array<{ month: number; cash: number }> = [];
   const warnings: string[] = [];
   const insights: string[] = [];
@@ -166,10 +172,14 @@ function buildScenario(
   }
 
   if ((adjustments.cashInjection ?? 0) > 0) {
-    insights.push(`Cash injection of £${formatCurrency(adjustments.cashInjection ?? 0)} applied in month 1.`);
+    insights.push(
+      `Cash injection of £${formatCurrency(adjustments.cashInjection ?? 0)} applied in month 1.`
+    );
   }
   if ((adjustments.hiringPlan ?? 0) > 0) {
-    insights.push(`Hiring plan adds ${(adjustments.hiringPlan ?? 0)} heads at approx £${formatCurrency(adjustments.avgHireCost ?? 4500)} per month each.`);
+    insights.push(
+      `Hiring plan adds ${adjustments.hiringPlan ?? 0} heads at approx £${formatCurrency(adjustments.avgHireCost ?? 4500)} per month each.`
+    );
   }
 
   return {

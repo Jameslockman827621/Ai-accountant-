@@ -1,12 +1,9 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { randomUUID } from 'crypto';
 import { rulepackManager } from '../../../rules-engine/src/services/rulepackDSL';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
 import { authorityAdapterRegistry } from './authorityAdapters';
 import { initiateAuthorityPayment } from './paymentOrchestration';
-
-const logger = createLogger('filing-lifecycle');
 
 export interface FilingObligation {
   filingType: string;
@@ -68,12 +65,15 @@ export class FilingLifecycleService {
     }
 
     const tenant = tenantResult.rows[0];
+    if (!tenant) {
+      return [];
+    }
     const obligations: FilingObligation[] = [];
 
     // Generate obligations based on filing types and periods
     for (const filingType of tenant.filing_types || []) {
       const periods = this.generatePeriods(tenant.jurisdiction, filingType, startDate, endDate);
-      
+
       for (const period of periods) {
         obligations.push({
           filingType,
@@ -98,7 +98,7 @@ export class FilingLifecycleService {
   ): Promise<FilingDraft> {
     // Get source data for period
     const sourceData = await this.hydrateSourceData(tenantId, obligation);
-    
+
     // Evaluate rulepack
     const evaluationResult = await rulepackManager.evaluateForFiling(
       obligation.jurisdiction,
@@ -113,7 +113,7 @@ export class FilingLifecycleService {
 
     // Create filing record
     const filingId = randomUUID();
-    
+
     await db.query(
       `INSERT INTO filing_ledger (
         id, tenant_id, filing_type, jurisdiction, period_start, period_end,
@@ -130,7 +130,7 @@ export class FilingLifecycleService {
         'draft',
         JSON.stringify(sourceData),
         JSON.stringify(evaluationResult.calculatedValues),
-        JSON.stringify(evaluationResult.appliedRules.map(r => r.ruleId)),
+        JSON.stringify(evaluationResult.appliedRules.map((r) => r.ruleId)),
         'latest', // Would get actual version from rulepack
         createdBy,
       ]
@@ -163,7 +163,7 @@ export class FilingLifecycleService {
       periodEnd: obligation.periodEnd,
       filingData: sourceData,
       calculatedValues: evaluationResult.calculatedValues,
-      sourceTransactions: evaluationResult.appliedRules.map(r => r.ruleId),
+      sourceTransactions: evaluationResult.appliedRules.map((r) => r.ruleId),
       adjustments: {},
       explanations: evaluationResult.explanations,
     };
@@ -196,13 +196,16 @@ export class FilingLifecycleService {
     }
 
     const filing = filingResult.rows[0];
+    if (!filing) {
+      throw new Error('Filing not found or not approved');
+    }
 
     const submission = await authorityAdapterRegistry.submit({
       filingId,
       tenantId,
       filingType: filing.filing_type,
       jurisdiction: filing.jurisdiction,
-      payload: filing.filing_data || {},
+      payload: (filing.filing_data as Record<string, unknown>) || {},
       adapterHint: adapter,
     });
 
@@ -254,26 +257,26 @@ export class FilingLifecycleService {
   }
 
   private generatePeriods(
-    jurisdiction: string,
+    _jurisdiction: string,
     filingType: string,
     startDate: string,
     endDate: string
   ): Array<{ start: string; end: string; dueDate: string }> {
     const periods: Array<{ start: string; end: string; dueDate: string }> = [];
-    
+
     // Determine period frequency based on filing type
     let frequency: 'monthly' | 'quarterly' | 'annually' = 'quarterly';
-    
+
     if (filingType.includes('monthly')) frequency = 'monthly';
     if (filingType.includes('annual')) frequency = 'annually';
-    
+
     const start = new Date(startDate);
     const end = new Date(endDate);
     let current = new Date(start);
-    
+
     while (current <= end) {
       const periodEnd = new Date(current);
-      
+
       if (frequency === 'monthly') {
         periodEnd.setMonth(periodEnd.getMonth() + 1);
         periodEnd.setDate(0); // Last day of month
@@ -284,24 +287,27 @@ export class FilingLifecycleService {
         periodEnd.setFullYear(periodEnd.getFullYear() + 1);
         periodEnd.setMonth(11, 31);
       }
-      
+
       if (periodEnd > end) periodEnd.setTime(end.getTime());
-      
+
       // Calculate due date (typically 1 month after period end for VAT, varies by jurisdiction)
       const dueDate = new Date(periodEnd);
       dueDate.setMonth(dueDate.getMonth() + 1);
       dueDate.setDate(7); // 7th of following month (UK VAT standard)
-      
+
+      const startIso = current.toISOString().slice(0, 10);
+      const endIso = periodEnd.toISOString().slice(0, 10);
+      const dueIso = dueDate.toISOString().slice(0, 10);
       periods.push({
-        start: current.toISOString().split('T')[0],
-        end: periodEnd.toISOString().split('T')[0],
-        dueDate: dueDate.toISOString().split('T')[0],
+        start: startIso,
+        end: endIso,
+        dueDate: dueIso,
       });
-      
+
       current = new Date(periodEnd);
       current.setDate(current.getDate() + 1);
     }
-    
+
     return periods;
   }
 
@@ -369,7 +375,6 @@ export class FilingLifecycleService {
 
     return data;
   }
-
 }
 
 export const filingLifecycleService = new FilingLifecycleService();

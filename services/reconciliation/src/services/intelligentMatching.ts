@@ -2,7 +2,6 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
-import { createHash } from 'crypto';
 
 const logger = createLogger('intelligent-matching');
 
@@ -53,11 +52,13 @@ export class IntelligentMatchingService {
 
     if (result.rows.length > 0) {
       const row = result.rows[0];
-      return {
-        autoMatch: parseFloat(row.min_confidence_score.toString()),
-        suggestMatch: parseFloat(row.min_confidence_score.toString()) * 0.7, // 70% of auto-match threshold
-        signalWeights: (row.signal_weights as MatchingThresholds['signalWeights']) || this.getDefaultWeights(),
-      };
+      if (row) {
+        return {
+          autoMatch: parseFloat(row.min_confidence_score.toString()),
+          suggestMatch: parseFloat(row.min_confidence_score.toString()) * 0.7, // 70% of auto-match threshold
+          signalWeights: (row.signal_weights as MatchingThresholds['signalWeights']) || this.getDefaultWeights(),
+        };
+      }
     }
 
     // Return default thresholds
@@ -136,6 +137,10 @@ export class IntelligentMatchingService {
     }
 
     const transaction = txResult.rows[0];
+    if (!transaction) {
+      return [];
+    }
+
     const thresholds = await this.getThresholds(tenantId);
 
     // Date range for matching (±7 days)
@@ -166,7 +171,11 @@ export class IntelligentMatchingService {
 
     for (const doc of docsResult.rows) {
       const extractedData = (doc.extracted_data as Record<string, unknown>) || {};
-      const signals = this.calculateSignals(transaction, extractedData, doc.confidence_score || 0.5);
+      const signals = this.calculateSignals(
+        { amount: transaction.amount, date: transaction.date, description: transaction.description },
+        extractedData,
+        doc.confidence_score || 0.5
+      );
 
       const confidenceScore = this.calculateConfidenceScore(signals, thresholds.signalWeights);
       const matchType = this.determineMatchType(confidenceScore, thresholds);
@@ -202,7 +211,10 @@ export class IntelligentMatchingService {
     );
 
     for (const entry of ledgerResult.rows) {
-      const signals = this.calculateSignalsForLedger(transaction, entry);
+      const signals = this.calculateSignalsForLedger(
+        { amount: transaction.amount, date: transaction.date, description: transaction.description },
+        entry
+      );
       const confidenceScore = this.calculateConfidenceScore(signals, thresholds.signalWeights);
       const matchType = this.determineMatchType(confidenceScore, thresholds);
 

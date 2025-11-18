@@ -84,9 +84,13 @@ export async function connectTrueLayer(
 
     logger.info('TrueLayer connected', { tenantId, accountId });
   } catch (error) {
-    logger.error('TrueLayer connection failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error('TrueLayer connection failed', { error });
     throw error;
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 export async function refreshTrueLayerToken(tenantId: TenantId): Promise<void> {
@@ -101,12 +105,15 @@ export async function refreshTrueLayerToken(tenantId: TenantId): Promise<void> {
     [tenantId, 'truelayer']
   );
 
-  if (connection.rows.length === 0) {
+  const connectionRow = connection.rows[0];
+
+  if (!connectionRow) {
     throw new Error('TrueLayer not connected');
   }
 
-  const { metadata } = connection.rows[0];
-  const refreshToken = (metadata as Record<string, unknown>)?.refresh_token as string | undefined;
+  const { metadata } = connectionRow;
+  const metadataRecord = isRecord(metadata) ? metadata : {};
+  const refreshToken = typeof metadataRecord.refresh_token === 'string' ? metadataRecord.refresh_token : undefined;
 
   if (!refreshToken) {
     throw new Error('Refresh token not found');
@@ -141,7 +148,7 @@ export async function refreshTrueLayerToken(tenantId: TenantId): Promise<void> {
 
     logger.info('TrueLayer token refreshed', { tenantId });
   } catch (error) {
-    logger.error('TrueLayer token refresh failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error('TrueLayer token refresh failed', { error });
     throw error;
   }
 }
@@ -162,11 +169,13 @@ export async function syncTrueLayerTransactions(
     [tenantId, 'truelayer']
   );
 
-  if (connection.rows.length === 0) {
+  const connectionRow = connection.rows[0];
+
+  if (!connectionRow) {
     throw new Error('TrueLayer not connected');
   }
 
-  let { access_token, account_id, expires_at } = connection.rows[0];
+  let { access_token, account_id, expires_at } = connectionRow;
 
   // Refresh token if expired
   if (expires_at && new Date(expires_at) < new Date()) {
@@ -175,7 +184,11 @@ export async function syncTrueLayerTransactions(
       'SELECT access_token FROM bank_connections WHERE tenant_id = $1 AND provider = $2',
       [tenantId, 'truelayer']
     );
-    access_token = refreshed.rows[0].access_token;
+    const refreshedRow = refreshed.rows[0];
+    if (!refreshedRow) {
+      throw new Error('TrueLayer token refresh did not return credentials');
+    }
+    access_token = refreshedRow.access_token;
   }
 
   try {
@@ -249,7 +262,7 @@ export async function syncTrueLayerTransactions(
       [error instanceof Error ? error.message : 'Sync failed', tenantId]
     );
 
-    logger.error('TrueLayer sync failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error('TrueLayer sync failed', { error });
     throw error;
   }
 }

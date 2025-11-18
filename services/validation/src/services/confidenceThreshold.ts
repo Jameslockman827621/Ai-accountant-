@@ -12,11 +12,9 @@ export interface ConfidenceCheck {
 }
 
 export const MIN_CONFIDENCE_THRESHOLD = 0.85;
-export const CRITICAL_CONFIDENCE_THRESHOLD = 0.70;
+export const CRITICAL_CONFIDENCE_THRESHOLD = 0.7;
 
-export async function checkConfidenceThresholds(
-  tenantId: TenantId
-): Promise<ConfidenceCheck[]> {
+export async function checkConfidenceThresholds(tenantId: TenantId): Promise<ConfidenceCheck[]> {
   logger.info('Checking confidence thresholds', { tenantId });
 
   const documents = await db.query<{
@@ -50,14 +48,18 @@ export async function checkConfidenceThresholds(
 
     // Additional checks based on document type
     if (doc.document_type === 'invoice' || doc.document_type === 'receipt') {
-      const extractedData = doc.extracted_data as Record<string, unknown> | null;
-      
+      const extractedData = (doc.extracted_data as Record<string, unknown> | null) ?? null;
+
       // Check if critical fields are missing
       if (extractedData) {
         const missingFields: string[] = [];
-        if (!extractedData.total) missingFields.push('total');
-        if (!extractedData.date) missingFields.push('date');
-        if (doc.document_type === 'invoice' && !extractedData.invoiceNumber) {
+        const totalValue = extractedData['total'];
+        const dateValue = extractedData['date'];
+        const invoiceNumberValue = extractedData['invoiceNumber'];
+
+        if (!isPresent(totalValue)) missingFields.push('total');
+        if (!isPresent(dateValue)) missingFields.push('date');
+        if (doc.document_type === 'invoice' && !isPresent(invoiceNumberValue)) {
           missingFields.push('invoiceNumber');
         }
 
@@ -67,11 +69,10 @@ export async function checkConfidenceThresholds(
         }
 
         // Check for unusual values
-        if (extractedData.total) {
-          const total = typeof extractedData.total === 'number'
-            ? extractedData.total
-            : parseFloat(String(extractedData.total || '0'));
-          
+        if (isPresent(totalValue)) {
+          const total =
+            typeof totalValue === 'number' ? totalValue : parseFloat(String(totalValue ?? '0'));
+
           if (total <= 0) {
             requiresReview = true;
             reason = 'Total amount is zero or negative';
@@ -83,15 +84,28 @@ export async function checkConfidenceThresholds(
       }
     }
 
-    checks.push({
+    const check: ConfidenceCheck = {
       documentId: doc.id,
       confidenceScore: confidence,
       requiresReview,
-      reason,
-    });
+    };
+    if (reason) {
+      check.reason = reason;
+    }
+    checks.push(check);
   }
 
   return checks;
+}
+
+function isPresent(value: unknown): boolean {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  return true;
 }
 
 export async function enforceConfidenceThreshold(
@@ -101,16 +115,19 @@ export async function enforceConfidenceThreshold(
   const result = await db.query<{
     confidence_score: number | null;
     status: string;
-  }>(
-    'SELECT confidence_score, status FROM documents WHERE id = $1 AND tenant_id = $2',
-    [documentId, tenantId]
-  );
+  }>('SELECT confidence_score, status FROM documents WHERE id = $1 AND tenant_id = $2', [
+    documentId,
+    tenantId,
+  ]);
 
   if (result.rows.length === 0) {
     return false;
   }
 
   const doc = result.rows[0];
+  if (!doc) {
+    return false;
+  }
   const confidence = doc.confidence_score || 0;
 
   // If confidence is below threshold, mark for review

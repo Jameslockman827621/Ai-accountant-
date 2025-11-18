@@ -1,7 +1,5 @@
-import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { quickBooksIntegration } from './quickbooks';
 
 const logger = createLogger('integrations-service');
 

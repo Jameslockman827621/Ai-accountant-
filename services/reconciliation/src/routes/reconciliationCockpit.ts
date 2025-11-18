@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '@ai-accountant/database';
-import { intelligentMatchingService } from '../services/intelligentMatching';
-import { reconciliationExceptionService } from '../services/reconciliationExceptions';
+import { intelligentMatchingService, MatchSignals } from '../services/intelligentMatching';
 import { TenantId } from '@ai-accountant/shared-types';
 
 interface AuthRequest extends Request {
@@ -17,10 +16,11 @@ const router = Router();
  * GET /api/reconciliation/transactions
  * Get bank transactions with match suggestions
  */
-router.get('/transactions', async (req: AuthRequest, res: Response) => {
+router.get('/transactions', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
     const { accountId, startDate, endDate } = req.query;
@@ -51,14 +51,11 @@ router.get('/transactions', async (req: AuthRequest, res: Response) => {
 
     query += ` ORDER BY date DESC LIMIT 500`;
 
-    const result = await db.query(query, params);
-
-    // Enrich with match suggestions
-    const transactions = await Promise.all(
-      result.rows.map(async (tx: {
+    const result = await db.query<
+      {
         id: string;
         date: Date;
-        amount: number;
+        amount: number | string;
         currency: string;
         description: string;
         category: string | null;
@@ -66,7 +63,12 @@ router.get('/transactions', async (req: AuthRequest, res: Response) => {
         reconciled_with_document: string | null;
         reconciled_with_ledger: string | null;
         metadata: unknown;
-      }) => {
+      }
+    >(query, params);
+
+    // Enrich with match suggestions
+    const transactions = await Promise.all(
+      result.rows.map(async (tx) => {
         let suggestedMatch = null;
 
         if (!tx.reconciled) {
@@ -74,13 +76,14 @@ router.get('/transactions', async (req: AuthRequest, res: Response) => {
             req.user!.tenantId,
             tx.id
           );
-          if (matches.length > 0 && matches[0].matchType !== 'manual') {
-            suggestedMatch = matches[0];
+          const firstMatch = matches[0];
+          if (firstMatch && firstMatch.matchType !== 'manual') {
+            suggestedMatch = firstMatch;
           }
         }
 
         // Check metadata for stored suggestions
-        const metadata = (tx.metadata as Record<string, unknown>) || {};
+        const metadata = (tx.metadata as Record<string, unknown>) ?? {};
         if (metadata.suggested_match) {
           suggestedMatch = metadata.suggested_match as typeof suggestedMatch;
         }
@@ -88,7 +91,7 @@ router.get('/transactions', async (req: AuthRequest, res: Response) => {
         return {
           id: tx.id,
           date: tx.date.toISOString(),
-          amount: parseFloat(tx.amount.toString()),
+          amount: typeof tx.amount === 'number' ? tx.amount : parseFloat(String(tx.amount)),
           currency: tx.currency,
           description: tx.description,
           category: tx.category,
@@ -109,13 +112,14 @@ router.get('/transactions', async (req: AuthRequest, res: Response) => {
  * GET /api/reconciliation/events
  * Get reconciliation events for timeline
  */
-router.get('/events', async (req: AuthRequest, res: Response) => {
+router.get('/events', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
-    const { accountId, startDate, endDate, limit = 100 } = req.query;
+    const { startDate, endDate, limit = 100 } = req.query;
 
     let query = `
       SELECT id, event_type, reason_code, reason_description, confidence_score,
@@ -139,27 +143,50 @@ router.get('/events', async (req: AuthRequest, res: Response) => {
     query += ` ORDER BY performed_at DESC LIMIT $${paramCount++}`;
     params.push(parseInt(limit as string, 10));
 
-    const result = await db.query(query, params);
-
-    const events = result.rows.map((row: {
+    const result = await db.query<{
       id: string;
       event_type: string;
       reason_code: string;
       reason_description: string | null;
-      confidence_score: number | null;
+      confidence_score: number | string | null;
       performed_at: Date;
       performed_by: string | null;
       match_signals: unknown;
-    }) => ({
-      id: row.id,
-      eventType: row.event_type,
-      reasonCode: row.reason_code,
-      reasonDescription: row.reason_description || undefined,
-      confidenceScore: row.confidence_score ? parseFloat(row.confidence_score.toString()) : undefined,
-      performedAt: row.performed_at.toISOString(),
-      performedBy: row.performed_by || undefined,
-      matchSignals: row.match_signals || {},
-    }));
+    }>(query, params);
+
+    const events = result.rows.map((row) => {
+      const event: {
+        id: string;
+        eventType: string;
+        reasonCode: string;
+        reasonDescription?: string;
+        confidenceScore?: number;
+        performedAt: string;
+        performedBy?: string;
+        matchSignals: Record<string, unknown>;
+      } = {
+        id: row.id,
+        eventType: row.event_type,
+        reasonCode: row.reason_code,
+        performedAt: row.performed_at.toISOString(),
+        matchSignals: (row.match_signals as Record<string, unknown>) ?? {},
+      };
+
+      if (row.reason_description) {
+        event.reasonDescription = row.reason_description;
+      }
+      if (row.confidence_score !== null && row.confidence_score !== undefined) {
+        event.confidenceScore =
+          typeof row.confidence_score === 'number'
+            ? row.confidence_score
+            : parseFloat(String(row.confidence_score));
+      }
+      if (row.performed_by) {
+        event.performedBy = row.performed_by;
+      }
+
+      return event;
+    });
 
     res.json({ events });
   } catch (error) {
@@ -172,16 +199,18 @@ router.get('/events', async (req: AuthRequest, res: Response) => {
  * POST /api/reconciliation/match
  * Accept a match suggestion
  */
-router.post('/match', async (req: AuthRequest, res: Response) => {
+router.post('/match', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
     const { bankTransactionId, documentId, ledgerEntryId, matchType } = req.body;
 
     if (!bankTransactionId || (!documentId && !ledgerEntryId)) {
-      return res.status(400).json({ error: 'Missing required fields' });
+      res.status(400).json({ error: 'Missing required fields' });
+      return;
     }
 
     // Reconcile transaction
@@ -222,17 +251,43 @@ router.post('/match', async (req: AuthRequest, res: Response) => {
     );
     const bestMatch = matches[0];
 
-    await intelligentMatchingService.recordEvent(req.user.tenantId, {
-      bankTransactionId,
-      documentId,
-      ledgerEntryId,
+    const eventPayload: {
+      bankTransactionId?: string;
+      documentId?: string;
+      ledgerEntryId?: string;
+      eventType: 'match' | 'unmatch' | 'auto_match' | 'manual_match' | 'split' | 'merge' | 'exception_created' | 'exception_resolved';
+      reasonCode: string;
+      reasonDescription?: string;
+      confidenceScore?: number;
+      matchSignals?: MatchSignals;
+      performedBy?: string;
+    } = {
       eventType: matchType === 'auto' ? 'auto_match' : 'manual_match',
       reasonCode: 'user_accepted_match',
       reasonDescription: `User accepted ${matchType} match`,
-      confidenceScore: bestMatch?.confidenceScore,
-      matchSignals: bestMatch?.signals,
-      performedBy: req.user.userId,
-    });
+    };
+
+    if (bankTransactionId) {
+      eventPayload.bankTransactionId = bankTransactionId;
+    }
+    if (req.user.userId) {
+      eventPayload.performedBy = req.user.userId;
+    }
+
+    if (documentId) {
+      eventPayload.documentId = documentId;
+    }
+    if (ledgerEntryId) {
+      eventPayload.ledgerEntryId = ledgerEntryId;
+    }
+    if (bestMatch) {
+      eventPayload.confidenceScore = bestMatch.confidenceScore;
+      if (bestMatch.signals) {
+        eventPayload.matchSignals = bestMatch.signals;
+      }
+    }
+
+    await intelligentMatchingService.recordEvent(req.user.tenantId, eventPayload);
 
     res.json({ success: true });
   } catch (error) {
@@ -245,16 +300,18 @@ router.post('/match', async (req: AuthRequest, res: Response) => {
  * POST /api/reconciliation/reject
  * Reject a match suggestion
  */
-router.post('/reject', async (req: AuthRequest, res: Response) => {
+router.post('/reject', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
     const { bankTransactionId } = req.body;
 
     if (!bankTransactionId) {
-      return res.status(400).json({ error: 'Missing bankTransactionId' });
+      res.status(400).json({ error: 'Missing bankTransactionId' });
+      return;
     }
 
     // Clear suggested match from metadata
@@ -285,10 +342,11 @@ router.post('/reject', async (req: AuthRequest, res: Response) => {
  * GET /api/reconciliation/anomalies
  * Get detected anomalies
  */
-router.get('/anomalies', async (req: AuthRequest, res: Response) => {
+router.get('/anomalies', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     if (!req.user) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
     const { startDate, endDate, minScore } = req.query;
@@ -296,11 +354,23 @@ router.get('/anomalies', async (req: AuthRequest, res: Response) => {
     // Import here to avoid circular dependency
     const { anomalyDetectionService } = await import('../services/anomalyDetection');
 
-    const anomalies = await anomalyDetectionService.detectAnomalies(req.user.tenantId, {
-      startDate: startDate ? new Date(startDate as string) : undefined,
-      endDate: endDate ? new Date(endDate as string) : undefined,
-      minScore: minScore ? parseFloat(minScore as string) : undefined,
-    });
+    const options: {
+      startDate?: Date;
+      endDate?: Date;
+      minScore?: number;
+    } = {};
+
+    if (startDate) {
+      options.startDate = new Date(startDate as string);
+    }
+    if (endDate) {
+      options.endDate = new Date(endDate as string);
+    }
+    if (minScore) {
+      options.minScore = parseFloat(minScore as string);
+    }
+
+    const anomalies = await anomalyDetectionService.detectAnomalies(req.user.tenantId, options);
 
     res.json({ anomalies });
   } catch (error) {

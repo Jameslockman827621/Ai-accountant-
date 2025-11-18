@@ -5,6 +5,37 @@ import crypto from 'crypto';
 
 const logger = createLogger('integrations-service');
 
+interface QuickBooksTokenResponse {
+  access_token?: string | undefined;
+  refresh_token?: string | undefined;
+  expires_in?: number | undefined;
+  realmId?: string | undefined;
+}
+
+function parseQuickBooksTokenResponse(payload: unknown): QuickBooksTokenResponse {
+  if (!payload || typeof payload !== 'object') {
+    return {};
+  }
+
+  const record = payload as Record<string, unknown>;
+  const getString = (key: string): string | undefined => {
+    const value = record[key];
+    return typeof value === 'string' ? value : undefined;
+  };
+
+  const getNumber = (key: string): number | undefined => {
+    const value = record[key];
+    return typeof value === 'number' ? value : undefined;
+  };
+
+  return {
+    access_token: getString('access_token'),
+    refresh_token: getString('refresh_token'),
+    expires_in: getNumber('expires_in'),
+    realmId: getString('realmId') || getString('realm_id'),
+  };
+}
+
 // Complete QuickBooks OAuth Flow
 export class QuickBooksOAuth {
   async initiateOAuth(tenantId: TenantId, redirectUri: string): Promise<string> {
@@ -67,13 +98,18 @@ export class QuickBooksOAuth {
       throw new Error(`QuickBooks token exchange failed: ${tokenResponse.status} ${errorText}`);
     }
 
-    const tokenData = await tokenResponse.json();
+    const tokenData = parseQuickBooksTokenResponse(await tokenResponse.json());
     const accessToken = tokenData.access_token;
     const refreshToken = tokenData.refresh_token;
     const realmId = tokenData.realmId; // QuickBooks company ID
 
+    if (!accessToken || !refreshToken || !realmId) {
+      throw new Error('QuickBooks token exchange returned incomplete data');
+    }
+
     // Store tokens and realm ID
-    const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+    const expiresInMs = (tokenData.expires_in ?? 3600) * 1000;
+    const expiresAt = new Date(Date.now() + expiresInMs);
     
     await db.query(
       `INSERT INTO quickbooks_connections (
@@ -120,10 +156,15 @@ export class QuickBooksOAuth {
       throw new Error(`QuickBooks token refresh failed: ${tokenResponse.status} ${errorText}`);
     }
 
-    const tokenData = await tokenResponse.json();
+    const tokenData = parseQuickBooksTokenResponse(await tokenResponse.json());
     const newAccessToken = tokenData.access_token;
     const newRefreshToken = tokenData.refresh_token || refreshToken;
-    const expiresAt = new Date(Date.now() + (tokenData.expires_in * 1000));
+    const expiresInMs = (tokenData.expires_in ?? 3600) * 1000;
+    const expiresAt = new Date(Date.now() + expiresInMs);
+
+    if (!newAccessToken) {
+      throw new Error('QuickBooks token refresh returned no access token');
+    }
 
     await db.query(
       `UPDATE quickbooks_connections

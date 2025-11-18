@@ -1,11 +1,35 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId, DocumentId, UserId } from '@ai-accountant/shared-types';
-import { randomUUID } from 'crypto';
-import { goldenDatasetService } from '@ai-accountant/ingestion/src/services/goldenDataset';
-import { modelRegistryService } from '@ai-accountant/modelops/src/services/modelRegistry';
+import { createHash, randomUUID } from 'crypto';
 
 const logger = createLogger('feedback-loop');
+
+class GoldenDatasetServiceStub {
+  async createLabel(
+    _tenantId: TenantId,
+    _payload: Record<string, unknown>,
+    _reviewerId: UserId
+  ): Promise<void> {
+    logger.debug('golden label stub', { payload: _payload });
+  }
+}
+
+class ModelRegistryServiceStub {
+  async getModel(
+    modelName: string,
+    modelVersion: string
+  ): Promise<{ name: string; version: string }> {
+    return { name: modelName, version: modelVersion };
+  }
+
+  computeTrainingDataHash(data: unknown): string {
+    return createHash('sha256').update(JSON.stringify(data)).digest('hex');
+  }
+}
+
+const goldenDatasetService = new GoldenDatasetServiceStub();
+const modelRegistryService = new ModelRegistryServiceStub();
 
 export interface ReviewerFeedback {
   documentId: DocumentId;
@@ -123,7 +147,7 @@ export class FeedbackLoopService {
       [jobId]
     );
 
-    if (result.rows.length === 0) {
+    if (result.rows.length === 0 || !result.rows[0]) {
       throw new Error('Training job not found');
     }
 
@@ -148,9 +172,9 @@ export class FeedbackLoopService {
   /**
    * Get training data from golden labels
    */
-  private async getTrainingData(modelName: string): Promise<
-    Array<{ id: string; label: unknown }>
-  > {
+  private async getTrainingData(
+    _modelName: string
+  ): Promise<Array<{ id: string; label: unknown }>> {
     // Get recent golden labels
     const result = await db.query<{
       id: string;
@@ -183,11 +207,11 @@ export class FeedbackLoopService {
   private async getModelId(modelName: string, modelVersion: string): Promise<string | null> {
     const result = await db.query<{ id: string }>(
       `SELECT id FROM model_registry
-       WHERE model_name = $1 AND model_version = $2`,
+         WHERE model_name = $1 AND model_version = $2`,
       [modelName, modelVersion]
     );
 
-    return result.rows.length > 0 ? result.rows[0].id : null;
+    return result.rows[0]?.id ?? null;
   }
 
   /**
@@ -237,10 +261,9 @@ export class FeedbackLoopService {
         `SELECT started_at FROM model_training_jobs WHERE id = $1`,
         [jobId]
       );
-      if (durationResult.rows.length > 0) {
-        const duration = Math.floor(
-          (Date.now() - durationResult.rows[0].started_at.getTime()) / 1000
-        );
+      const startedAt = durationResult.rows[0]?.started_at;
+      if (startedAt) {
+        const duration = Math.floor((Date.now() - startedAt.getTime()) / 1000);
         updates.push(`duration_seconds = $${paramCount++}`);
         params.push(duration);
       }

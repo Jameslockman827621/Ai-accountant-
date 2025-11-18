@@ -2,7 +2,7 @@
  * Xero Webhook Handler
  */
 
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import crypto from 'crypto';
@@ -10,27 +10,46 @@ import crypto from 'crypto';
 const logger = createLogger('xero-webhooks');
 const router = Router();
 
+interface XeroWebhookEvent {
+  eventType?: string;
+  resourceId?: string;
+  resourceType?: string;
+}
+
+interface XeroWebhookPayload {
+  events?: XeroWebhookEvent[];
+  tenantId?: string;
+}
+
 // Verify webhook signature
 function verifyWebhookSignature(
   payload: string,
-  signature: string,
+  signature: string | undefined,
   webhookKey: string
 ): boolean {
+  if (!signature || !webhookKey) {
+    return false;
+  }
+
   const expectedSignature = crypto
     .createHmac('sha256', webhookKey)
     .update(payload)
     .digest('base64');
   
-  return crypto.timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(expectedSignature)
-  );
+  const providedBuffer = Buffer.from(signature, 'base64');
+  const expectedBuffer = Buffer.from(expectedSignature, 'base64');
+
+  if (providedBuffer.length !== expectedBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
 }
 
 // Handle Xero webhook events
-router.post('/xero/webhook', async (req, res) => {
+router.post('/xero/webhook', async (req: Request, res: Response) => {
   try {
-    const signature = req.headers['x-xero-signature'] as string;
+    const signature = req.headers['x-xero-signature'] as string | undefined;
     const webhookKey = process.env.XERO_WEBHOOK_KEY || '';
 
     if (!signature) {
@@ -44,11 +63,16 @@ router.post('/xero/webhook', async (req, res) => {
       return res.status(401).json({ error: 'Invalid signature' });
     }
 
-    const event = req.body;
-    const events = event.events || [];
+    const event = req.body as XeroWebhookPayload;
+    const events = event.events ?? [];
     const tenantIdXero = event.tenantId;
 
     logger.info('Xero webhook received', { eventCount: events.length, tenantIdXero });
+
+    if (!tenantIdXero) {
+      logger.warn('Missing tenant ID in Xero webhook');
+      return res.status(400).json({ error: 'Missing tenant ID' });
+    }
 
     // Get tenant ID from Xero tenant ID
     const connection = await db.query<{ tenant_id: string }>(
@@ -56,18 +80,20 @@ router.post('/xero/webhook', async (req, res) => {
       [tenantIdXero]
     );
 
-    if (connection.rows.length === 0) {
+    const connectionRow = connection.rows[0];
+
+    if (!connectionRow) {
       logger.warn('No connection found for Xero tenant', { tenantIdXero });
       return res.status(404).json({ error: 'Connection not found' });
     }
 
-    const tenantId = connection.rows[0].tenant_id;
+    const tenantId = connectionRow.tenant_id;
 
     // Handle different event types
     for (const evt of events) {
-      const eventType = evt.eventType;
+      const eventType = evt.eventType || 'unknown';
       const resourceId = evt.resourceId;
-      const resourceType = evt.resourceType;
+      const resourceType = evt.resourceType || 'unknown';
 
       logger.info('Processing Xero event', { eventType, resourceType, resourceId, tenantId });
 
@@ -98,17 +124,19 @@ router.post('/xero/webhook', async (req, res) => {
     }
 
     // Store webhook event for audit
+    const primaryEventType = events[0]?.eventType || 'unknown';
+
     await db.query(
       `INSERT INTO webhook_events (
         id, tenant_id, provider, event_type, payload, created_at
       ) VALUES (gen_random_uuid(), $1, 'xero', $2, $3, NOW())`,
-      [tenantId, JSON.stringify(events), JSON.stringify(event)]
+      [tenantId, primaryEventType, JSON.stringify(event)]
     );
 
-    res.status(200).json({ received: true });
+    return res.status(200).json({ received: true });
   } catch (error) {
-    logger.error('Xero webhook error', error);
-    res.status(500).json({ error: 'Webhook processing failed' });
+    logger.error('Xero webhook error', { error });
+    return res.status(500).json({ error: 'Webhook processing failed' });
   }
 });
 

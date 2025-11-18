@@ -21,7 +21,15 @@ export interface LineItem {
 }
 
 export interface ExtractedEntity {
-  entityType: 'vendor' | 'customer' | 'amount' | 'date' | 'tax_id' | 'invoice_number' | 'currency' | 'other';
+  entityType:
+    | 'vendor'
+    | 'customer'
+    | 'amount'
+    | 'date'
+    | 'tax_id'
+    | 'invoice_number'
+    | 'currency'
+    | 'other';
   entityValue: string;
   confidenceScore: number;
   boundingBox?: { x: number; y: number; width: number; height: number };
@@ -32,6 +40,15 @@ export interface ExtractedEntity {
 /**
  * Extract line items from document text (Chunk 3)
  */
+type StructuredLineItem = {
+  description?: string | null;
+  quantity?: number | null;
+  unitPrice?: number | null;
+  total?: number | null;
+  tax?: number | null;
+  taxRate?: number | null;
+};
+
 export class LineItemExtractor {
   /**
    * Extract line items from classified document
@@ -48,8 +65,15 @@ export class LineItemExtractor {
 
     try {
       // Try to extract from structured data first
-      if (structuredData.lineItems && Array.isArray(structuredData.lineItems)) {
-        return this.processStructuredLineItems(documentId, structuredData.lineItems as any[]);
+      if (Array.isArray(structuredData.lineItems)) {
+        const structuredItems = structuredData.lineItems.filter(
+          (candidate): candidate is StructuredLineItem =>
+            Boolean(candidate) && typeof candidate === 'object'
+        );
+
+        if (structuredItems.length > 0) {
+          return this.processStructuredLineItems(documentId, structuredItems);
+        }
       }
 
       // Fallback to text parsing
@@ -68,33 +92,40 @@ export class LineItemExtractor {
    */
   private async processStructuredLineItems(
     documentId: string,
-    items: Array<{
-      description?: string;
-      quantity?: number;
-      unitPrice?: number;
-      total?: number;
-      tax?: number;
-      taxRate?: number;
-    }>
+    items: StructuredLineItem[]
   ): Promise<LineItem[]> {
     const lineItems: LineItem[] = [];
 
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const lineNumber = i + 1;
+    items.forEach((item, index) => {
+      if (!item) {
+        return;
+      }
+      const lineNumber = index + 1;
+      const description = typeof item.description === 'string' ? item.description : '';
+      const quantity =
+        typeof item.quantity === 'number' && Number.isFinite(item.quantity) ? item.quantity : 1;
+      const unitPrice =
+        typeof item.unitPrice === 'number' && Number.isFinite(item.unitPrice) ? item.unitPrice : 0;
+      const totalAmount =
+        typeof item.total === 'number' && Number.isFinite(item.total)
+          ? item.total
+          : unitPrice * quantity;
+      const taxAmount = typeof item.tax === 'number' && Number.isFinite(item.tax) ? item.tax : 0;
+      const taxRate =
+        typeof item.taxRate === 'number' && Number.isFinite(item.taxRate) ? item.taxRate : 0;
 
       lineItems.push({
         lineNumber,
-        description: item.description || '',
-        quantity: item.quantity || 1,
-        unitPrice: item.unitPrice || 0,
-        totalAmount: item.total || (item.unitPrice || 0) * (item.quantity || 1),
-        taxAmount: item.tax || 0,
-        taxRate: item.taxRate || 0,
+        description,
+        quantity,
+        unitPrice,
+        totalAmount,
+        taxAmount,
+        taxRate,
         confidenceScore: 0.85, // Higher confidence for structured data
-        rawText: item.description || '',
+        rawText: description,
       });
-    }
+    });
 
     // Store in database
     await this.storeLineItems(documentId, lineItems);
@@ -112,14 +143,21 @@ export class LineItemExtractor {
     let lineNumber = 1;
     for (const line of lines) {
       // Look for patterns like: "Item Description | Qty | Price | Total"
-      const match = line.match(/(.+?)\s+(\d+(?:\.\d+)?)\s+([£$€]?\d+(?:\.\d+)?)\s+([£$€]?\d+(?:\.\d+)?)/);
+      const match = line.match(
+        /(.+?)\s+(\d+(?:\.\d+)?)\s+([£$€]?\d+(?:\.\d+)?)\s+([£$€]?\d+(?:\.\d+)?)/
+      );
       if (match) {
+        const description = (match[1] ?? '').trim();
+        const quantity = parseFloat(match[2] ?? '1');
+        const unitPriceRaw = match[3] ?? '0';
+        const totalRaw = match[4] ?? '0';
+
         lineItems.push({
           lineNumber: lineNumber++,
-          description: match[1].trim(),
-          quantity: parseFloat(match[2]),
-          unitPrice: parseFloat(match[3].replace(/[£$€]/g, '')),
-          totalAmount: parseFloat(match[4].replace(/[£$€]/g, '')),
+          description,
+          quantity: Number.isFinite(quantity) ? quantity : 1,
+          unitPrice: parseFloat(unitPriceRaw.replace(/[£$€]/g, '')),
+          totalAmount: parseFloat(totalRaw.replace(/[£$€]/g, '')),
           taxAmount: 0,
           taxRate: 0,
           confidenceScore: 0.7,
@@ -175,7 +213,7 @@ export class LineItemExtractor {
     const entities: ExtractedEntity[] = [];
 
     // Extract vendor
-    if (structuredData.vendor) {
+    if (typeof structuredData.vendor === 'string' && structuredData.vendor.trim().length > 0) {
       entities.push({
         entityType: 'vendor',
         entityValue: String(structuredData.vendor),
@@ -185,7 +223,10 @@ export class LineItemExtractor {
     }
 
     // Extract invoice number
-    if (structuredData.invoiceNumber) {
+    if (
+      typeof structuredData.invoiceNumber === 'string' &&
+      structuredData.invoiceNumber.trim().length > 0
+    ) {
       entities.push({
         entityType: 'invoice_number',
         entityValue: String(structuredData.invoiceNumber),
@@ -195,10 +236,18 @@ export class LineItemExtractor {
     }
 
     // Extract date
-    if (structuredData.date) {
-      const dateValue = structuredData.date instanceof Date
-        ? structuredData.date.toISOString().split('T')[0]
-        : String(structuredData.date);
+    const rawDate = structuredData.date;
+    if (rawDate instanceof Date) {
+      const isoString = rawDate.toISOString();
+      const dateValue: string = isoString.split('T')[0] ?? isoString;
+      entities.push({
+        entityType: 'date',
+        entityValue: dateValue,
+        confidenceScore: 0.9,
+        normalizedValue: dateValue,
+      });
+    } else if (typeof rawDate === 'string' && rawDate.trim() !== '') {
+      const dateValue: string = rawDate.trim();
       entities.push({
         entityType: 'date',
         entityValue: dateValue,
@@ -208,7 +257,10 @@ export class LineItemExtractor {
     }
 
     // Extract amount
-    if (structuredData.total) {
+    if (
+      typeof structuredData.total === 'number' ||
+      (typeof structuredData.total === 'string' && structuredData.total.trim() !== '')
+    ) {
       entities.push({
         entityType: 'amount',
         entityValue: String(structuredData.total),
@@ -218,7 +270,7 @@ export class LineItemExtractor {
     }
 
     // Extract currency
-    if (structuredData.currency) {
+    if (typeof structuredData.currency === 'string' && structuredData.currency.trim() !== '') {
       entities.push({
         entityType: 'currency',
         entityValue: String(structuredData.currency),
@@ -229,12 +281,13 @@ export class LineItemExtractor {
 
     // Extract tax ID from text
     const taxIdMatch = extractedText.match(/(?:VAT|Tax|EIN|SSN)[\s#:]*([A-Z0-9-]+)/i);
-    if (taxIdMatch) {
+    if (taxIdMatch?.[1]) {
+      const taxId = taxIdMatch[1];
       entities.push({
         entityType: 'tax_id',
-        entityValue: taxIdMatch[1],
+        entityValue: taxId,
         confidenceScore: 0.8,
-        normalizedValue: taxIdMatch[1].toUpperCase().trim(),
+        normalizedValue: taxId.toUpperCase().trim(),
       });
     }
 
@@ -249,6 +302,9 @@ export class LineItemExtractor {
    */
   private async storeEntities(documentId: string, entities: ExtractedEntity[]): Promise<void> {
     for (const entity of entities) {
+      const normalizedValue = entity.normalizedValue ?? entity.entityValue;
+      const pageNumber = entity.pageNumber ?? null;
+
       await db.query(
         `INSERT INTO document_entities (
           id, document_id, entity_type, entity_value, confidence_score,
@@ -263,8 +319,8 @@ export class LineItemExtractor {
           entity.entityValue,
           entity.confidenceScore,
           entity.boundingBox ? JSON.stringify(entity.boundingBox) : null,
-          entity.pageNumber || null,
-          entity.normalizedValue || entity.entityValue,
+          pageNumber,
+          normalizedValue,
         ]
       );
     }

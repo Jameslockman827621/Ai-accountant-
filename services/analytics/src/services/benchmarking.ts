@@ -2,12 +2,8 @@
  * Industry Benchmarking Service
  */
 
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
-
-const logger = createLogger('benchmarking');
-
-export interface BenchmarkData {
+export interface BenchmarkData extends Record<string, unknown> {
   industry: string;
   metric: string;
   period: string;
@@ -60,9 +56,9 @@ export class BenchmarkingService {
       industry: 'professional_services',
       metric: 'net_profit_margin',
       period: '2024',
-      value: 0.20,
+      value: 0.2,
       percentile25: 0.15,
-      percentile50: 0.20,
+      percentile50: 0.2,
       percentile75: 0.25,
       percentile90: 0.35,
       source: 'industry_average',
@@ -88,23 +84,28 @@ export class BenchmarkingService {
     period: string = '2024'
   ): Promise<BenchmarkData | null> {
     // Try database first
-    const result = await db.query<BenchmarkData>(
-      `SELECT * FROM benchmark_data
+    const result = await db
+      .query<BenchmarkData>(
+        `SELECT * FROM benchmark_data
        WHERE industry = $1 AND metric = $2 AND period = $3
        ORDER BY updated_at DESC LIMIT 1`,
-      [industry, metric, period]
-    ).catch(() => ({ rows: [] }));
+        [industry, metric, period]
+      )
+      .catch(() => ({ rows: [] }));
 
     if (result.rows.length > 0) {
-      return result.rows[0];
+      const row = result.rows[0];
+      if (row) {
+        return row;
+      }
     }
 
     // Fallback to default benchmarks
     const defaultBenchmark = this.defaultBenchmarks.find(
-      b => b.industry === industry && b.metric === metric && b.period === period
+      (b) => b.industry === industry && b.metric === metric && b.period === period
     );
 
-    return defaultBenchmark || null;
+    return defaultBenchmark ?? null;
   }
 
   async compareToBenchmark(
@@ -157,14 +158,19 @@ export class BenchmarkingService {
         recommendation = this.generateRecommendation(metric, userValue, benchmark.value);
       }
 
-      comparisons.push({
+      const comparison: BenchmarkComparison = {
         metric,
         userValue,
         industryAverage: benchmark.value,
         percentile,
         performance,
-        recommendation,
-      });
+      };
+
+      if (recommendation) {
+        comparison.recommendation = recommendation;
+      }
+
+      comparisons.push(comparison);
     }
 
     return comparisons;
@@ -175,13 +181,13 @@ export class BenchmarkingService {
     metric: string,
     period: string
   ): Promise<number | null> {
-    const [year, quarter] = period.split('-Q');
+    const [yearStr, quarterStr] = period.split('-Q');
+    const parsedYear = parseInt(yearStr || `${new Date().getFullYear()}`, 10);
+    const quarter = quarterStr ? parseInt(quarterStr, 10) : undefined;
     const startDate = quarter
-      ? new Date(parseInt(year), (parseInt(quarter) - 1) * 3, 1)
-      : new Date(parseInt(year), 0, 1);
-    const endDate = quarter
-      ? new Date(parseInt(year), parseInt(quarter) * 3, 0)
-      : new Date(parseInt(year), 11, 31);
+      ? new Date(parsedYear, (quarter - 1) * 3, 1)
+      : new Date(parsedYear, 0, 1);
+    const endDate = quarter ? new Date(parsedYear, quarter * 3, 0) : new Date(parsedYear, 11, 31);
 
     switch (metric) {
       case 'gross_margin': {
@@ -201,12 +207,14 @@ export class BenchmarkingService {
           [tenantId, startDate, endDate]
         );
 
-        const rev = typeof revenue.rows[0]?.total === 'number'
-          ? revenue.rows[0].total
-          : parseFloat(String(revenue.rows[0]?.total || '0'));
-        const cost = typeof cogs.rows[0]?.total === 'number'
-          ? cogs.rows[0].total
-          : parseFloat(String(cogs.rows[0]?.total || '0'));
+        const rev =
+          typeof revenue.rows[0]?.total === 'number'
+            ? revenue.rows[0].total
+            : parseFloat(String(revenue.rows[0]?.total || '0'));
+        const cost =
+          typeof cogs.rows[0]?.total === 'number'
+            ? cogs.rows[0].total
+            : parseFloat(String(cogs.rows[0]?.total || '0'));
 
         return rev > 0 ? (rev - cost) / rev : null;
       }
@@ -227,12 +235,14 @@ export class BenchmarkingService {
           [tenantId, startDate, endDate]
         );
 
-        const rev = typeof revenue.rows[0]?.total === 'number'
-          ? revenue.rows[0].total
-          : parseFloat(String(revenue.rows[0]?.total || '0'));
-        const exp = typeof expenses.rows[0]?.total === 'number'
-          ? expenses.rows[0].total
-          : parseFloat(String(expenses.rows[0]?.total || '0'));
+        const rev =
+          typeof revenue.rows[0]?.total === 'number'
+            ? revenue.rows[0].total
+            : parseFloat(String(revenue.rows[0]?.total || '0'));
+        const exp =
+          typeof expenses.rows[0]?.total === 'number'
+            ? expenses.rows[0].total
+            : parseFloat(String(expenses.rows[0]?.total || '0'));
 
         return rev > 0 ? (rev - exp) / rev : null;
       }

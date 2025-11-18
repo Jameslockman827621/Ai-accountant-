@@ -95,26 +95,53 @@ export class ComplianceEvidenceService {
     }
 
     const row = result.rows[0];
-    return {
+    if (!row) {
+      throw new Error(`Compliance evidence not found: ${id}`);
+    }
+
+    const evidence: ComplianceEvidence = {
       id: row.id,
       complianceFramework: row.compliance_framework as ComplianceEvidence['complianceFramework'],
       controlId: row.control_id,
       controlName: row.control_name,
       evidenceType: row.evidence_type as ComplianceEvidence['evidenceType'],
-      evidenceUrl: row.evidence_url || undefined,
-      evidenceData: row.evidence_data as Record<string, unknown> | undefined,
       status: row.status as ComplianceEvidence['status'],
-      reviewedBy: row.reviewed_by as UserId | undefined,
-      reviewedAt: row.reviewed_at || undefined,
-      approvedBy: row.approved_by as UserId | undefined,
-      approvedAt: row.approved_at || undefined,
-      effectiveFrom: row.effective_from || undefined,
-      effectiveTo: row.effective_to || undefined,
-      lastVerifiedAt: row.last_verified_at || undefined,
-      nextReviewDue: row.next_review_due || undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
+
+    if (row.evidence_url) {
+      evidence.evidenceUrl = row.evidence_url;
+    }
+    if (row.evidence_data) {
+      evidence.evidenceData = row.evidence_data as Record<string, unknown>;
+    }
+    if (row.reviewed_by) {
+      evidence.reviewedBy = row.reviewed_by as UserId;
+    }
+    if (row.reviewed_at) {
+      evidence.reviewedAt = row.reviewed_at;
+    }
+    if (row.approved_by) {
+      evidence.approvedBy = row.approved_by as UserId;
+    }
+    if (row.approved_at) {
+      evidence.approvedAt = row.approved_at;
+    }
+    if (row.effective_from) {
+      evidence.effectiveFrom = row.effective_from;
+    }
+    if (row.effective_to) {
+      evidence.effectiveTo = row.effective_to;
+    }
+    if (row.last_verified_at) {
+      evidence.lastVerifiedAt = row.last_verified_at;
+    }
+    if (row.next_review_due) {
+      evidence.nextReviewDue = row.next_review_due;
+    }
+
+    return evidence;
   }
 
   async updateEvidenceStatus(
@@ -146,7 +173,10 @@ export class ComplianceEvidenceService {
     }
 
     params.push(id);
-    await db.query(`UPDATE compliance_evidence SET ${updates.join(', ')} WHERE id = $${paramIndex}`, params);
+    await db.query(
+      `UPDATE compliance_evidence SET ${updates.join(', ')} WHERE id = $${paramIndex}`,
+      params
+    );
 
     logger.info('Compliance evidence status updated', { id, status });
     return this.getEvidence(id);
@@ -177,7 +207,8 @@ export class ComplianceEvidenceService {
     // Count total
     const countQuery = query.replace('SELECT *', 'SELECT COUNT(*)');
     const countResult = await db.query<{ count: string }>(countQuery, params);
-    const total = parseInt(countResult.rows[0].count, 10);
+    const totalRow = countResult.rows[0];
+    const total = totalRow ? parseInt(totalRow.count, 10) : 0;
 
     query += ' ORDER BY created_at DESC';
     if (filters.limit) {
@@ -211,26 +242,52 @@ export class ComplianceEvidenceService {
     }>(query, params);
 
     return {
-      evidence: result.rows.map((row) => ({
-        id: row.id,
-        complianceFramework: row.compliance_framework as ComplianceEvidence['complianceFramework'],
-        controlId: row.control_id,
-        controlName: row.control_name,
-        evidenceType: row.evidence_type as ComplianceEvidence['evidenceType'],
-        evidenceUrl: row.evidence_url || undefined,
-        evidenceData: row.evidence_data as Record<string, unknown> | undefined,
-        status: row.status as ComplianceEvidence['status'],
-        reviewedBy: row.reviewed_by as UserId | undefined,
-        reviewedAt: row.reviewed_at || undefined,
-        approvedBy: row.approved_by as UserId | undefined,
-        approvedAt: row.approved_at || undefined,
-        effectiveFrom: row.effective_from || undefined,
-        effectiveTo: row.effective_to || undefined,
-        lastVerifiedAt: row.last_verified_at || undefined,
-        nextReviewDue: row.next_review_due || undefined,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      })),
+      evidence: result.rows.map((row) => {
+        const item: ComplianceEvidence = {
+          id: row.id,
+          complianceFramework:
+            row.compliance_framework as ComplianceEvidence['complianceFramework'],
+          controlId: row.control_id,
+          controlName: row.control_name,
+          evidenceType: row.evidence_type as ComplianceEvidence['evidenceType'],
+          status: row.status as ComplianceEvidence['status'],
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+        };
+
+        if (row.evidence_url) {
+          item.evidenceUrl = row.evidence_url;
+        }
+        if (row.evidence_data) {
+          item.evidenceData = row.evidence_data as Record<string, unknown>;
+        }
+        if (row.reviewed_by) {
+          item.reviewedBy = row.reviewed_by as UserId;
+        }
+        if (row.reviewed_at) {
+          item.reviewedAt = row.reviewed_at;
+        }
+        if (row.approved_by) {
+          item.approvedBy = row.approved_by as UserId;
+        }
+        if (row.approved_at) {
+          item.approvedAt = row.approved_at;
+        }
+        if (row.effective_from) {
+          item.effectiveFrom = row.effective_from;
+        }
+        if (row.effective_to) {
+          item.effectiveTo = row.effective_to;
+        }
+        if (row.last_verified_at) {
+          item.lastVerifiedAt = row.last_verified_at;
+        }
+        if (row.next_review_due) {
+          item.nextReviewDue = row.next_review_due;
+        }
+
+        return item;
+      }),
       total,
     };
   }
@@ -263,26 +320,51 @@ export class ComplianceEvidenceService {
        ORDER BY next_review_due ASC`
     );
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      complianceFramework: row.compliance_framework as ComplianceEvidence['complianceFramework'],
-      controlId: row.control_id,
-      controlName: row.control_name,
-      evidenceType: row.evidence_type as ComplianceEvidence['evidenceType'],
-      evidenceUrl: row.evidence_url || undefined,
-      evidenceData: row.evidence_data as Record<string, unknown> | undefined,
-      status: row.status as ComplianceEvidence['status'],
-      reviewedBy: row.reviewed_by as UserId | undefined,
-      reviewedAt: row.reviewed_at || undefined,
-      approvedBy: row.approved_by as UserId | undefined,
-      approvedAt: row.approved_at || undefined,
-      effectiveFrom: row.effective_from || undefined,
-      effectiveTo: row.effective_to || undefined,
-      lastVerifiedAt: row.last_verified_at || undefined,
-      nextReviewDue: row.next_review_due || undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    }));
+    return result.rows.map((row) => {
+      const item: ComplianceEvidence = {
+        id: row.id,
+        complianceFramework: row.compliance_framework as ComplianceEvidence['complianceFramework'],
+        controlId: row.control_id,
+        controlName: row.control_name,
+        evidenceType: row.evidence_type as ComplianceEvidence['evidenceType'],
+        status: row.status as ComplianceEvidence['status'],
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      };
+
+      if (row.evidence_url) {
+        item.evidenceUrl = row.evidence_url;
+      }
+      if (row.evidence_data) {
+        item.evidenceData = row.evidence_data as Record<string, unknown>;
+      }
+      if (row.reviewed_by) {
+        item.reviewedBy = row.reviewed_by as UserId;
+      }
+      if (row.reviewed_at) {
+        item.reviewedAt = row.reviewed_at;
+      }
+      if (row.approved_by) {
+        item.approvedBy = row.approved_by as UserId;
+      }
+      if (row.approved_at) {
+        item.approvedAt = row.approved_at;
+      }
+      if (row.effective_from) {
+        item.effectiveFrom = row.effective_from;
+      }
+      if (row.effective_to) {
+        item.effectiveTo = row.effective_to;
+      }
+      if (row.last_verified_at) {
+        item.lastVerifiedAt = row.last_verified_at;
+      }
+      if (row.next_review_due) {
+        item.nextReviewDue = row.next_review_due;
+      }
+
+      return item;
+    });
   }
 }
 

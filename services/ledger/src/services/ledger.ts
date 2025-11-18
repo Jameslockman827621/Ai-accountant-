@@ -20,7 +20,7 @@ export interface CreateLedgerEntryInput {
   reasoningTrace?: string;
 }
 
-export interface LedgerEntry {
+export interface LedgerEntry extends Record<string, unknown> {
   id: string;
   tenantId: TenantId;
   entryType: 'debit' | 'credit';
@@ -108,9 +108,10 @@ export async function getLedgerEntries(
   // Get total count
   const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
   const countResult = await db.query<{ total: string | number }>(countQuery, params);
-  const total = typeof countResult.rows[0]?.total === 'number'
-    ? countResult.rows[0].total
-    : parseInt(String(countResult.rows[0]?.total || '0'), 10);
+  const total =
+    typeof countResult.rows[0]?.total === 'number'
+      ? countResult.rows[0].total
+      : parseInt(String(countResult.rows[0]?.total || '0'), 10);
 
   // Apply pagination
   query += ' ORDER BY transaction_date DESC';
@@ -137,17 +138,18 @@ export async function reconcileEntries(
     id: string;
     amount: number;
     entry_type: string;
-  }>(
-    'SELECT id, amount, entry_type FROM ledger_entries WHERE id IN ($1, $2) AND tenant_id = $3',
-    [entryId1, entryId2, tenantId]
-  );
+  }>('SELECT id, amount, entry_type FROM ledger_entries WHERE id IN ($1, $2) AND tenant_id = $3', [
+    entryId1,
+    entryId2,
+    tenantId,
+  ]);
 
   if (entries.rows.length !== 2) {
     throw new ValidationError('One or both entries not found');
   }
 
-  const entry1 = entries.rows.find(e => e.id === entryId1);
-  const entry2 = entries.rows.find(e => e.id === entryId2);
+  const entry1 = entries.rows.find((e) => e.id === entryId1);
+  const entry2 = entries.rows.find((e) => e.id === entryId2);
 
   if (!entry1 || !entry2) {
     throw new ValidationError('Entries not found');
@@ -227,12 +229,21 @@ export async function getAccountBalance(
   }
 
   const row = result.rows[0];
+  if (!row) {
+    throw new ValidationError('Account not found or has no entries');
+  }
   return {
     accountCode: row.account_code,
     accountName: row.account_name,
     balance: typeof row.balance === 'number' ? row.balance : parseFloat(String(row.balance || '0')),
-    debitTotal: typeof row.debit_total === 'number' ? row.debit_total : parseFloat(String(row.debit_total || '0')),
-    creditTotal: typeof row.credit_total === 'number' ? row.credit_total : parseFloat(String(row.credit_total || '0')),
+    debitTotal:
+      typeof row.debit_total === 'number'
+        ? row.debit_total
+        : parseFloat(String(row.debit_total || '0')),
+    creditTotal:
+      typeof row.credit_total === 'number'
+        ? row.credit_total
+        : parseFloat(String(row.credit_total || '0')),
     asOfDate: asOfDate || new Date(),
   };
 }

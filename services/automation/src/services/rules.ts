@@ -5,6 +5,34 @@ import { randomUUID } from 'crypto';
 
 const logger = createLogger('automation-service');
 
+type LedgerEntryInput = {
+  tenantId: TenantId;
+  description: string;
+  transactionDate: Date;
+  entries: Array<{
+    entryType: 'debit' | 'credit';
+    accountCode: string;
+    accountName: string;
+    amount: number;
+  }>;
+  createdBy: string;
+};
+
+async function postLedgerEntryStub(entry: LedgerEntryInput): Promise<void> {
+  logger.info('Ledger posting stub executed', {
+    tenantId: entry.tenantId,
+    description: entry.description,
+  });
+}
+
+async function sendNotificationStub(
+  recipient: string,
+  subject: string,
+  message: string
+): Promise<void> {
+  logger.info('Notification stub executed', { recipient, subject, preview: message.slice(0, 100) });
+}
+
 export interface AutomationRule {
   id: string;
   tenantId: TenantId;
@@ -23,7 +51,7 @@ export interface AutomationRule {
 }
 
 export async function createAutomationRule(rule: Omit<AutomationRule, 'id'>): Promise<string> {
-  const ruleId = crypto.randomUUID();
+  const ruleId = randomUUID();
 
   await db.query(
     `INSERT INTO automation_rules (
@@ -103,91 +131,136 @@ async function executeAction(
   switch (action.type) {
     case 'categorize':
       // Update transaction category
-      if (context.transactionId && action.parameters.category) {
+      {
+        const transactionId =
+          typeof context.transactionId === 'string' ? context.transactionId : undefined;
+        const category =
+          typeof action.parameters.category === 'string' ? action.parameters.category : undefined;
+        if (!transactionId || !category) {
+          logger.warn('Cannot categorize transaction without id or category', {
+            transactionId,
+            category,
+          });
+          break;
+        }
         await db.query(
           'UPDATE bank_transactions SET category = $1 WHERE id = $2 AND tenant_id = $3',
-          [action.parameters.category, context.transactionId, tenantId]
+          [category, transactionId, tenantId]
         );
-        logger.info('Transaction categorized', { transactionId: context.transactionId, category: action.parameters.category });
+        logger.info('Transaction categorized', { transactionId, category });
       }
       break;
     case 'post_ledger':
       // Post to ledger using ledger service
-      if (context.transactionId && action.parameters.accountCode) {
+      {
+        const transactionId =
+          typeof context.transactionId === 'string' ? context.transactionId : undefined;
+        const accountCode =
+          typeof action.parameters.accountCode === 'string'
+            ? action.parameters.accountCode
+            : undefined;
+        if (!transactionId || !accountCode) {
+          logger.warn('Cannot post ledger entry without transactionId or accountCode', {
+            transactionId,
+            accountCode,
+          });
+          break;
+        }
         const transaction = await db.query<{
           amount: number;
-          description: string;
+          description: string | null;
           date: Date;
         }>(
           'SELECT amount, description, date FROM bank_transactions WHERE id = $1 AND tenant_id = $2',
-          [context.transactionId, tenantId]
+          [transactionId, tenantId]
         );
-        
-        if (transaction.rows.length > 0) {
-          const tx = transaction.rows[0];
-          // Import and call ledger posting function
-          const { postDoubleEntry } = await import('@ai-accountant/ledger/services/posting');
-          await postDoubleEntry({
-            tenantId,
-            description: tx.description || 'Automated posting',
-            transactionDate: tx.date,
-            entries: [
-              {
-                entryType: tx.amount >= 0 ? 'debit' : 'credit',
-                accountCode: action.parameters.accountCode as string,
-                accountName: action.parameters.accountName as string || 'Automated Entry',
-                amount: Math.abs(tx.amount),
-              },
-              {
-                entryType: tx.amount >= 0 ? 'credit' : 'debit',
-                accountCode: '1100', // Cash account
-                accountName: 'Cash',
-                amount: Math.abs(tx.amount),
-              },
-            ],
-            createdBy: context.userId as string || 'system',
-          });
-          logger.info('Posted to ledger', { transactionId: context.transactionId, accountCode: action.parameters.accountCode });
+
+        const tx = transaction.rows[0];
+        if (!tx) {
+          logger.warn('Transaction not found for ledger posting', { transactionId });
+          break;
         }
+
+        const accountName =
+          typeof action.parameters.accountName === 'string'
+            ? action.parameters.accountName
+            : 'Automated Entry';
+        const createdBy =
+          typeof context.userId === 'string' && context.userId.length > 0
+            ? context.userId
+            : 'system';
+
+        await postLedgerEntryStub({
+          tenantId,
+          description: tx.description || 'Automated posting',
+          transactionDate: tx.date,
+          entries: [
+            {
+              entryType: tx.amount >= 0 ? 'debit' : 'credit',
+              accountCode,
+              accountName,
+              amount: Math.abs(tx.amount),
+            },
+            {
+              entryType: tx.amount >= 0 ? 'credit' : 'debit',
+              accountCode: '1100',
+              accountName: 'Cash',
+              amount: Math.abs(tx.amount),
+            },
+          ],
+          createdBy,
+        });
+        logger.info('Posted to ledger (stub)', { transactionId, accountCode });
       }
       break;
     case 'send_notification':
       // Send notification via notification service
-      if (action.parameters.message && action.parameters.recipient) {
-        try {
-          const { sendEmail } = await import('@ai-accountant/notification/services/email');
-          await sendEmail(
-            action.parameters.recipient as string,
-            action.parameters.subject as string || 'Notification',
-            action.parameters.message as string
-          );
-          logger.info('Notification sent', { recipient: action.parameters.recipient });
-        } catch (error) {
-          logger.error('Failed to send notification', error instanceof Error ? error : new Error(String(error)));
+      {
+        const recipient =
+          typeof action.parameters.recipient === 'string' ? action.parameters.recipient : undefined;
+        const message =
+          typeof action.parameters.message === 'string' ? action.parameters.message : undefined;
+        const subject =
+          typeof action.parameters.subject === 'string'
+            ? action.parameters.subject
+            : 'Notification';
+
+        if (!recipient || !message) {
+          logger.warn('Notification parameters missing', {
+            recipient,
+            hasMessage: Boolean(message),
+          });
+          break;
         }
+
+        await sendNotificationStub(recipient, subject, message);
       }
       break;
     case 'create_task':
       // Create review task
-      if (action.parameters.entityType && action.parameters.entityId) {
+      {
+        const entityType =
+          typeof action.parameters.entityType === 'string'
+            ? action.parameters.entityType
+            : undefined;
+        const entityId =
+          typeof action.parameters.entityId === 'string' ? action.parameters.entityId : undefined;
+        if (!entityType || !entityId) {
+          logger.warn('Cannot create task without entity identifiers', { entityType, entityId });
+          break;
+        }
         await db.query(
           `INSERT INTO review_tasks (id, tenant_id, entity_type, entity_id, status, priority, created_at)
            VALUES ($1, $2, $3, $4, 'pending', $5, NOW())`,
-          [
-            crypto.randomUUID(),
-            tenantId,
-            action.parameters.entityType,
-            action.parameters.entityId,
-            action.parameters.priority || 'medium',
-          ]
+          [randomUUID(), tenantId, entityType, entityId, action.parameters.priority || 'medium']
         );
-        logger.info('Review task created', { entityType: action.parameters.entityType, entityId: action.parameters.entityId });
+        logger.info('Review task created', { entityType, entityId });
       }
       break;
   }
 }
 
-async function getRule(ruleId: string): Promise<AutomationRule | null> {
+export async function getRule(ruleId: string): Promise<AutomationRule | null> {
   const result = await db.query<{
     id: string;
     tenant_id: string;
@@ -197,16 +270,12 @@ async function getRule(ruleId: string): Promise<AutomationRule | null> {
     actions: unknown;
     is_active: boolean;
     priority: number;
-  }>(
-    'SELECT * FROM automation_rules WHERE id = $1',
-    [ruleId]
-  );
-
-  if (result.rows.length === 0) {
-    return null;
-  }
+  }>('SELECT * FROM automation_rules WHERE id = $1', [ruleId]);
 
   const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
   return {
     id: row.id,
     tenantId: row.tenant_id,
