@@ -6,6 +6,7 @@ import { createHash } from 'crypto';
 import { unifiedIngestionService } from '../../ingestion/src/services/unifiedIngestion';
 import { uploadFile } from '../storage/s3';
 import { publishOCRJob } from '../messaging/queue';
+import { recordDocumentStageTransition } from './documentWorkflow';
 
 const logger = createLogger('email-ingestion');
 
@@ -135,6 +136,19 @@ export class EmailIngestionService {
           filename: sanitizedFileName,
           storageKey,
       });
+
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId,
+          toStatus: DocumentStatus.UPLOADED,
+          trigger: 'email_attachment',
+          metadata: {
+            filename: sanitizedFileName,
+            from: email.from,
+            subject: email.subject,
+          },
+          updateDocumentStatus: false,
+        });
     }
 
     return documents;
@@ -158,14 +172,16 @@ export class EmailIngestionService {
         },
       });
 
-      await db.query(
-        `UPDATE documents
-           SET status = $1,
-               error_message = NULL,
-               updated_at = NOW()
-         WHERE id = $2`,
-        [DocumentStatus.PROCESSING, doc.id]
-      );
+        await recordDocumentStageTransition({
+          documentId: doc.id,
+          tenantId,
+          toStatus: DocumentStatus.PROCESSING,
+          trigger: 'ocr_enqueued',
+          metadata: {
+            ingestionLogId,
+            channel: 'email',
+          },
+        });
 
       logger.info('Document queued for OCR processing', {
         tenantId,
@@ -179,14 +195,14 @@ export class EmailIngestionService {
         { tenantId, documentId: doc.id }
       );
 
-      await db.query(
-        `UPDATE documents
-           SET status = $1,
-               error_message = $2,
-               updated_at = NOW()
-         WHERE id = $3`,
-        [DocumentStatus.ERROR, 'Failed to enqueue OCR job', doc.id]
-      );
+        await recordDocumentStageTransition({
+          documentId: doc.id,
+          tenantId,
+          toStatus: DocumentStatus.ERROR,
+          trigger: 'ocr_enqueue_failed',
+          metadata: { ingestionLogId, channel: 'email' },
+          errorMessage: 'Failed to enqueue OCR job',
+        });
     }
   }
 

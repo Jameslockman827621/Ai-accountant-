@@ -10,26 +10,17 @@ import { AuthRequest } from '../middleware/auth';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { assessDocumentQuality } from '../services/qualityAssessment';
 import { guidanceService } from '../services/guidanceService';
+import {
+  DocumentProcessingStage,
+  getDocumentStageHistory,
+  getStageForStatus,
+  recordDocumentStageTransition,
+} from '../services/documentWorkflow';
 
 const router = Router();
 const logger = createLogger('document-ingest-service');
 
-type DocumentStage = 'document' | 'ocr' | 'classification' | 'ledger_posting' | 'completed';
-
-const STATUS_STAGE_MAP: Record<DocumentStatus, DocumentStage> = {
-  [DocumentStatus.UPLOADED]: 'document',
-  [DocumentStatus.PROCESSING]: 'ocr',
-  [DocumentStatus.EXTRACTED]: 'classification',
-  [DocumentStatus.CLASSIFIED]: 'ledger_posting',
-  [DocumentStatus.POSTED]: 'completed',
-  [DocumentStatus.ERROR]: 'document',
-};
-
 const UPLOAD_SOURCES: DocumentUploadSource[] = ['dashboard', 'onboarding', 'mobile', 'api', 'legacy'];
-
-function determineStageFromStatus(status: DocumentStatus): DocumentStage {
-  return STATUS_STAGE_MAP[status] || 'document';
-}
 
 function parseDocumentTypeInput(value?: string): DocumentType | undefined {
   if (!value) {
@@ -71,7 +62,7 @@ function getTraceId(req: AuthRequest): string | undefined {
 function determineRetryStage(
   status: DocumentStatus,
   extractedData: Record<string, unknown> | null
-): DocumentStage {
+): DocumentProcessingStage {
   if (status === DocumentStatus.UPLOADED || status === DocumentStatus.PROCESSING) {
     return 'ocr';
   }
@@ -177,6 +168,18 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
       return;
     }
 
+      await recordDocumentStageTransition({
+        documentId,
+        tenantId: req.user.tenantId,
+        toStatus: DocumentStatus.UPLOADED,
+        trigger: 'upload',
+        metadata: {
+          source: uploadSource,
+          traceId,
+        },
+        updateDocumentStatus: false,
+      });
+
     // Publish OCR job
     try {
       await publishOCRJob(documentId, storageKey, {
@@ -186,10 +189,13 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
           'x-trigger': 'upload',
         },
       });
-      await db.query(
-        'UPDATE documents SET status = $1 WHERE id = $2',
-        [DocumentStatus.PROCESSING, documentId]
-      );
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId: req.user.tenantId,
+          toStatus: DocumentStatus.PROCESSING,
+          trigger: 'ocr_enqueued',
+          metadata: { traceId, source: uploadSource },
+        });
     } catch (error) {
       logger.error('Failed to publish OCR job', error instanceof Error ? error : new Error(String(error)));
       // Continue anyway - job can be retried
@@ -303,31 +309,32 @@ router.get('/status/jobs', async (req: AuthRequest, res: Response) => {
     }
 
     const limit = parseInt(String(req.query.limit || '10'), 10);
-    const result = await db.query<{
-      id: string;
-      file_name: string;
-      status: DocumentStatus;
-      confidence_score: number | null;
-      error_message: string | null;
-      updated_at: Date;
-    }>(
-      `SELECT id, file_name, status, confidence_score, error_message, updated_at
-       FROM documents
-       WHERE tenant_id = $1
-       ORDER BY updated_at DESC
-       LIMIT $2`,
-      [req.user.tenantId, Number.isNaN(limit) ? 10 : limit]
-    );
+  const result = await db.query<{
+    id: string;
+    file_name: string;
+    status: DocumentStatus;
+    processing_stage: DocumentProcessingStage | null;
+    confidence_score: number | null;
+    error_message: string | null;
+    updated_at: Date;
+  }>(
+    `SELECT id, file_name, status, processing_stage, confidence_score, error_message, updated_at
+         FROM documents
+         WHERE tenant_id = $1
+         ORDER BY updated_at DESC
+         LIMIT $2`,
+    [req.user.tenantId, Number.isNaN(limit) ? 10 : limit]
+  );
 
-    const jobs = result.rows.map((row) => ({
-      id: row.id,
-      fileName: row.file_name,
-      status: row.status,
-      stage: determineStageFromStatus(row.status),
-      confidenceScore: row.confidence_score,
-      errorMessage: row.error_message,
-      updatedAt: row.updated_at,
-    }));
+  const jobs = result.rows.map((row) => ({
+    id: row.id,
+    fileName: row.file_name,
+    status: row.status,
+    stage: row.processing_stage || getStageForStatus(row.status),
+    confidenceScore: row.confidence_score,
+    errorMessage: row.error_message,
+    updatedAt: row.updated_at,
+  }));
 
     res.json({ jobs });
   } catch (error) {
@@ -366,6 +373,23 @@ router.get('/:documentId', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get document failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get document' });
+  }
+});
+
+// Get document stage timeline
+router.get('/:documentId/stages', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { documentId } = req.params;
+    const history = await getDocumentStageHistory(documentId, req.user.tenantId);
+    res.json({ history });
+  } catch (error) {
+    logger.error('Get document stages failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch document stages' });
   }
 });
 
@@ -531,19 +555,18 @@ router.post('/:documentId/retry', async (req: AuthRequest, res: Response) => {
       if (!document.storage_key) {
         throw new ValidationError('Document storage key missing; re-upload required');
       }
-      await publishOCRJob(documentId, document.storage_key, {
-        tenantId: req.user.tenantId,
-        traceId,
-        headers: retryHeaders,
-      });
-      await db.query(
-        `UPDATE documents
-         SET status = $1,
-             error_message = NULL,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [DocumentStatus.PROCESSING, documentId]
-      );
+        await publishOCRJob(documentId, document.storage_key, {
+          tenantId: req.user.tenantId,
+          traceId,
+          headers: retryHeaders,
+        });
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId: req.user.tenantId,
+          toStatus: DocumentStatus.PROCESSING,
+          trigger: 'retry_ocr',
+          metadata: { userId: req.user.userId, traceId },
+        });
     } else if (targetStage === 'classification') {
       const rawText = extractedData?.['rawText'];
       if (typeof rawText !== 'string' || rawText.length === 0) {
@@ -554,14 +577,13 @@ router.post('/:documentId/retry', async (req: AuthRequest, res: Response) => {
         traceId,
         headers: retryHeaders,
       });
-      await db.query(
-        `UPDATE documents
-         SET status = $1,
-             error_message = NULL,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [DocumentStatus.EXTRACTED, documentId]
-      );
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId: req.user.tenantId,
+          toStatus: DocumentStatus.EXTRACTED,
+          trigger: 'retry_classification',
+          metadata: { userId: req.user.userId, traceId },
+        });
     } else if (targetStage === 'ledger_posting') {
       await publishLedgerJob(
         documentId,
@@ -572,14 +594,13 @@ router.post('/:documentId/retry', async (req: AuthRequest, res: Response) => {
           headers: retryHeaders,
         }
       );
-      await db.query(
-        `UPDATE documents
-         SET status = $1,
-             error_message = NULL,
-             updated_at = NOW()
-         WHERE id = $2`,
-        [DocumentStatus.CLASSIFIED, documentId]
-      );
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId: req.user.tenantId,
+          toStatus: DocumentStatus.CLASSIFIED,
+          trigger: 'retry_posting',
+          metadata: { userId: req.user.userId, traceId },
+        });
     } else {
       throw new ValidationError('Document is not eligible for retry');
     }

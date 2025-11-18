@@ -7,6 +7,7 @@ import { db } from '@ai-accountant/database';
 import { DocumentStatus, ProcessingQueues } from '@ai-accountant/shared-types';
 import { getFile } from './storage/s3';
 import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
+import { recordDocumentStageTransition } from '@ai-accountant/document-ingest-service/services/documentWorkflow';
 
 config();
 
@@ -66,7 +67,8 @@ async function handleOCRFailure(
   msg: amqp.ConsumeMessage,
   payload: OCRJobPayload,
   attempts: number,
-  error: unknown
+  error: unknown,
+  tenantId?: string
 ): Promise<void> {
   const nextAttempt = attempts + 1;
   const errorMessage = error instanceof Error ? error.message : 'OCR processing failed';
@@ -83,17 +85,24 @@ async function handleOCRFailure(
   });
 
   try {
-    await db.query(
-      `UPDATE documents
-       SET status = $1,
-           error_message = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [shouldRetry ? DocumentStatus.PROCESSING : DocumentStatus.ERROR, errorMessage, payload.documentId]
-    );
+    if (!tenantId) {
+      tenantId = await resolveTenantId(payload.documentId);
+    }
+    if (tenantId) {
+      await recordDocumentStageTransition({
+        documentId: payload.documentId,
+        tenantId,
+        toStatus: shouldRetry ? DocumentStatus.PROCESSING : DocumentStatus.ERROR,
+        trigger: shouldRetry ? 'ocr_retry_scheduled' : 'ocr_failed',
+        metadata: {
+          attempts: nextAttempt,
+        },
+        errorMessage,
+      });
+    }
   } catch (updateError) {
     logger.error(
-      'Failed to update document status after OCR failure',
+      'Failed to record OCR failure stage',
       updateError instanceof Error ? updateError : new Error(String(updateError))
     );
   }
@@ -219,14 +228,16 @@ async function startWorker(): Promise<void> {
           },
         });
 
-      try {
+        let tenantId: string | undefined;
+        try {
         const fileBuffer = await getFile(payload.storageKey);
         const extractedText = await processOCRJob(fileBuffer, payload.storageKey);
 
-        await db.transaction(async (client) => {
-          const existing = await client.query('SELECT id FROM documents WHERE id = $1 FOR UPDATE', [
-            payload.documentId,
-          ]);
+          tenantId = await db.transaction(async (client) => {
+            const existing = await client.query<{ tenant_id: string }>(
+              'SELECT tenant_id FROM documents WHERE id = $1 FOR UPDATE',
+              [payload.documentId]
+            );
           if (existing.rowCount === 0) {
             throw new Error('Document not found');
           }
@@ -239,12 +250,13 @@ async function startWorker(): Promise<void> {
                    to_jsonb($1::text),
                    true
                  ),
-                 status = $2,
                  error_message = NULL,
                  updated_at = NOW()
-             WHERE id = $3`,
-            [extractedText, DocumentStatus.EXTRACTED, payload.documentId]
+               WHERE id = $2`,
+              [extractedText, payload.documentId]
           );
+
+            return existing.rows[0].tenant_id;
         });
 
         const classificationPayload = JSON.stringify({
@@ -275,12 +287,25 @@ async function startWorker(): Promise<void> {
               documentId: payload.documentId,
             },
           });
-        channel.ack(msg);
+          if (tenantId) {
+            await recordDocumentStageTransition({
+              documentId: payload.documentId,
+              tenantId,
+              toStatus: DocumentStatus.EXTRACTED,
+              trigger: 'ocr_completed',
+              metadata: {
+                storageKey: payload.storageKey,
+                attempts,
+              },
+            });
+          }
+
+          channel.ack(msg);
 
         logger.info('OCR job completed', { documentId: payload.documentId });
       } catch (error) {
         logger.error('OCR job failed', error instanceof Error ? error : new Error(String(error)));
-        await handleOCRFailure(channel, msg, payload, attempts, error);
+          await handleOCRFailure(channel, msg, payload, attempts, error, tenantId);
       }
     });
   } catch (error) {
@@ -290,3 +315,11 @@ async function startWorker(): Promise<void> {
 }
 
 void startWorker();
+
+async function resolveTenantId(documentId: string): Promise<string | null> {
+  const result = await db.query<{ tenant_id: string }>(
+    'SELECT tenant_id FROM documents WHERE id = $1',
+    [documentId]
+  );
+  return result.rows[0]?.tenant_id || null;
+}

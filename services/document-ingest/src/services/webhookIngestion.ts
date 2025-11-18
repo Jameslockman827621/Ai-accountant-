@@ -5,6 +5,7 @@ import { randomUUID, createHash } from 'crypto';
 import { unifiedIngestionService } from '../../ingestion/src/services/unifiedIngestion';
 import { uploadFile } from '../storage/s3';
 import { publishOCRJob } from '../messaging/queue';
+import { recordDocumentStageTransition } from './documentWorkflow';
 
 const logger = createLogger('webhook-ingestion');
 
@@ -328,6 +329,15 @@ export class WebhookIngestionService {
           ]
         );
 
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId,
+          toStatus: DocumentStatus.UPLOADED,
+          trigger: `${payload.provider}_webhook`,
+          metadata: { provider: payload.provider, eventType: payload.eventType, filename },
+          updateDocumentStatus: false,
+        });
+
         await publishOCRJob(documentId, storageKey, {
           tenantId,
           source: `${payload.provider}-webhook`,
@@ -338,14 +348,13 @@ export class WebhookIngestionService {
           },
         });
 
-        await db.query(
-          `UPDATE documents
-             SET status = $1,
-                 error_message = NULL,
-                 updated_at = NOW()
-           WHERE id = $2`,
-          [DocumentStatus.PROCESSING, documentId]
-        );
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId,
+          toStatus: DocumentStatus.PROCESSING,
+          trigger: 'ocr_enqueued',
+          metadata: { provider: payload.provider, eventType: payload.eventType, ingestionLogId },
+        });
 
         logger.info('Webhook attachment processed', {
           tenantId,
@@ -360,14 +369,14 @@ export class WebhookIngestionService {
           { tenantId, provider: payload.provider, filename }
         );
 
-        await db.query(
-          `UPDATE documents
-             SET status = $1,
-                 error_message = $2,
-                 updated_at = NOW()
-           WHERE id = $3`,
-          [DocumentStatus.ERROR, 'Failed to enqueue OCR job', documentId]
-        );
+        await recordDocumentStageTransition({
+          documentId,
+          tenantId,
+          toStatus: DocumentStatus.ERROR,
+          trigger: 'ocr_enqueue_failed',
+          metadata: { provider: payload.provider, eventType: payload.eventType, ingestionLogId, filename },
+          errorMessage: 'Failed to enqueue OCR job',
+        });
       }
     }
   }
