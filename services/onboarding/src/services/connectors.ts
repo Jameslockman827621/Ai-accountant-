@@ -255,7 +255,7 @@ export class ConnectorService {
   private async generateAuthorizationUrl(
     provider: ConnectorProvider,
     connectorId: string,
-    authorizationData?: Record<string, unknown>
+    _authorizationData?: Record<string, unknown>
   ): Promise<{ authorizationUrl?: string; connectionId?: string }> {
     // In production, this would generate actual OAuth URLs or API keys
     switch (provider) {
@@ -293,8 +293,8 @@ export class ConnectorService {
   async handleOAuthCallback(
     provider: ConnectorProvider,
     connectorId: string,
-    code: string,
-    state?: string
+    _code: string,
+    _state?: string
   ): Promise<{ connectionId: string; accountIds?: string[] }> {
     // In production, exchange code for tokens and create connection
     const connectionId = `conn_${provider}_${randomUUID()}`;
