@@ -1,9 +1,10 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId } from '@ai-accountant/shared-types';
-import { randomUUID } from 'crypto';
-import { createHash } from 'crypto';
+import { DocumentStatus, DocumentType, TenantId } from '@ai-accountant/shared-types';
+import { randomUUID, createHash } from 'crypto';
 import { unifiedIngestionService } from '../../ingestion/src/services/unifiedIngestion';
+import { uploadFile } from '../storage/s3';
+import { publishOCRJob } from '../messaging/queue';
 
 const logger = createLogger('webhook-ingestion');
 
@@ -14,6 +15,15 @@ export interface WebhookPayload {
   signature?: string;
   timestamp?: string;
   webhookId?: string;
+  attachments?: WebhookAttachment[];
+}
+
+export interface WebhookAttachment {
+  filename?: string;
+  contentType?: string;
+  content?: string | Buffer; // base64 string or Buffer
+  contentBase64?: string;
+  size?: number;
 }
 
 export class WebhookIngestionService {
@@ -55,8 +65,11 @@ export class WebhookIngestionService {
         },
       });
 
-      // Process based on provider and event type
-      await this.processWebhookEvent(tenantId, payload, ingestionLogId);
+        // Process based on provider and event type
+        await this.processWebhookEvent(tenantId, payload, ingestionLogId);
+
+        // Process attachments/documents if included
+        await this.handleDocumentAttachments(tenantId, payload, ingestionLogId);
 
       logger.info('Webhook processed', {
         tenantId,
@@ -261,6 +274,188 @@ export class WebhookIngestionService {
     );
 
     return result.rows.length > 0 ? result.rows[0].id : null;
+  }
+
+  /**
+   * Handle document attachments embedded in webhook payloads
+   */
+  private async handleDocumentAttachments(
+    tenantId: TenantId,
+    payload: WebhookPayload,
+    ingestionLogId: string
+  ): Promise<void> {
+    const attachments = this.extractAttachments(payload);
+    if (!attachments || attachments.length === 0) {
+      return;
+    }
+
+    for (const attachment of attachments) {
+      const buffer = this.normalizeAttachmentContent(attachment);
+      if (!buffer) {
+        continue;
+      }
+
+      const filename = this.sanitizeFilename(attachment.filename || `${payload.provider}-attachment-${Date.now()}`);
+      const contentType = attachment.contentType || 'application/octet-stream';
+
+      if (!this.isFinancialDocument(filename, contentType)) {
+        continue;
+      }
+
+      const documentId = randomUUID();
+      const storageKey = `webhooks/${tenantId}/${documentId}/${filename}`;
+      const documentType = this.detectDocumentType(filename, contentType);
+
+      try {
+        await uploadFile(storageKey, buffer, contentType);
+
+        await db.query(
+          `INSERT INTO documents (
+            id, tenant_id, uploaded_by, file_name, file_type, file_size,
+            storage_key, status, upload_source, document_type, created_at, updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW(), NOW())`,
+          [
+            documentId,
+            tenantId,
+            'system',
+            filename,
+            contentType,
+            buffer.length,
+            storageKey,
+            DocumentStatus.UPLOADED,
+            'webhook',
+            documentType,
+          ]
+        );
+
+        await publishOCRJob(documentId, storageKey, {
+          tenantId,
+          source: `${payload.provider}-webhook`,
+          headers: {
+            'x-trigger': 'webhook',
+            'x-webhook-provider': payload.provider,
+            'x-ingestion-log-id': ingestionLogId,
+          },
+        });
+
+        await db.query(
+          `UPDATE documents
+             SET status = $1,
+                 error_message = NULL,
+                 updated_at = NOW()
+           WHERE id = $2`,
+          [DocumentStatus.PROCESSING, documentId]
+        );
+
+        logger.info('Webhook attachment processed', {
+          tenantId,
+          provider: payload.provider,
+          documentId,
+          ingestionLogId,
+        });
+      } catch (error) {
+        logger.error(
+          'Failed to ingest webhook attachment',
+          error instanceof Error ? error : new Error(String(error)),
+          { tenantId, provider: payload.provider, filename }
+        );
+
+        await db.query(
+          `UPDATE documents
+             SET status = $1,
+                 error_message = $2,
+                 updated_at = NOW()
+           WHERE id = $3`,
+          [DocumentStatus.ERROR, 'Failed to enqueue OCR job', documentId]
+        );
+      }
+    }
+  }
+
+  private extractAttachments(payload: WebhookPayload): WebhookAttachment[] {
+    if (payload.attachments && payload.attachments.length > 0) {
+      return payload.attachments;
+    }
+    const data = payload.data || {};
+    const nestedAttachments =
+      (data as any).attachments ||
+      (data as any).documents ||
+      (data as any).files;
+
+    if (Array.isArray(nestedAttachments)) {
+      return nestedAttachments;
+    }
+
+    return [];
+  }
+
+  private normalizeAttachmentContent(attachment: WebhookAttachment): Buffer | null {
+    if (attachment.content instanceof Buffer) {
+      return attachment.content;
+    }
+    const payload = attachment.content || attachment.contentBase64;
+    if (!payload) {
+      return null;
+    }
+
+    if (typeof payload === 'string') {
+      const normalizedString = payload.includes('base64,')
+        ? payload.substring(payload.indexOf('base64,') + 'base64,'.length)
+        : payload;
+      try {
+        return Buffer.from(normalizedString, 'base64');
+      } catch {
+        try {
+          return Buffer.from(normalizedString, 'utf8');
+        } catch {
+          return null;
+        }
+      }
+    }
+
+    if (payload instanceof Uint8Array) {
+      return Buffer.from(payload);
+    }
+
+    return null;
+  }
+
+  private sanitizeFilename(filename: string): string {
+    const fallback = `attachment-${Date.now()}`;
+    if (!filename) {
+      return fallback;
+    }
+    const basename = filename.split('/').pop()?.split('\\').pop() || fallback;
+    return basename.replace(/[^a-zA-Z0-9._-]/g, '_');
+  }
+
+  private isFinancialDocument(filename: string, contentType: string): boolean {
+    const financialExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.xls', '.csv'];
+    const financialContentTypes = [
+      'application/pdf',
+      'image/jpeg',
+      'image/png',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/csv',
+    ];
+
+    const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+    const normalizedType = (contentType || '').toLowerCase();
+    return financialExtensions.includes(ext) || financialContentTypes.includes(normalizedType);
+  }
+
+  private detectDocumentType(filename: string, contentType: string): DocumentType {
+    const filenameLower = filename.toLowerCase();
+    const normalizedType = (contentType || '').toLowerCase();
+
+    if (filenameLower.includes('invoice')) return DocumentType.INVOICE;
+    if (filenameLower.includes('receipt')) return DocumentType.RECEIPT;
+    if (filenameLower.includes('statement')) return DocumentType.STATEMENT;
+    if (filenameLower.includes('payslip') || filenameLower.includes('payroll')) return DocumentType.PAYSLIP;
+    if (normalizedType.includes('tax')) return DocumentType.TAX_FORM;
+
+    return DocumentType.OTHER;
   }
 }
 
