@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DocumentUpload from './DocumentUpload';
 import { DocumentType } from '@ai-accountant/shared-types';
 import UnifiedConnectionsPanel from './UnifiedConnectionsPanel';
-import KYCVerificationPanel from './KYCVerificationPanel';
 import type {
   OnboardingEventType,
   OnboardingProgress,

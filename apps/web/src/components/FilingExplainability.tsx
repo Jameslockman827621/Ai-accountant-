@@ -61,14 +61,14 @@ export default function FilingExplainability({ token, filingId }: FilingExplaina
     );
   }
 
-    const groupedBySection = explanations.reduce((acc, exp) => {
-      const sectionKey = exp.section;
-      if (!acc[sectionKey]) {
-        acc[sectionKey] = [];
-      }
-      acc[sectionKey]!.push(exp);
-      return acc;
-    }, {} as Record<string, FilingExplanation[]>);
+  const groupedBySection: Record<string, FilingExplanation[]> = {};
+  for (const exp of explanations) {
+    const sectionKey = exp.section;
+    if (!groupedBySection[sectionKey]) {
+      groupedBySection[sectionKey] = [];
+    }
+    groupedBySection[sectionKey]!.push(exp);
+  }
 
   return (
     <div className="space-y-6">

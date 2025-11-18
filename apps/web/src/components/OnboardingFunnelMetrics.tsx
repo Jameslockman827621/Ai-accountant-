@@ -36,7 +36,7 @@ export default function OnboardingFunnelMetrics({
 
   useEffect(() => {
     loadMetrics();
-  }, [timeframe, tenantId]);
+  }, [timeframe, _tenantId]);
 
   const loadMetrics = async () => {
     setIsLoading(true);
@@ -151,8 +151,8 @@ export default function OnboardingFunnelMetrics({
           <h3 className="text-lg font-semibold text-gray-900">Onboarding Funnel</h3>
           <select
             value={timeframe}
-            onChange={(e) => {
-              // Would trigger reload with new timeframe
+            onChange={() => {
+              // Integrate with parent controls when available
             }}
             className="text-sm border border-gray-300 rounded px-3 py-1"
           >
@@ -165,10 +165,7 @@ export default function OnboardingFunnelMetrics({
 
         <div className="space-y-4">
           {funnelData.map((step) => (
-            <FunnelStep
-              key={step.step}
-              data={step}
-            />
+            <FunnelStep key={step.step} data={step} />
           ))}
         </div>
       </div>

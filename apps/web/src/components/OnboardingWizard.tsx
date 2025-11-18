@@ -216,7 +216,7 @@ export default function OnboardingWizard({
     return idx === -1 ? 0 : idx;
   }, [progress.currentStep]);
 
-  const activeDefinition = STEP_DEFINITIONS[activeStepIndex];
+  const activeDefinition = STEP_DEFINITIONS[activeStepIndex] ?? STEP_DEFINITIONS[0];
   const totalSteps = STEP_DEFINITIONS.length;
   const completionPercent = useMemo(() => {
     return Math.min(

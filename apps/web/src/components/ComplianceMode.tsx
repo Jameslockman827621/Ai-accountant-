@@ -326,7 +326,7 @@ export default function ComplianceMode({ token, tenantId: tenantIdProp, userId: 
                                   </pre>
                                 </div>
                               )}
-                              {tc.result && (
+                                {tc.result !== undefined && tc.result !== null && (
                                 <div className="text-gray-600 mt-1">
                                   <div className="font-medium mb-1">Result:</div>
                                   <pre className="bg-white p-1 rounded text-xs overflow-x-auto">

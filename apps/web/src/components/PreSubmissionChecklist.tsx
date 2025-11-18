@@ -87,7 +87,6 @@ export default function PreSubmissionChecklist({
 
       if (!response.ok) throw new Error('Validation failed');
 
-      const data = await response.json();
       await loadChecklist(); // Reload to get updated status
     } catch (error) {
       logger.error('Pre-submission validation failed', error);

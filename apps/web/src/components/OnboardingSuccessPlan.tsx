@@ -22,25 +22,25 @@ const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').re
 export default function OnboardingSuccessPlan({ token, tenantId }: SuccessPlanProps) {
   const [planItems, setPlanItems] = useState<PlanItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [intentProfile, setIntentProfile] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     loadSuccessPlan();
   }, [tenantId]);
 
-  const loadSuccessPlan = async () => {
-    try {
-      // Load intent profile
-      const profileResponse = await fetch(`${API_BASE}/api/intent-profile`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+    const loadSuccessPlan = async () => {
+      try {
+        // Load intent profile
+        const profileResponse = await fetch(`${API_BASE}/api/intent-profile`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-      if (profileResponse.ok) {
-        const profileData = await profileResponse.json();
-        setIntentProfile(profileData.profile);
-      }
+        let latestProfile: Record<string, unknown> | null = null;
+        if (profileResponse.ok) {
+          const profileData = await profileResponse.json();
+          latestProfile = profileData.profile ?? null;
+        }
 
       // Load connectors
       const connectorsResponse = await fetch(`${API_BASE}/api/connectors`, {
@@ -52,7 +52,7 @@ export default function OnboardingSuccessPlan({ token, tenantId }: SuccessPlanPr
       const connectors = connectorsResponse.ok ? (await connectorsResponse.json()).connectors : [];
 
       // Generate plan items based on profile and connectors
-      const items = generatePlanItems(intentProfile, connectors);
+        const items = generatePlanItems(latestProfile, connectors);
       setPlanItems(items);
     } catch (error) {
       console.error('Failed to load success plan', error);

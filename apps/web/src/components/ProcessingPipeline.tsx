@@ -40,7 +40,6 @@ export default function ProcessingPipeline({
 }: ProcessingPipelineProps) {
   const [stages, setStages] = useState<PipelineStage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentStage, setCurrentStage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!documentId) return;
@@ -77,9 +76,6 @@ export default function ProcessingPipeline({
 
       setStages(pipelineStages);
       
-      const activeStage = pipelineStages.find(s => s.status === 'processing');
-      setCurrentStage(activeStage?.id || null);
-
       const completed = pipelineStages.every(s => s.status === 'completed' || s.status === 'skipped');
       const failed = pipelineStages.find(s => s.status === 'failed');
       
@@ -138,8 +134,8 @@ export default function ProcessingPipeline({
         {/* Connection lines */}
         <div className="absolute top-6 left-0 right-0 h-0.5 bg-gray-300" style={{ top: '24px' }} />
         
-        <div className="relative flex justify-between items-start">
-          {stages.map((stage, index) => (
+          <div className="relative flex justify-between items-start">
+            {stages.map((stage) => (
             <div key={stage.id} className="flex flex-col items-center" style={{ flex: 1 }}>
               <div
                 className={`relative z-10 w-12 h-12 rounded-full border-4 flex items-center justify-center text-white font-bold ${getStageColor(stage.status)}`}
