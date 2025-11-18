@@ -32,9 +32,10 @@ router.post('/us/tax/calculate', async (req, res) => {
   try {
     const { income, stateCode, filingStatus, localIncomeTaxRate } = req.body;
 
-    if (!income || !stateCode) {
-      return res.status(400).json({ error: 'Income and stateCode are required' });
-    }
+      if (!income || !stateCode) {
+        res.status(400).json({ error: 'Income and stateCode are required' });
+        return;
+      }
 
     const result = calculateUSTotalTax(
       income,
@@ -55,9 +56,10 @@ router.get('/us/tax/state/:stateCode', async (req, res) => {
     const { stateCode } = req.params;
     const info = getUSStateTaxInfo(stateCode);
 
-    if (!info) {
-      return res.status(404).json({ error: 'State not found' });
-    }
+      if (!info) {
+        res.status(404).json({ error: 'State not found' });
+        return;
+      }
 
     res.json({ stateTax: info });
   } catch (error) {
@@ -70,9 +72,10 @@ router.post('/us/tax/sales', async (req, res) => {
   try {
     const { amount, stateCode, localRate } = req.body;
 
-    if (!amount || !stateCode) {
-      return res.status(400).json({ error: 'Amount and stateCode are required' });
-    }
+      if (!amount || !stateCode) {
+        res.status(400).json({ error: 'Amount and stateCode are required' });
+        return;
+      }
 
     const tax = calculateUSSalesTax(amount, stateCode, localRate || 0);
     res.json({ salesTax: tax });
@@ -98,9 +101,10 @@ router.get('/eu/tax/:countryCode', async (req, res) => {
     const { countryCode } = req.params;
     const info = getEUTaxInfo(countryCode);
 
-    if (!info) {
-      return res.status(404).json({ error: 'Country not found' });
-    }
+      if (!info) {
+        res.status(404).json({ error: 'Country not found' });
+        return;
+      }
 
     res.json({ taxInfo: info });
   } catch (error) {
@@ -113,9 +117,10 @@ router.post('/eu/tax/vat', async (req, res) => {
   try {
     const { amount, countryCode, isReduced } = req.body;
 
-    if (!amount || !countryCode) {
-      return res.status(400).json({ error: 'Amount and countryCode are required' });
-    }
+      if (!amount || !countryCode) {
+        res.status(400).json({ error: 'Amount and countryCode are required' });
+        return;
+      }
 
     const vat = calculateEUVAT(amount, countryCode, isReduced || false);
     res.json({ vat });
@@ -129,9 +134,10 @@ router.post('/eu/tax/income', async (req, res) => {
   try {
     const { income, countryCode } = req.body;
 
-    if (!income || !countryCode) {
-      return res.status(400).json({ error: 'Income and countryCode are required' });
-    }
+      if (!income || !countryCode) {
+        res.status(400).json({ error: 'Income and countryCode are required' });
+        return;
+      }
 
     const tax = calculateEUIncomeTax(income, countryCode);
     res.json({ incomeTax: tax });
@@ -145,9 +151,10 @@ router.post('/eu/tax/corporate', async (req, res) => {
   try {
     const { profit, countryCode } = req.body;
 
-    if (!profit || !countryCode) {
-      return res.status(400).json({ error: 'Profit and countryCode are required' });
-    }
+      if (!profit || !countryCode) {
+        res.status(400).json({ error: 'Profit and countryCode are required' });
+        return;
+      }
 
     const tax = calculateEUCorporateTax(profit, countryCode);
     res.json({ corporateTax: tax });
@@ -165,9 +172,10 @@ router.get('/fx/rate/:from/:to', async (req, res) => {
 
     const rate = await getExchangeRate(from.toUpperCase(), to.toUpperCase(), useAPI);
 
-    if (!rate) {
-      return res.status(404).json({ error: 'Exchange rate not found' });
-    }
+      if (!rate) {
+        res.status(404).json({ error: 'Exchange rate not found' });
+        return;
+      }
 
     res.json({ rate });
   } catch (error) {
@@ -180,15 +188,17 @@ router.post('/fx/convert', async (req, res) => {
   try {
     const { amount, from, to, useAPI } = req.body;
 
-    if (!amount || !from || !to) {
-      return res.status(400).json({ error: 'Amount, from, and to are required' });
-    }
+      if (!amount || !from || !to) {
+        res.status(400).json({ error: 'Amount, from, and to are required' });
+        return;
+      }
 
     const converted = await convertCurrency(amount, from.toUpperCase(), to.toUpperCase(), useAPI || false);
 
-    if (converted === null) {
-      return res.status(400).json({ error: 'Currency conversion failed' });
-    }
+      if (converted === null) {
+        res.status(400).json({ error: 'Currency conversion failed' });
+        return;
+      }
 
     res.json({ amount: converted, from, to });
   } catch (error) {
@@ -212,9 +222,10 @@ router.post('/ledger/entry', async (req, res) => {
   try {
     const { accountId, amount, currency, baseCurrency, transactionDate, description } = req.body;
 
-    if (!accountId || !amount || !currency) {
-      return res.status(400).json({ error: 'accountId, amount, and currency are required' });
-    }
+      if (!accountId || !amount || !currency) {
+        res.status(400).json({ error: 'accountId, amount, and currency are required' });
+        return;
+      }
 
     const entry = await createMultiCurrencyEntry(
       accountId,

@@ -167,5 +167,6 @@ function parseSchedule(value: unknown): ScheduleFrequency {
 }
 
 function formatDateSlug(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const [isoDate] = date.toISOString().split('T');
+  return isoDate ?? date.toISOString();
 }

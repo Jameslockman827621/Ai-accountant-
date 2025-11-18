@@ -320,7 +320,9 @@ export function getBuiltInUSRulepacks(): InstallableTaxRulepack[] {
   const { getAllUSStateRulepacks } = require('./usStatesTaxSystem');
   const allStateRulepacks = getAllUSStateRulepacks();
   // Remove California from state list since it's already included
-  const otherStateRulepacks = allStateRulepacks.filter(pack => pack.jurisdictionCode !== 'US-CA');
+  const otherStateRulepacks = allStateRulepacks.filter(
+    (pack: InstallableTaxRulepack) => pack.jurisdictionCode !== 'US-CA'
+  );
   return [US_FEDERAL_RULEPACK_2024, CALIFORNIA_RULEPACK_2024, ...otherStateRulepacks];
 }
 

@@ -94,7 +94,10 @@ export async function getExchangeRate(
         };
       }
     } catch (error) {
-      logger.warn('Failed to fetch exchange rate from API', error);
+      logger.warn(
+        'Failed to fetch exchange rate from API',
+        error instanceof Error ? error : new Error(String(error))
+      );
     }
   }
 

@@ -83,8 +83,8 @@ router.get('/:rulepackId', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { rulepackId } = req.params;
-    const rulepack = await rulepackRegistryService.getRulepack(rulepackId);
+      const rulepackId = getRequiredParam(req.params, 'rulepackId');
+      const rulepack = await rulepackRegistryService.getRulepack(rulepackId);
 
     if (!rulepack) {
       res.status(404).json({ error: 'Rulepack not found' });
@@ -111,7 +111,7 @@ router.patch('/:rulepackId/activate', async (req: AuthRequest, res: Response) =>
         return;
       }
 
-      const { rulepackId } = req.params;
+      const rulepackId = getRequiredParam(req.params, 'rulepackId');
       const { effectiveFrom } = req.body;
 
       await rulepackRegistryService.activateRulepack(rulepackId, req.user.userId, {
@@ -133,7 +133,7 @@ router.post('/:rulepackId/regression', async (req: AuthRequest, res: Response) =
       return;
     }
 
-    const { rulepackId } = req.params;
+      const rulepackId = getRequiredParam(req.params, 'rulepackId');
     const { runType } = req.body;
 
     const runId = await rulepackRegistryService.runRegressionTests(
@@ -157,9 +157,10 @@ router.get('/:rulepackId/regression/:runId', async (req: AuthRequest, res: Respo
       return;
     }
 
-    const { runId } = req.params;
-    // In production, would fetch from database
-    res.json({ message: 'Regression run details' });
+      const rulepackId = getRequiredParam(req.params, 'rulepackId');
+      const runId = getRequiredParam(req.params, 'runId');
+      // In production, would fetch from database
+      res.json({ message: 'Regression run details', rulepackId, runId });
   } catch (error) {
     logger.error('Get regression run failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get regression run' });
@@ -167,3 +168,11 @@ router.get('/:rulepackId/regression/:runId', async (req: AuthRequest, res: Respo
 });
 
 export { router as rulepackRouter };
+
+function getRequiredParam(params: Record<string, string | undefined>, key: string): string {
+  const value = params[key];
+  if (!value) {
+    throw new ValidationError(`${key} is required`);
+  }
+  return value;
+}
