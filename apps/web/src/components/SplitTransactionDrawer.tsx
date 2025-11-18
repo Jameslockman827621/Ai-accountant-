@@ -1,9 +1,11 @@
 'use client';
 
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState, useCallback } from 'react';
 import { Dialog, Transition } from '@headlessui/react';
-import { PlusIcon, TrashIcon } from '@heroicons/react/24/outline';
 import { SplitRow, useTransactionSplits } from '@/hooks/useTransactionSplits';
+import { PlusIcon, TrashIcon, ArrowPathIcon } from '@heroicons/react/24/outline';
+
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
 
 interface SplitTransactionDrawerProps {
   token: string;
@@ -32,6 +34,17 @@ interface DraftRow {
   tags: string[];
 }
 
+interface MatchOption {
+  id: string;
+  label: string;
+  type: 'document' | 'ledger';
+  documentId?: string | null;
+  ledgerEntryId?: string | null;
+  score?: number;
+  reason?: string;
+  amount?: number;
+}
+
 function emptyDraft(currency: string): DraftRow {
   return {
     amount: 0,
@@ -41,6 +54,26 @@ function emptyDraft(currency: string): DraftRow {
     memo: '',
     tags: [],
   };
+}
+
+function getOptionValue(option: MatchOption): string {
+  if (option.type === 'document' && option.documentId) {
+    return `doc:${option.documentId}`;
+  }
+  if (option.type === 'ledger' && option.ledgerEntryId) {
+    return `ledger:${option.ledgerEntryId}`;
+  }
+  return option.id;
+}
+
+function getSelectedOptionValue(row: DraftRow): string {
+  if (row.documentId) {
+    return `doc:${row.documentId}`;
+  }
+  if (row.ledgerEntryId) {
+    return `ledger:${row.ledgerEntryId}`;
+  }
+  return '';
 }
 
 export function SplitTransactionDrawer({
@@ -66,6 +99,75 @@ export function SplitTransactionDrawer({
   const [drafts, setDrafts] = useState<DraftRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [matchOptions, setMatchOptions] = useState<MatchOption[]>([]);
+  const [loadingMatches, setLoadingMatches] = useState(false);
+  const [matchError, setMatchError] = useState<string | null>(null);
+
+  const fetchMatches = useCallback(async () => {
+    if (!transactionId) {
+      setMatchOptions([]);
+      return;
+    }
+    setLoadingMatches(true);
+    setMatchError(null);
+    try {
+      const response = await fetch(`${API_BASE}/api/reconciliation/matches/${transactionId}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body?.error || `Failed to load matches (status ${response.status})`);
+      }
+      const data = await response.json() as {
+        matches: Array<{
+          documentId?: string;
+          ledgerEntryId?: string;
+          reason: string;
+          confidenceScore?: number;
+          matchType?: string;
+        }>;
+      };
+        const options: MatchOption[] = data.matches
+          .map((match) => {
+            if (match.documentId) {
+              return {
+                id: match.documentId,
+                label: `Document • ${match.reason}`,
+                type: 'document' as const,
+                documentId: match.documentId,
+                score: match.confidenceScore,
+                reason: match.reason,
+              };
+            }
+            if (match.ledgerEntryId) {
+              return {
+                id: match.ledgerEntryId,
+                label: `Ledger • ${match.reason}`,
+                type: 'ledger' as const,
+                ledgerEntryId: match.ledgerEntryId,
+                score: match.confidenceScore,
+                reason: match.reason,
+              };
+            }
+            return null;
+          })
+        .filter((option): option is MatchOption => Boolean(option));
+      setMatchOptions(options);
+    } catch (err) {
+      setMatchError(err instanceof Error ? err.message : 'Failed to load suggestions');
+      setMatchOptions([]);
+    } finally {
+      setLoadingMatches(false);
+    }
+  }, [token, transactionId]);
+
+  useEffect(() => {
+    if (open && transactionId) {
+      void fetchMatches();
+    }
+  }, [open, transactionId, fetchMatches]);
 
   useEffect(() => {
     if (!summary || !transaction) {
@@ -108,6 +210,19 @@ export function SplitTransactionDrawer({
 
   function removeRow(index: number) {
     setDrafts((rows) => rows.filter((_, idx) => idx !== index));
+  }
+
+  function assignMatchToRow(index: number, value: string) {
+    if (!value) {
+      updateDraft(index, { documentId: null, ledgerEntryId: null });
+      return;
+    }
+    const [type, id] = value.split(':');
+    if (type === 'doc') {
+      updateDraft(index, { documentId: id || null, ledgerEntryId: null });
+    } else if (type === 'ledger') {
+      updateDraft(index, { ledgerEntryId: id || null, documentId: null });
+    }
   }
 
   async function handleSaveDrafts() {
@@ -269,18 +384,33 @@ export function SplitTransactionDrawer({
                         />
                       </section>
 
-                      <section>
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-md font-semibold">Split Lines</h3>
-                          <button
-                            onClick={addRow}
-                            className="inline-flex items-center gap-1 px-3 py-1 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
-                            disabled={disabled}
-                          >
-                            <PlusIcon className="h-4 w-4" />
-                            Add line
-                          </button>
-                        </div>
+                        <section>
+                          <div className="flex flex-col gap-2 mb-3">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-md font-semibold">Split Lines</h3>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => fetchMatches()}
+                                  className="inline-flex items-center gap-1 px-3 py-1 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+                                  disabled={disabled || loadingMatches || !transactionId}
+                                >
+                                  <ArrowPathIcon className={`h-4 w-4 ${loadingMatches ? 'animate-spin' : ''}`} />
+                                  {loadingMatches ? 'Refreshing' : 'Refresh matches'}
+                                </button>
+                                <button
+                                  onClick={addRow}
+                                  className="inline-flex items-center gap-1 px-3 py-1 rounded-md border border-gray-300 text-sm text-gray-700 hover:bg-gray-50"
+                                  disabled={disabled}
+                                >
+                                  <PlusIcon className="h-4 w-4" />
+                                  Add line
+                                </button>
+                              </div>
+                            </div>
+                            {matchError && (
+                              <div className="text-xs text-red-600">{matchError}</div>
+                            )}
+                          </div>
                         <div className="space-y-4">
                           {drafts.map((draft, index) => (
                             <div key={index} className="border border-gray-200 rounded-lg p-4 space-y-3">
