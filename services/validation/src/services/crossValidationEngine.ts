@@ -25,6 +25,11 @@ export interface CrossValidationReport {
   totalItems: number;
   matchedItems: number;
   unmatchedItems: number;
+  matched: number;
+  unmatched: number;
+  bankBalance: number;
+  ledgerBalance: number;
+  difference: number;
   discrepancies: CrossValidationResult[];
   summary: {
     bankTransactions: number;
@@ -67,10 +72,10 @@ export async function crossValidateData(
     );
 
     // Try to match with ledger entries
-    const matchingLedger = ledgerEntries.find(
+      const matchingLedger = ledgerEntries.find(
       entry =>
         Math.abs(entry.amount - bankTx.amount) < 0.01 &&
-        Math.abs(entry.transactionDate.getTime() - bankTx.date.getTime()) < 7 * 24 * 60 * 60 * 1000
+          Math.abs(entry.date.getTime() - bankTx.date.getTime()) < 7 * 24 * 60 * 60 * 1000
     );
 
     if (matchingDoc && matchingLedger) {
@@ -120,7 +125,7 @@ export async function crossValidateData(
       const matchingLedger = ledgerEntries.find(
         entry =>
           Math.abs(entry.amount - doc.amount) < 0.01 &&
-          Math.abs(entry.transactionDate.getTime() - doc.date.getTime()) < 7 * 24 * 60 * 60 * 1000
+          Math.abs(entry.date.getTime() - doc.date.getTime()) < 7 * 24 * 60 * 60 * 1000
       );
 
       if (!matchingBank && !matchingLedger) {
@@ -144,23 +149,23 @@ export async function crossValidateData(
   for (const entry of ledgerEntries) {
     const ledgerKey = `ledger_${entry.id}`;
     if (!matchedItems.has(ledgerKey)) {
-      const matchingDoc = documents.find(
+        const matchingDoc = documents.find(
         doc =>
           Math.abs(doc.amount - entry.amount) < 0.01 &&
-          Math.abs(doc.date.getTime() - entry.transactionDate.getTime()) < 7 * 24 * 60 * 60 * 1000
+            Math.abs(doc.date.getTime() - entry.date.getTime()) < 7 * 24 * 60 * 60 * 1000
       );
 
-      const matchingBank = bankTransactions.find(
+        const matchingBank = bankTransactions.find(
         tx =>
           Math.abs(tx.amount - entry.amount) < 0.01 &&
-          Math.abs(tx.date.getTime() - entry.transactionDate.getTime()) < 7 * 24 * 60 * 60 * 1000
+            Math.abs(tx.date.getTime() - entry.date.getTime()) < 7 * 24 * 60 * 60 * 1000
       );
 
-      if (!matchingDoc && !matchingBank && !entry.documentId) {
+        if (!matchingDoc && !matchingBank) {
         discrepancies.push({
           source: 'ledger',
           itemId: entry.id,
-          date: entry.transactionDate,
+            date: entry.date,
           amount: entry.amount,
           description: entry.description,
           matched: false,
@@ -194,16 +199,24 @@ export async function crossValidateData(
     }
   }
 
-  const totalItems = bankTransactions.length + documents.length + ledgerEntries.length;
-  const matchRate = totalItems > 0 ? matchedItems.size / totalItems : 1;
+    const totalItems = bankTransactions.length + documents.length + ledgerEntries.length;
+    const matchRate = totalItems > 0 ? matchedItems.size / totalItems : 1;
+    const bankBalance = bankTransactions.reduce((sum, tx) => sum + tx.amount, 0);
+    const ledgerBalance = ledgerEntries.reduce((sum, entry) => sum + entry.amount, 0);
+    const difference = bankBalance - ledgerBalance;
 
-  return {
+    return {
     tenantId,
     periodStart,
     periodEnd,
     totalItems,
     matchedItems: matchedItems.size,
     unmatchedItems: discrepancies.length,
+      matched: matchedItems.size,
+      unmatched: discrepancies.length,
+      bankBalance,
+      ledgerBalance,
+      difference,
     discrepancies,
     summary: {
       bankTransactions: bankTransactions.length,

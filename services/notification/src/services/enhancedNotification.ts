@@ -128,7 +128,7 @@ export class EnhancedNotificationService {
     }
 
     // Collect digest items
-    const digestItems = await this.collectDigestItems(tenantId, userId);
+    const digestItems = await this.collectDigestItems(tenantId);
 
     if (digestItems.length === 0) {
       logger.debug('No digest items, skipping', { tenantId, userId });
@@ -382,7 +382,7 @@ export class EnhancedNotificationService {
   /**
    * Collect digest items
    */
-  private async collectDigestItems(tenantId: TenantId, userId: UserId): Promise<Array<{
+  private async collectDigestItems(tenantId: TenantId): Promise<Array<{
     type: string;
     title: string;
     message: string;

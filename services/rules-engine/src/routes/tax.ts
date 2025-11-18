@@ -16,7 +16,10 @@ router.post('/:jurisdiction/calculate', async (req: AuthRequest, res: Response) 
       return;
     }
 
-    const { jurisdiction } = req.params;
+      const { jurisdiction } = req.params;
+      if (!jurisdiction) {
+        throw new ValidationError('jurisdiction is required');
+      }
     const { transaction, taxType } = req.body;
 
     if (!transaction) {

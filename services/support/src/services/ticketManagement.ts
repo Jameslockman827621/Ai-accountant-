@@ -104,8 +104,8 @@ export async function getTickets(
   // Get messages for each ticket
   const tickets: SupportTicket[] = [];
 
-  for (const row of result.rows) {
-    const messagesResult = await db.query<{
+    for (const row of result.rows) {
+      const messagesResult = await db.query<{
       id: string;
       user_id: string;
       message: string;
@@ -119,27 +119,32 @@ export async function getTickets(
       [row.id]
     );
 
-    tickets.push({
-      id: row.id,
-      tenantId: row.tenant_id as TenantId,
-      userId: row.user_id as UserId,
-      subject: row.subject,
-      description: row.description,
-      category: row.category as SupportTicket['category'],
-      priority: row.priority as SupportTicket['priority'],
-      status: row.status as SupportTicket['status'],
-      assignedTo: row.assigned_to as UserId | undefined,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      resolvedAt: row.resolved_at || undefined,
-      messages: messagesResult.rows.map(msg => ({
-        id: msg.id,
-        userId: msg.user_id as UserId,
-        message: msg.message,
-        isInternal: msg.is_internal,
-        createdAt: msg.created_at,
-      })),
-    });
+      const ticket: SupportTicket = {
+        id: row.id,
+        tenantId: row.tenant_id as TenantId,
+        userId: row.user_id as UserId,
+        subject: row.subject,
+        description: row.description,
+        category: row.category as SupportTicket['category'],
+        priority: row.priority as SupportTicket['priority'],
+        status: row.status as SupportTicket['status'],
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+        resolvedAt: row.resolved_at || undefined,
+        messages: messagesResult.rows.map(msg => ({
+          id: msg.id,
+          userId: msg.user_id as UserId,
+          message: msg.message,
+          isInternal: msg.is_internal,
+          createdAt: msg.created_at,
+        })),
+      };
+
+      if (row.assigned_to) {
+        ticket.assignedTo = row.assigned_to as UserId;
+      }
+
+      tickets.push(ticket);
   }
 
   return tickets;

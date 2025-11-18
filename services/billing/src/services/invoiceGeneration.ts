@@ -77,12 +77,13 @@ export async function generateInvoicePDF(
       [templateId, tenantId]
     );
 
-    if (result.rows.length > 0) {
+    const row = result.rows[0];
+    if (row) {
       template = {
-        id: result.rows[0].id,
-        tenantId: result.rows[0].tenant_id,
-        name: result.rows[0].name,
-        template: result.rows[0].template as InvoiceTemplate['template'],
+        id: row.id,
+        tenantId: row.tenant_id,
+        name: row.name,
+        template: row.template as InvoiceTemplate['template'],
       };
     }
   }

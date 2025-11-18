@@ -76,12 +76,13 @@ export async function checkUsageLimit(
     [tenantId]
   );
 
-  if (tenantResult.rows.length === 0) {
+  const tenantRow = tenantResult.rows[0];
+  if (!tenantRow) {
     throw new Error('Tenant not found');
   }
 
-  const tier = tenantResult.rows[0].subscription_tier as keyof typeof TIER_LIMITS;
-  const limits = TIER_LIMITS[tier] || TIER_LIMITS.freelancer;
+  const tier = (tenantRow.subscription_tier as keyof typeof TIER_LIMITS) ?? 'freelancer';
+  const limits = TIER_LIMITS[tier] ?? TIER_LIMITS.freelancer;
 
   // Get current period usage
   const currentPeriod = new Date().toISOString().slice(0, 7); // YYYY-MM
@@ -113,67 +114,68 @@ export async function checkUsageLimit(
   let limit: number;
   let currentUsage: number;
 
-  switch (resourceType) {
-    case 'documents':
-      limit = limits.documentsPerMonth;
-      currentUsage = parseInt(String(usage.documents_processed || 0), 10);
-      break;
-    case 'ocr':
-      limit = limits.ocrRequestsPerMonth;
-      currentUsage = parseInt(String(usage.ocr_requests || 0), 10);
-      break;
-    case 'llm':
-      limit = limits.llmQueriesPerMonth;
-      currentUsage = parseInt(String(usage.llm_queries || 0), 10);
-      break;
-    case 'filings':
-      limit = limits.filingsPerMonth;
-      currentUsage = parseInt(String(usage.filings_submitted || 0), 10);
-      break;
-    case 'storage':
-      limit = limits.storageGB;
-      currentUsage = parseFloat(String(usage.storage_used || 0));
-      break;
-    case 'bank_connections':
-      limit = limits.bankConnections;
-      // Get actual count
-      const connResult = await db.query<{
-        count: number;
-      }>(
-        `SELECT COUNT(*) as count
-         FROM bank_connections
-         WHERE tenant_id = $1 AND is_active = true`,
-        [tenantId]
-      );
-      currentUsage = parseInt(String(connResult.rows[0]?.count || 0), 10);
-      break;
-    case 'clients':
-      limit = limits.clients || 0;
-      // Get actual count (for accountant tier)
-      const clientsResult = await db.query<{
-        count: number;
-      }>(
-        `SELECT COUNT(*) as count
-         FROM tenants
-         WHERE metadata->>'parent_tenant_id' = $1`,
-        [tenantId]
-      );
-      currentUsage = parseInt(String(clientsResult.rows[0]?.count || 0), 10);
-      break;
-    default:
-      throw new Error(`Unknown resource type: ${resourceType}`);
-  }
+    switch (resourceType) {
+      case 'documents':
+        limit = limits.documentsPerMonth;
+        currentUsage = toNumber(usage.documents_processed);
+        break;
+      case 'ocr':
+        limit = limits.ocrRequestsPerMonth;
+        currentUsage = toNumber(usage.ocr_requests);
+        break;
+      case 'llm':
+        limit = limits.llmQueriesPerMonth;
+        currentUsage = toNumber(usage.llm_queries);
+        break;
+      case 'filings':
+        limit = limits.filingsPerMonth;
+        currentUsage = toNumber(usage.filings_submitted);
+        break;
+      case 'storage':
+        limit = limits.storageGB;
+        currentUsage = toNumber(usage.storage_used);
+        break;
+      case 'bank_connections': {
+        limit = limits.bankConnections;
+        const connResult = await db.query<{ count: number }>(
+          `SELECT COUNT(*) as count
+           FROM bank_connections
+           WHERE tenant_id = $1 AND is_active = true`,
+          [tenantId]
+        );
+        currentUsage = toNumber(connResult.rows[0]?.count);
+        break;
+      }
+      case 'clients': {
+        limit = limits.clients || 0;
+        const clientsResult = await db.query<{ count: number }>(
+          `SELECT COUNT(*) as count
+           FROM tenants
+           WHERE metadata->>'parent_tenant_id' = $1`,
+          [tenantId]
+        );
+        currentUsage = toNumber(clientsResult.rows[0]?.count);
+        break;
+      }
+      default:
+        throw new Error(`Unknown resource type: ${resourceType}`);
+    }
 
-  const allowed = currentUsage < limit;
-  const remaining = Math.max(0, limit - currentUsage);
+    const allowed = currentUsage < limit;
+    const remaining = Math.max(0, limit - currentUsage);
 
-  return {
-    allowed,
-    reason: allowed ? undefined : `Limit reached for ${resourceType}. Current: ${currentUsage}, Limit: ${limit}`,
-    currentUsage,
-    limit,
-    remaining,
-  };
+    const usageCheck: UsageCheck = {
+      allowed,
+      currentUsage,
+      limit,
+      remaining,
+    };
+
+    if (!allowed) {
+      usageCheck.reason = `Limit reached for ${resourceType}. Current: ${currentUsage}, Limit: ${limit}`;
+    }
+
+    return usageCheck;
 }
 
 /**
@@ -210,4 +212,9 @@ export async function recordUsage(
   );
 
   logger.debug('Usage recorded', { tenantId, resourceType, amount, period: currentPeriod });
+}
+
+function toNumber(value: unknown): number {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
 }

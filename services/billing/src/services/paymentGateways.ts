@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import Stripe from 'stripe';
@@ -83,6 +84,7 @@ async function processPayPalPayment(
   metadata?: Record<string, unknown>
 ): Promise<PaymentIntent> {
   // PayPal integration (simplified)
+  logger.info('PayPal payment processing', { tenantId, amount });
   const response = await axios.post(
     'https://api.paypal.com/v2/payments/captures',
     {
@@ -117,7 +119,7 @@ async function processWorldpayPayment(
   metadata?: Record<string, unknown>
 ): Promise<PaymentIntent> {
   // Worldpay integration (simplified)
-  logger.info('Worldpay payment processing', { tenantId, amount });
+  logger.info('Worldpay payment processing', { tenantId, amount, paymentMethodId });
   // In production, would call Worldpay API
   return {
     id: crypto.randomUUID(),
@@ -137,7 +139,7 @@ async function processSagepayPayment(
   metadata?: Record<string, unknown>
 ): Promise<PaymentIntent> {
   // Sagepay integration (simplified)
-  logger.info('Sagepay payment processing', { tenantId, amount });
+  logger.info('Sagepay payment processing', { tenantId, amount, paymentMethodId });
   // In production, would call Sagepay API
   return {
     id: crypto.randomUUID(),

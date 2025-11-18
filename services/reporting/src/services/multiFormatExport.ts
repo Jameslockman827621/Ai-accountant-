@@ -25,7 +25,10 @@ export async function exportReportMultiFormat(
 
   switch (format) {
     case 'csv': {
-      return exportToCSV(reportData, reportType);
+      if (reportType !== 'profit_loss') {
+        throw new Error('CSV export is only supported for profit and loss reports');
+      }
+      return exportProfitAndLossToCSV(reportData as ProfitAndLoss);
     }
     case 'excel': {
       return exportReportToExcel(tenantId, reportType, periodStart, periodEnd);
@@ -38,7 +41,10 @@ export async function exportReportMultiFormat(
       return Buffer.from(JSON.stringify(reportData, null, 2), 'utf-8');
     }
     case 'xml': {
-      return exportToXML(reportData, reportType);
+      if (reportType !== 'profit_loss') {
+        throw new Error('XML export is only supported for profit and loss reports');
+      }
+      return exportProfitAndLossToXML(reportData as ProfitAndLoss);
     }
     default: {
       throw new Error(`Unsupported format: ${String(format)}`);
@@ -46,30 +52,23 @@ export async function exportReportMultiFormat(
   }
 }
 
-function exportToCSV(data: Record<string, unknown>, reportType: ReportType): Buffer {
+function exportProfitAndLossToCSV(data: ProfitAndLoss): Buffer {
   const rows: string[] = [];
 
-  if (reportType === 'profit_loss') {
-    rows.push('Category,Amount');
-    const pl = data as ProfitAndLoss;
-    rows.push(`Revenue,${pl.revenue.total}`);
-    rows.push(`Expenses,${pl.expenses.total}`);
-    rows.push(`Net Profit,${pl.netProfit}`);
-  }
+  rows.push('Category,Amount');
+  rows.push(`Revenue,${data.revenue.total}`);
+  rows.push(`Expenses,${data.expenses.total}`);
+  rows.push(`Net Profit,${data.netProfit}`);
 
   return Buffer.from(rows.join('\n'), 'utf-8');
 }
 
-function exportToXML(data: Record<string, unknown>, reportType: ReportType): Buffer {
+function exportProfitAndLossToXML(data: ProfitAndLoss): Buffer {
   let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
-  xml += `<report type="${reportType}">\n`;
-
-  if (reportType === 'profit_loss') {
-    const pl = data as ProfitAndLoss;
-    xml += `  <revenue>${pl.revenue.total}</revenue>\n`;
-    xml += `  <expenses>${pl.expenses.total}</expenses>\n`;
-    xml += `  <netProfit>${pl.netProfit}</netProfit>\n`;
-  }
+  xml += `<report type="profit_loss">\n`;
+  xml += `  <revenue>${data.revenue.total}</revenue>\n`;
+  xml += `  <expenses>${data.expenses.total}</expenses>\n`;
+  xml += `  <netProfit>${data.netProfit}</netProfit>\n`;
 
   xml += '</report>';
   return Buffer.from(xml, 'utf-8');

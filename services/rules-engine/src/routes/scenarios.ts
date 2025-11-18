@@ -65,8 +65,11 @@ router.get('/:scenarioId', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { scenarioId } = req.params;
-    const scenario = await scenarioPlannerService.getScenario(scenarioId);
+      const { scenarioId } = req.params;
+      if (!scenarioId) {
+        throw new ValidationError('scenarioId is required');
+      }
+      const scenario = await scenarioPlannerService.getScenario(scenarioId);
 
     if (!scenario) {
       res.status(404).json({ error: 'Scenario not found' });

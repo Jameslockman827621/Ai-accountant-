@@ -114,14 +114,14 @@ router.get('/clients/comparison', async (req, res) => {
           vatDue: vat,
           upcomingDeadlines: deadlineCount,
         };
-      })
-    );
+        })
+      );
 
-    res.json({ metrics });
-  } catch (error) {
-    logger.error('Failed to get client comparison', error);
-    res.status(500).json({ error: 'Failed to get client comparison' });
-  }
-});
+      return res.json({ metrics });
+    } catch (error) {
+      logger.error('Failed to get client comparison', error instanceof Error ? error : new Error(String(error)));
+      return res.status(500).json({ error: 'Failed to get client comparison' });
+    }
+  });
 
 export default router;

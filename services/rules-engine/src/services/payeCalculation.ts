@@ -76,7 +76,8 @@ export async function calculatePAYE(
   let totalEmployerNI = 0;
   let totalIncomeTax = 0;
   let totalStudentLoan = 0;
-  let totalPension = 0;
+  let totalEmployeePension = 0;
+  let totalEmployerPension = 0;
 
   const breakdown: Array<{
     employeeId: string;
@@ -114,15 +115,16 @@ export async function calculatePAYE(
 
     // Student Loan (simplified - assume Plan 2, 9% above £27,295)
     const studentLoanThreshold = 27295;
-    const studentLoan = grossPay > studentLoanThreshold 
-      ? (grossPay - studentLoanThreshold) * 0.09 
+    const studentLoan = grossPay > studentLoanThreshold
+      ? (grossPay - studentLoanThreshold) * 0.09
       : 0;
     totalStudentLoan += studentLoan;
 
     // Pension contributions (simplified - assume 5% employee, 3% employer)
     const pensionEmployee = grossPay * 0.05;
     const pensionEmployer = grossPay * 0.03;
-    totalPension += pensionEmployee;
+    totalEmployeePension += pensionEmployee;
+    totalEmployerPension += pensionEmployer;
 
     const netPay = grossPay - incomeTax - employeeNI - studentLoan - pensionEmployee;
 
@@ -140,7 +142,7 @@ export async function calculatePAYE(
     });
   }
 
-  const totalCost = totalGrossPay + totalEmployerNI;
+  const totalCost = totalGrossPay + totalEmployerNI + totalEmployerPension;
 
   logger.info('PAYE calculation completed', {
     tenantId,
@@ -158,8 +160,8 @@ export async function calculatePAYE(
     employerNI: Math.round(totalEmployerNI * 100) / 100,
     incomeTax: Math.round(totalIncomeTax * 100) / 100,
     studentLoan: Math.round(totalStudentLoan * 100) / 100,
-    pensionContributions: Math.round(totalPension * 100) / 100,
-    netPay: Math.round((totalGrossPay - totalIncomeTax - totalEmployeeNI - totalStudentLoan - totalPension) * 100) / 100,
+    pensionContributions: Math.round((totalEmployeePension + totalEmployerPension) * 100) / 100,
+    netPay: Math.round((totalGrossPay - totalIncomeTax - totalEmployeeNI - totalStudentLoan - totalEmployeePension) * 100) / 100,
     totalCost: Math.round(totalCost * 100) / 100,
     breakdown,
   };

@@ -9,6 +9,7 @@ import {
   TaxFilingSchema,
   TaxRegressionCase,
   TaxRule,
+  TaxNexusThreshold,
 } from '@ai-accountant/shared-types';
 import { InstallableTaxRulepack } from '../../../rules-engine/src/services/rulepackTypes';
 import { USIncomeTaxBracket, FilingStatus } from './usTaxSystem';
@@ -712,7 +713,7 @@ export function createEnhancedStateRulepack(
   hasLocalTax: boolean,
   filingSchemas: TaxFilingSchema[],
   regressionTests: TaxRegressionCase[],
-  nexusThresholds: Array<{ type: 'revenue' | 'transactions'; amount?: number; transactions?: number; currency?: string; period?: string; description?: string }>
+  nexusThresholds: TaxNexusThreshold[]
 ): InstallableTaxRulepack {
   const isProgressive = Array.isArray(incomeBrackets) || (incomeBrackets && typeof incomeBrackets === 'object' && !Array.isArray(incomeBrackets));
   

@@ -3,7 +3,6 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import PDFDocument from 'pdfkit';
-import type PDFKit from 'pdfkit';
 import ExcelJS from 'exceljs';
 import { ProfitAndLoss } from './financialReports';
 import { loadReportData } from './reportData';
@@ -23,7 +22,7 @@ export async function exportReportToPDF(
 
   // Generate PDF using PDFKit
   try {
-    const doc: PDFKit.PDFDocument = new PDFDocument();
+    const doc = new PDFDocument();
     const chunks: Buffer[] = [];
 
     doc.on('data', (chunk: Buffer) => chunks.push(chunk));
