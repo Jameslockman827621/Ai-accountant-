@@ -328,7 +328,7 @@ export class AnomalyDetectionService {
           ledgerEntryId?: string;
           description: string;
           anomalyScore?: number;
-          remediationPlaybook?: Array<{ step: number; action: string }>;
+          remediationPlaybook?: Array<{ step: number; action: string; description: string }>;
         } = {
           exceptionType,
           severity: anomaly.severity as ExceptionSeverity,

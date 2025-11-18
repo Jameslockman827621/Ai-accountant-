@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { db } from '@ai-accountant/database';
-import { intelligentMatchingService } from '../services/intelligentMatching';
+import { intelligentMatchingService, MatchSignals } from '../services/intelligentMatching';
 import { TenantId } from '@ai-accountant/shared-types';
 
 interface AuthRequest extends Request {
@@ -259,7 +259,7 @@ router.post('/match', async (req: AuthRequest, res: Response): Promise<void> => 
       reasonCode: string;
       reasonDescription?: string;
       confidenceScore?: number;
-      matchSignals?: unknown;
+      matchSignals?: MatchSignals;
       performedBy?: string;
     } = {
       eventType: matchType === 'auto' ? 'auto_match' : 'manual_match',
@@ -282,8 +282,9 @@ router.post('/match', async (req: AuthRequest, res: Response): Promise<void> => 
     }
     if (bestMatch) {
       eventPayload.confidenceScore = bestMatch.confidenceScore;
-      // matchSignals is optional and may not match the exact type
-      // We'll let the service handle the type conversion
+      if (bestMatch.signals) {
+        eventPayload.matchSignals = bestMatch.signals;
+      }
     }
 
     await intelligentMatchingService.recordEvent(req.user.tenantId, eventPayload);

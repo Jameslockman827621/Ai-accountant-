@@ -70,22 +70,43 @@ export class EnhancedReconciliationService {
       // Sort by match score
       candidates.sort((a, b) => b.matchScore - a.matchScore);
       const bestMatch = candidates[0];
+      if (!bestMatch) {
+        return {
+          matchId: randomUUID(),
+          matchType: 'fuzzy',
+          matchConfidence: 0,
+          matchScore: 0,
+          bankTransactionId,
+          status: 'unmatched',
+        };
+      }
 
       // Create match record
       const matchId = randomUUID();
-      await this.createMatchRecord(tenantId, {
+      const matchRecord: ReconciliationResult = {
         matchId,
         matchType: bestMatch.matchType,
         matchConfidence: bestMatch.matchScore,
         matchScore: bestMatch.matchScore,
         bankTransactionId,
-        documentId: bestMatch.documentId,
-        ledgerEntryId: bestMatch.ledgerEntryId,
-        amountDifference: bestMatch.amountDifference,
-        dateDifference: bestMatch.dateDifference,
         currency: bankTx.currency,
         status: bestMatch.matchScore >= 0.85 ? 'matched' : 'exception',
-      });
+      };
+
+      if (bestMatch.documentId) {
+        matchRecord.documentId = bestMatch.documentId;
+      }
+      if (bestMatch.ledgerEntryId) {
+        matchRecord.ledgerEntryId = bestMatch.ledgerEntryId;
+      }
+      if (bestMatch.amountDifference !== undefined) {
+        matchRecord.amountDifference = bestMatch.amountDifference;
+      }
+      if (bestMatch.dateDifference !== undefined) {
+        matchRecord.dateDifference = bestMatch.dateDifference;
+      }
+
+      await this.createMatchRecord(tenantId, matchRecord);
 
       logger.info('Transaction matched', {
         tenantId,
@@ -94,19 +115,7 @@ export class EnhancedReconciliationService {
         matchScore: bestMatch.matchScore,
       });
 
-      return {
-        matchId,
-        matchType: bestMatch.matchType,
-        matchConfidence: bestMatch.matchScore,
-        matchScore: bestMatch.matchScore,
-        bankTransactionId,
-        documentId: bestMatch.documentId,
-        ledgerEntryId: bestMatch.ledgerEntryId,
-        amountDifference: bestMatch.amountDifference,
-        dateDifference: bestMatch.dateDifference,
-        currency: bankTx.currency,
-        status: bestMatch.matchScore >= 0.85 ? 'matched' : 'exception',
-      };
+      return matchRecord;
     } catch (error) {
       logger.error('Matching failed', {
         bankTransactionId,
@@ -149,6 +158,7 @@ export class EnhancedReconciliationService {
   private async matchDocuments(
     tenantId: TenantId,
     bankTx: {
+      id: string;
       amount: number;
       date: Date;
       description: string;
@@ -206,7 +216,7 @@ export class EnhancedReconciliationService {
       );
 
       if (matchScore > 0.5) {
-        candidates.push({
+        const candidate: MatchCandidate = {
           bankTransactionId: bankTx.id,
           documentId: doc.id,
           matchScore,
@@ -215,7 +225,8 @@ export class EnhancedReconciliationService {
           dateDifference: Math.floor(
             (bankTx.date.getTime() - doc.date.getTime()) / (1000 * 60 * 60 * 24)
           ),
-        });
+        };
+        candidates.push(candidate);
       }
     }
 
@@ -228,6 +239,7 @@ export class EnhancedReconciliationService {
   private async matchLedgerEntries(
     tenantId: TenantId,
     bankTx: {
+      id: string;
       amount: number;
       date: Date;
       description: string;
@@ -269,7 +281,7 @@ export class EnhancedReconciliationService {
       );
 
       if (matchScore > 0.5) {
-        candidates.push({
+        const candidate: MatchCandidate = {
           bankTransactionId: bankTx.id,
           ledgerEntryId: entry.id,
           matchScore,
@@ -278,7 +290,8 @@ export class EnhancedReconciliationService {
           dateDifference: Math.floor(
             (bankTx.date.getTime() - entry.transaction_date.getTime()) / (1000 * 60 * 60 * 24)
           ),
-        });
+        };
+        candidates.push(candidate);
       }
     }
 
@@ -373,7 +386,8 @@ export class EnhancedReconciliationService {
       [id]
     );
 
-    return result.rows.length > 0 ? result.rows[0] : null;
+    const row = result.rows[0];
+    return row ?? null;
   }
 
   /**

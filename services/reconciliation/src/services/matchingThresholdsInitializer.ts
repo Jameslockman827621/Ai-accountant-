@@ -1,7 +1,6 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { randomUUID } from 'crypto';
 import { intelligentMatchingService, MatchingThresholds } from './intelligentMatching';
 
 const logger = createLogger('matching-thresholds-initializer');
@@ -20,12 +19,12 @@ export interface DefaultThresholdsConfig {
 
 export const DEFAULT_THRESHOLDS: DefaultThresholdsConfig = {
   autoMatch: 0.85,
-  suggestMatch: 0.60,
+  suggestMatch: 0.6,
   signalWeights: {
     amount: 0.35,
     date: 0.25,
     vendor: 0.15,
-    ocrConfidence: 0.10,
+    ocrConfidence: 0.1,
     description: 0.15,
   },
 };
@@ -34,7 +33,10 @@ export class MatchingThresholdsInitializer {
   /**
    * Initialize default thresholds for a tenant
    */
-  async initializeForTenant(tenantId: TenantId, customThresholds?: Partial<DefaultThresholdsConfig>): Promise<void> {
+  async initializeForTenant(
+    tenantId: TenantId,
+    customThresholds?: Partial<DefaultThresholdsConfig>
+  ): Promise<void> {
     const thresholds: MatchingThresholds = {
       autoMatch: customThresholds?.autoMatch ?? DEFAULT_THRESHOLDS.autoMatch,
       suggestMatch: customThresholds?.suggestMatch ?? DEFAULT_THRESHOLDS.suggestMatch,
@@ -87,7 +89,11 @@ export class MatchingThresholdsInitializer {
       }
     }
 
-    logger.info('Threshold initialization completed', { initialized, skipped, total: tenantsResult.rows.length });
+    logger.info('Threshold initialization completed', {
+      initialized,
+      skipped,
+      total: tenantsResult.rows.length,
+    });
 
     return { initialized, skipped };
   }
@@ -127,7 +133,8 @@ export class MatchingThresholdsInitializer {
     let suggestMatchAdjustment = 0;
 
     if (rejected.length > 0) {
-      const avgRejectedConfidence = rejected.reduce((sum, f) => sum + f.confidenceScore, 0) / rejected.length;
+      const avgRejectedConfidence =
+        rejected.reduce((sum, f) => sum + f.confidenceScore, 0) / rejected.length;
       if (avgRejectedConfidence >= currentThresholds.autoMatch) {
         // High-confidence matches were rejected, lower threshold
         autoMatchAdjustment = -0.05;
@@ -135,15 +142,18 @@ export class MatchingThresholdsInitializer {
     }
 
     if (accepted.length > 0) {
-      const avgAcceptedConfidence = accepted.reduce((sum, f) => sum + f.confidenceScore, 0) / accepted.length;
+      const avgAcceptedConfidence =
+        accepted.reduce((sum, f) => sum + f.confidenceScore, 0) / accepted.length;
       if (avgAcceptedConfidence < currentThresholds.autoMatch) {
         // Low-confidence matches were accepted, raise threshold
         autoMatchAdjustment = 0.05;
       }
     }
 
+    type SignalKey = 'amount' | 'date' | 'vendor' | 'ocrConfidence' | 'description';
+
     // Adjust signal weights based on which signals were most reliable
-    const signalReliability: Record<string, number> = {
+    const signalReliability: Record<SignalKey, number> = {
       amount: 0,
       date: 0,
       vendor: 0,
@@ -151,11 +161,14 @@ export class MatchingThresholdsInitializer {
       description: 0,
     };
 
+    const signalKeys: SignalKey[] = ['amount', 'date', 'vendor', 'ocrConfidence', 'description'];
+
     for (const item of feedback) {
-      if (item.accepted) {
+      if (item.accepted && item.signals) {
         // High signal values in accepted matches = reliable
-        Object.keys(signalReliability).forEach((key) => {
-          signalReliability[key] += item.signals[key as keyof typeof item.signals];
+        signalKeys.forEach((key) => {
+          const signalValue = item.signals[key];
+          signalReliability[key] += signalValue;
         });
       }
     }
@@ -164,24 +177,30 @@ export class MatchingThresholdsInitializer {
     const totalReliability = Object.values(signalReliability).reduce((sum, v) => sum + v, 0);
     if (totalReliability > 0) {
       const newWeights = { ...currentThresholds.signalWeights };
-      Object.keys(signalReliability).forEach((key) => {
+      signalKeys.forEach((key) => {
         const reliability = signalReliability[key] / totalReliability;
+        const currentWeight = currentThresholds.signalWeights[key];
         // Adjust weight proportionally to reliability
-        newWeights[key as keyof typeof newWeights] =
-          currentThresholds.signalWeights[key as keyof typeof newWeights] * 0.8 + reliability * 0.2;
+        newWeights[key] = currentWeight * 0.8 + reliability * 0.2;
       });
 
       // Normalize weights to sum to 1
       const weightSum = Object.values(newWeights).reduce((sum, w) => sum + w, 0);
-      Object.keys(newWeights).forEach((key) => {
-        newWeights[key as keyof typeof newWeights] /= weightSum;
+      (Object.keys(newWeights) as Array<keyof typeof newWeights>).forEach((key) => {
+        newWeights[key] /= weightSum;
       });
 
       await intelligentMatchingService.updateThresholds(
         tenantId,
         {
-          autoMatch: Math.max(0.5, Math.min(0.95, currentThresholds.autoMatch + autoMatchAdjustment)),
-          suggestMatch: Math.max(0.3, Math.min(0.8, currentThresholds.suggestMatch + suggestMatchAdjustment)),
+          autoMatch: Math.max(
+            0.5,
+            Math.min(0.95, currentThresholds.autoMatch + autoMatchAdjustment)
+          ),
+          suggestMatch: Math.max(
+            0.3,
+            Math.min(0.8, currentThresholds.suggestMatch + suggestMatchAdjustment)
+          ),
           signalWeights: newWeights,
         },
         feedback.length

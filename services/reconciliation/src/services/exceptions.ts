@@ -1,8 +1,5 @@
 import { db } from '@ai-accountant/database';
-import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-
-const logger = createLogger('reconciliation-service');
 
 export type ExceptionSeverity = 'low' | 'medium' | 'high' | 'critical';
 
