@@ -32,10 +32,9 @@ router.post('/us/tax/calculate', async (req, res) => {
   try {
     const { income, stateCode, filingStatus, localIncomeTaxRate } = req.body;
 
-      if (!income || !stateCode) {
-        res.status(400).json({ error: 'Income and stateCode are required' });
-        return;
-      }
+    if (!income || !stateCode) {
+      return res.status(400).json({ error: 'Income and stateCode are required' });
+    }
 
     const result = calculateUSTotalTax(
       income,
@@ -44,10 +43,10 @@ router.post('/us/tax/calculate', async (req, res) => {
       localIncomeTaxRate || 0
     );
 
-    res.json({ tax: result });
+    return res.json({ tax: result });
   } catch (error) {
-    logger.error('Failed to calculate US tax', error);
-    res.status(500).json({ error: 'Failed to calculate US tax' });
+    logger.error('Failed to calculate US tax', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to calculate US tax' });
   }
 });
 
@@ -56,15 +55,14 @@ router.get('/us/tax/state/:stateCode', async (req, res) => {
     const { stateCode } = req.params;
     const info = getUSStateTaxInfo(stateCode);
 
-      if (!info) {
-        res.status(404).json({ error: 'State not found' });
-        return;
-      }
+    if (!info) {
+      return res.status(404).json({ error: 'State not found' });
+    }
 
-    res.json({ stateTax: info });
+    return res.json({ stateTax: info });
   } catch (error) {
-    logger.error('Failed to get US state tax info', error);
-    res.status(500).json({ error: 'Failed to get US state tax info' });
+    logger.error('Failed to get US state tax info', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to get US state tax info' });
   }
 });
 
@@ -72,27 +70,26 @@ router.post('/us/tax/sales', async (req, res) => {
   try {
     const { amount, stateCode, localRate } = req.body;
 
-      if (!amount || !stateCode) {
-        res.status(400).json({ error: 'Amount and stateCode are required' });
-        return;
-      }
+    if (!amount || !stateCode) {
+      return res.status(400).json({ error: 'Amount and stateCode are required' });
+    }
 
     const tax = calculateUSSalesTax(amount, stateCode, localRate || 0);
-    res.json({ salesTax: tax });
+    return res.json({ salesTax: tax });
   } catch (error) {
-    logger.error('Failed to calculate US sales tax', error);
-    res.status(500).json({ error: 'Failed to calculate US sales tax' });
+    logger.error('Failed to calculate US sales tax', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to calculate US sales tax' });
   }
 });
 
 // EU Tax Routes
-router.get('/eu/countries', async (req, res) => {
+router.get('/eu/countries', async (_req, res) => {
   try {
     const countries = getAllEUCountries();
-    res.json({ countries });
+    return res.json({ countries });
   } catch (error) {
-    logger.error('Failed to get EU countries', error);
-    res.status(500).json({ error: 'Failed to get EU countries' });
+    logger.error('Failed to get EU countries', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to get EU countries' });
   }
 });
 
@@ -101,15 +98,14 @@ router.get('/eu/tax/:countryCode', async (req, res) => {
     const { countryCode } = req.params;
     const info = getEUTaxInfo(countryCode);
 
-      if (!info) {
-        res.status(404).json({ error: 'Country not found' });
-        return;
-      }
+    if (!info) {
+      return res.status(404).json({ error: 'Country not found' });
+    }
 
-    res.json({ taxInfo: info });
+    return res.json({ taxInfo: info });
   } catch (error) {
-    logger.error('Failed to get EU tax info', error);
-    res.status(500).json({ error: 'Failed to get EU tax info' });
+    logger.error('Failed to get EU tax info', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to get EU tax info' });
   }
 });
 
@@ -117,16 +113,15 @@ router.post('/eu/tax/vat', async (req, res) => {
   try {
     const { amount, countryCode, isReduced } = req.body;
 
-      if (!amount || !countryCode) {
-        res.status(400).json({ error: 'Amount and countryCode are required' });
-        return;
-      }
+    if (!amount || !countryCode) {
+      return res.status(400).json({ error: 'Amount and countryCode are required' });
+    }
 
     const vat = calculateEUVAT(amount, countryCode, isReduced || false);
-    res.json({ vat });
+    return res.json({ vat });
   } catch (error) {
-    logger.error('Failed to calculate EU VAT', error);
-    res.status(500).json({ error: 'Failed to calculate EU VAT' });
+    logger.error('Failed to calculate EU VAT', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to calculate EU VAT' });
   }
 });
 
@@ -134,16 +129,15 @@ router.post('/eu/tax/income', async (req, res) => {
   try {
     const { income, countryCode } = req.body;
 
-      if (!income || !countryCode) {
-        res.status(400).json({ error: 'Income and countryCode are required' });
-        return;
-      }
+    if (!income || !countryCode) {
+      return res.status(400).json({ error: 'Income and countryCode are required' });
+    }
 
     const tax = calculateEUIncomeTax(income, countryCode);
-    res.json({ incomeTax: tax });
+    return res.json({ incomeTax: tax });
   } catch (error) {
-    logger.error('Failed to calculate EU income tax', error);
-    res.status(500).json({ error: 'Failed to calculate EU income tax' });
+    logger.error('Failed to calculate EU income tax', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to calculate EU income tax' });
   }
 });
 
@@ -151,16 +145,15 @@ router.post('/eu/tax/corporate', async (req, res) => {
   try {
     const { profit, countryCode } = req.body;
 
-      if (!profit || !countryCode) {
-        res.status(400).json({ error: 'Profit and countryCode are required' });
-        return;
-      }
+    if (!profit || !countryCode) {
+      return res.status(400).json({ error: 'Profit and countryCode are required' });
+    }
 
     const tax = calculateEUCorporateTax(profit, countryCode);
-    res.json({ corporateTax: tax });
+    return res.json({ corporateTax: tax });
   } catch (error) {
-    logger.error('Failed to calculate EU corporate tax', error);
-    res.status(500).json({ error: 'Failed to calculate EU corporate tax' });
+    logger.error('Failed to calculate EU corporate tax', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to calculate EU corporate tax' });
   }
 });
 
@@ -172,15 +165,14 @@ router.get('/fx/rate/:from/:to', async (req, res) => {
 
     const rate = await getExchangeRate(from.toUpperCase(), to.toUpperCase(), useAPI);
 
-      if (!rate) {
-        res.status(404).json({ error: 'Exchange rate not found' });
-        return;
-      }
+    if (!rate) {
+      return res.status(404).json({ error: 'Exchange rate not found' });
+    }
 
-    res.json({ rate });
+    return res.json({ rate });
   } catch (error) {
-    logger.error('Failed to get exchange rate', error);
-    res.status(500).json({ error: 'Failed to get exchange rate' });
+    logger.error('Failed to get exchange rate', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to get exchange rate' });
   }
 });
 
@@ -188,32 +180,30 @@ router.post('/fx/convert', async (req, res) => {
   try {
     const { amount, from, to, useAPI } = req.body;
 
-      if (!amount || !from || !to) {
-        res.status(400).json({ error: 'Amount, from, and to are required' });
-        return;
-      }
+    if (!amount || !from || !to) {
+      return res.status(400).json({ error: 'Amount, from, and to are required' });
+    }
 
     const converted = await convertCurrency(amount, from.toUpperCase(), to.toUpperCase(), useAPI || false);
 
-      if (converted === null) {
-        res.status(400).json({ error: 'Currency conversion failed' });
-        return;
-      }
+    if (converted === null) {
+      return res.status(400).json({ error: 'Currency conversion failed' });
+    }
 
-    res.json({ amount: converted, from, to });
+    return res.json({ amount: converted, from, to });
   } catch (error) {
-    logger.error('Failed to convert currency', error);
-    res.status(500).json({ error: 'Failed to convert currency' });
+    logger.error('Failed to convert currency', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to convert currency' });
   }
 });
 
-router.get('/fx/currencies', async (req, res) => {
+router.get('/fx/currencies', async (_req, res) => {
   try {
     const currencies = getSupportedCurrencies();
-    res.json({ currencies });
+    return res.json({ currencies });
   } catch (error) {
-    logger.error('Failed to get supported currencies', error);
-    res.status(500).json({ error: 'Failed to get supported currencies' });
+    logger.error('Failed to get supported currencies', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to get supported currencies' });
   }
 });
 
@@ -222,10 +212,9 @@ router.post('/ledger/entry', async (req, res) => {
   try {
     const { accountId, amount, currency, baseCurrency, transactionDate, description } = req.body;
 
-      if (!accountId || !amount || !currency) {
-        res.status(400).json({ error: 'accountId, amount, and currency are required' });
-        return;
-      }
+    if (!accountId || !amount || !currency) {
+      return res.status(400).json({ error: 'accountId, amount, and currency are required' });
+    }
 
     const entry = await createMultiCurrencyEntry(
       accountId,
@@ -236,10 +225,10 @@ router.post('/ledger/entry', async (req, res) => {
       description
     );
 
-    res.json({ entry });
+    return res.json({ entry });
   } catch (error) {
-    logger.error('Failed to create multi-currency entry', error);
-    res.status(500).json({ error: 'Failed to create multi-currency entry' });
+    logger.error('Failed to create multi-currency entry', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to create multi-currency entry' });
   }
 });
 
@@ -249,10 +238,10 @@ router.get('/ledger/balance/:accountId', async (req, res) => {
     const { baseCurrency } = req.query;
 
     const balances = await getMultiCurrencyBalance(accountId, (baseCurrency as string) || 'GBP');
-    res.json({ balances });
+    return res.json({ balances });
   } catch (error) {
-    logger.error('Failed to get multi-currency balance', error);
-    res.status(500).json({ error: 'Failed to get multi-currency balance' });
+    logger.error('Failed to get multi-currency balance', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to get multi-currency balance' });
   }
 });
 
@@ -262,10 +251,10 @@ router.post('/ledger/revalue/:accountId', async (req, res) => {
     const { baseCurrency } = req.body;
 
     await revalueAccountBalances(accountId, baseCurrency || 'GBP');
-    res.json({ success: true });
+    return res.json({ success: true });
   } catch (error) {
-    logger.error('Failed to revalue account balances', error);
-    res.status(500).json({ error: 'Failed to revalue account balances' });
+    logger.error('Failed to revalue account balances', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to revalue account balances' });
   }
 });
 
@@ -274,10 +263,10 @@ router.get('/ledger/exposure', async (req, res) => {
     const { baseCurrency } = req.query;
 
     const exposure = await getCurrencyExposureReport((baseCurrency as string) || 'GBP');
-    res.json({ exposure });
+    return res.json({ exposure });
   } catch (error) {
-    logger.error('Failed to get currency exposure', error);
-    res.status(500).json({ error: 'Failed to get currency exposure' });
+    logger.error('Failed to get currency exposure', error instanceof Error ? error : new Error(String(error)));
+    return res.status(500).json({ error: 'Failed to get currency exposure' });
   }
 });
 

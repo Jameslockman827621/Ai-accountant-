@@ -47,23 +47,17 @@ export class FirmPortalService {
    * Get firm overview
    */
   async getFirmOverview(firmId: string, userId: UserId): Promise<FirmOverview | null> {
-    // Get firm
-    const firmResult = await db.query<{
-      id: string;
-      firm_name: string;
-    }>(
+    const firmResult = await db.query<{ id: string; firm_name: string }>(
       `SELECT id, firm_name FROM accountant_firms WHERE id = $1`,
       [firmId]
     );
 
-    if (firmResult.rows.length === 0) return null;
-    const firm = firmResult.rows[0];
+    if (firmResult.rows.length === 0) {
+      logger.warn('Firm not found for overview request', { firmId, userId });
+      return null;
+    }
 
-    // Get client stats
-    const clientsResult = await db.query<{
-      total: number;
-      active: number;
-    }>(
+    const clientsResult = await db.query<{ total: number; active: number }>(
       `SELECT 
          COUNT(*) as total,
          COUNT(*) FILTER (WHERE is_active = true) as active
@@ -72,7 +66,6 @@ export class FirmPortalService {
       [firmId]
     );
 
-    // Get pending approvals
     const approvalsResult = await db.query<{ count: string }>(
       `SELECT COUNT(*) as count
        FROM autopilot_tasks
@@ -84,12 +77,7 @@ export class FirmPortalService {
       [firmId, userId]
     );
 
-    // Get compliance status
-    const complianceResult = await db.query<{
-      on_track: number;
-      at_risk: number;
-      overdue: number;
-    }>(
+    const complianceResult = await db.query<{ on_track: number; at_risk: number; overdue: number }>(
       `SELECT 
          COUNT(*) FILTER (WHERE status = 'on_track') as on_track,
          COUNT(*) FILTER (WHERE status = 'at_risk') as at_risk,
@@ -102,7 +90,6 @@ export class FirmPortalService {
       [firmId]
     );
 
-    // Get client health
     const healthResult = await db.query<{
       client_tenant_id: string;
       client_name: string;
@@ -125,30 +112,31 @@ export class FirmPortalService {
       [firmId]
     );
 
+    const firm = firmResult.rows[0];
     const clients = clientsResult.rows[0];
     const compliance = complianceResult.rows[0];
 
     return {
       firmId: firm.id,
       firmName: firm.firm_name,
-      totalClients: parseInt(clients?.total || '0', 10),
-      activeClients: parseInt(clients?.active || '0', 10),
+      totalClients: this.parseNumeric(clients?.total),
+      activeClients: this.parseNumeric(clients?.active),
       totalRevenue: 0, // Would calculate from billing
-      pendingApprovals: parseInt(approvalsResult.rows[0]?.count || '0', 10),
+      pendingApprovals: this.parseNumeric(approvalsResult.rows[0]?.count),
       complianceStatus: {
-        onTrack: parseInt(compliance?.on_track || '0', 10),
-        atRisk: parseInt(compliance?.at_risk || '0', 10),
-        overdue: parseInt(compliance?.overdue || '0', 10),
+        onTrack: this.parseNumeric(compliance?.on_track),
+        atRisk: this.parseNumeric(compliance?.at_risk),
+        overdue: this.parseNumeric(compliance?.overdue),
       },
       clientHealth: healthResult.rows.map(row => ({
         clientId: row.client_tenant_id,
         clientName: row.client_name,
         healthScore: this.calculateHealthScore(
-          parseInt(row.pending_tasks || '0', 10),
-          parseInt(row.upcoming_deadlines || '0', 10)
+          this.parseNumeric(row.pending_tasks),
+          this.parseNumeric(row.upcoming_deadlines)
         ),
-        pendingTasks: parseInt(row.pending_tasks || '0', 10),
-        upcomingDeadlines: parseInt(row.upcoming_deadlines || '0', 10),
+        pendingTasks: this.parseNumeric(row.pending_tasks),
+        upcomingDeadlines: this.parseNumeric(row.upcoming_deadlines),
       })),
     };
   }
@@ -157,11 +145,7 @@ export class FirmPortalService {
    * Get client summary
    */
   async getClientSummary(firmId: string, clientTenantId: TenantId): Promise<ClientSummary | null> {
-    // Verify client belongs to firm
-    const clientResult = await db.query<{
-      client_tenant_id: string;
-      client_name: string;
-    }>(
+    const clientResult = await db.query<{ client_tenant_id: string; client_name: string }>(
       `SELECT fc.client_tenant_id, t.name as client_name
        FROM firm_clients fc
        JOIN tenants t ON t.id = fc.client_tenant_id
@@ -169,14 +153,12 @@ export class FirmPortalService {
       [firmId, clientTenantId]
     );
 
-    if (clientResult.rows.length === 0) return null;
+    if (clientResult.rows.length === 0) {
+      logger.warn('Client not found for firm summary', { firmId, clientTenantId });
+      return null;
+    }
 
-    // Get task stats
-    const tasksResult = await db.query<{
-      pending: number;
-      in_progress: number;
-      completed: number;
-    }>(
+    const tasksResult = await db.query<{ pending: number; in_progress: number; completed: number }>(
       `SELECT 
          COUNT(*) FILTER (WHERE status = 'pending') as pending,
          COUNT(*) FILTER (WHERE status = 'in_progress') as in_progress,
@@ -186,11 +168,7 @@ export class FirmPortalService {
       [clientTenantId]
     );
 
-    // Get deadline stats
-    const deadlinesResult = await db.query<{
-      upcoming: number;
-      overdue: number;
-    }>(
+    const deadlinesResult = await db.query<{ upcoming: number; overdue: number }>(
       `SELECT 
          COUNT(*) FILTER (WHERE due_date >= CURRENT_DATE AND status = 'pending') as upcoming,
          COUNT(*) FILTER (WHERE due_date < CURRENT_DATE AND status = 'pending') as overdue
@@ -199,7 +177,6 @@ export class FirmPortalService {
       [clientTenantId]
     );
 
-    // Get SLA adherence
     const slaResult = await db.query<{ adherence: number }>(
       `SELECT 
          CASE 
@@ -220,25 +197,35 @@ export class FirmPortalService {
       clientId: clientTenantId,
       clientName: clientResult.rows[0].client_name,
       healthScore: this.calculateHealthScore(
-        parseInt(tasks?.pending || '0', 10),
-        parseInt(deadlines?.upcoming || '0', 10)
+        this.parseNumeric(tasks?.pending),
+        this.parseNumeric(deadlines?.upcoming)
       ),
-      pendingTasks: parseInt(tasks?.pending || '0', 10),
-      inProgressTasks: parseInt(tasks?.in_progress || '0', 10),
-      completedTasks: parseInt(tasks?.completed || '0', 10),
-      upcomingDeadlines: parseInt(deadlines?.upcoming || '0', 10),
-      overdueDeadlines: parseInt(deadlines?.overdue || '0', 10),
-      slaAdherence: parseFloat(sla?.adherence || '100'),
+      pendingTasks: this.parseNumeric(tasks?.pending),
+      inProgressTasks: this.parseNumeric(tasks?.in_progress),
+      completedTasks: this.parseNumeric(tasks?.completed),
+      upcomingDeadlines: this.parseNumeric(deadlines?.upcoming),
+      overdueDeadlines: this.parseNumeric(deadlines?.overdue),
+      slaAdherence: this.parseNumeric(sla?.adherence) || 100,
       recentActivity: [], // Would fetch from activity log
     };
   }
 
   private calculateHealthScore(pendingTasks: number, upcomingDeadlines: number): number {
-    // Simple health score calculation
     let score = 100;
     score -= pendingTasks * 5;
     score -= upcomingDeadlines * 3;
     return Math.max(0, Math.min(100, score));
+  }
+
+  private parseNumeric(value: number | string | null | undefined): number {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : 0;
+    }
+    if (value === null || value === undefined) {
+      return 0;
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : 0;
   }
 }
 

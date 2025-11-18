@@ -141,12 +141,12 @@ export async function convertCurrency(
   toCurrency: string,
   useAPI: boolean = false
 ): Promise<number | null> {
-  const rate = await getExchangeRate(fromCurrency, toCurrency, useAPI);
-  if (!rate) {
+  const rateInfo = await getExchangeRate(fromCurrency, toCurrency, useAPI);
+  if (!rateInfo) {
     return null;
   }
 
-  return Math.round(amount * rate * 100) / 100;
+  return Math.round(amount * rateInfo.rate * 100) / 100;
 }
 
 export function getSupportedCurrencies(): string[] {

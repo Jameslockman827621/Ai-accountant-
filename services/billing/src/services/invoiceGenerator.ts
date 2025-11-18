@@ -143,22 +143,25 @@ export async function getInvoices(
     created_at: Date;
   }>(query, params);
 
-  return result.rows.map(row => ({
-    id: row.id,
-    tenantId: row.tenant_id as TenantId,
-    invoiceNumber: row.invoice_number,
-    issueDate: row.issue_date,
-    dueDate: row.due_date,
-    amount: parseFloat(String(row.amount)),
-    currency: row.currency,
-    status: row.status as Invoice['status'],
-    lineItems: JSON.parse(row.line_items) as Invoice['lineItems'],
-    subtotal: parseFloat(String(row.subtotal)),
-    tax: parseFloat(String(row.tax)),
-    total: parseFloat(String(row.total)),
-    paidAt: row.paid_at || undefined,
-    createdAt: row.created_at,
-  }));
+  return result.rows.map(row => {
+    const baseInvoice: Invoice = {
+      id: row.id,
+      tenantId: row.tenant_id as TenantId,
+      invoiceNumber: row.invoice_number,
+      issueDate: row.issue_date,
+      dueDate: row.due_date,
+      amount: parseFloat(String(row.amount)),
+      currency: row.currency,
+      status: row.status as Invoice['status'],
+      lineItems: JSON.parse(row.line_items) as Invoice['lineItems'],
+      subtotal: parseFloat(String(row.subtotal)),
+      tax: parseFloat(String(row.tax)),
+      total: parseFloat(String(row.total)),
+      createdAt: row.created_at,
+    };
+
+    return row.paid_at ? { ...baseInvoice, paidAt: row.paid_at } : baseInvoice;
+  });
 }
 
 /**

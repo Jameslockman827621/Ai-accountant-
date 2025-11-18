@@ -4,23 +4,9 @@ import { AuthRequest } from '../middleware/auth';
 import { db } from '@ai-accountant/database';
 import { ValidationError } from '@ai-accountant/shared-utils';
 import { upgradeSubscription, cancelTenantSubscription } from '../services/subscription';
-import {
-  generateInvoice,
-  getInvoices,
-  markInvoicePaid,
-} from '../services/invoiceGenerator';
-import {
-  checkUsageLimit,
-  recordUsage,
-} from '../services/usageEnforcement';
-import {
-  handlePaymentFailure,
-  resolvePaymentFailure,
-} from '../services/paymentFailureHandler';
-import {
-  cancelTenantSubscription as cancelSubscription,
-  getCancellationHistory,
-} from '../services/subscriptionCancellation';
+import { generateInvoice, getInvoices } from '../services/invoiceGenerator';
+import { checkUsageLimit } from '../services/usageEnforcement';
+import { getCancellationHistory } from '../services/subscriptionCancellation';
 import {
   createOneTimePaymentIntent,
   createBillingPortalSession,
@@ -190,19 +176,36 @@ router.post('/invoices', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { periodStart, periodEnd } = req.body;
+      const { lineItems, issueDate, dueDate } = req.body;
 
-    if (!periodStart || !periodEnd) {
-      throw new ValidationError('periodStart and periodEnd are required');
-    }
+      if (!Array.isArray(lineItems) || lineItems.length === 0) {
+        throw new ValidationError('lineItems are required');
+      }
 
-    const { generateInvoice } = await import('../services/invoiceGenerator');
+      const normalizedLineItems = lineItems.map((item: Record<string, unknown>) => {
+        const { description, quantity, unitPrice } = item;
+        if (typeof description !== 'string' || !description.trim()) {
+          throw new ValidationError('Each line item requires a description');
+        }
+        if (typeof quantity !== 'number' || Number.isNaN(quantity)) {
+          throw new ValidationError('Each line item requires a numeric quantity');
+        }
+        if (typeof unitPrice !== 'number' || Number.isNaN(unitPrice)) {
+          throw new ValidationError('Each line item requires a numeric unitPrice');
+        }
+        return {
+          description: description.trim(),
+          quantity,
+          unitPrice,
+        };
+      });
 
-    const invoice = await generateInvoice(
-      req.user.tenantId,
-      new Date(periodStart),
-      new Date(periodEnd)
-    );
+      const invoice = await generateInvoice(
+        req.user.tenantId,
+        normalizedLineItems,
+        issueDate ? new Date(issueDate) : undefined,
+        dueDate ? new Date(dueDate) : undefined
+      );
 
     res.status(201).json({ invoice });
   } catch (error) {

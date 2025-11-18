@@ -10,8 +10,7 @@
  * - Extensive validation and error handling
  */
 
-import { InstallableTaxRulepack, TaxRulepack } from '../../../rules-engine/src/services/rulepackTypes';
-import { RulepackTransactionInput } from '@ai-accountant/shared-types';
+import { RulepackTransactionInput, TaxRulepack } from '@ai-accountant/shared-types';
 
 // ============================================================================
 // LOCAL TAX RATE DATABASES
@@ -145,16 +144,17 @@ export const TAX_CREDITS: TaxCredit[] = [
     phaseoutEnd: 63498,
     eligibilityCriteria: ['earned_income', 'filing_status', 'children'],
   },
-  {
-    id: 'us-child-tax-credit',
-    name: 'Child Tax Credit',
-    jurisdictionCode: 'US',
-    type: 'partially_refundable',
-    maxAmount: 2000,
-    phaseoutStart: 200000,
-    phaseoutEnd: 240000,
-    eligibilityCriteria: ['dependent_child', 'age_under_17'],
-  },
+    {
+      id: 'us-child-tax-credit',
+      name: 'Child Tax Credit',
+      jurisdictionCode: 'US',
+      type: 'refundable',
+      maxAmount: 2000,
+      phaseoutStart: 200000,
+      phaseoutEnd: 240000,
+      eligibilityCriteria: ['dependent_child', 'age_under_17'],
+      notes: 'Partially refundable up to $1,600; remainder is non-refundable',
+    },
   // Add more credits
 ];
 
@@ -335,7 +335,7 @@ export interface EnhancedCalculationResult {
 export function calculateEnhancedTax(
   rulepack: TaxRulepack,
   transaction: RulepackTransactionInput,
-  options?: {
+  _options?: {
     applyAMT?: boolean;
     includeLocalTax?: boolean;
     locality?: string;

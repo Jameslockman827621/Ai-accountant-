@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
@@ -38,9 +39,11 @@ export async function handlePaymentFailure(
   let failureCount: number;
   let failureId: string;
 
-  if (existingResult.rows.length > 0) {
-    failureId = existingResult.rows[0].id;
-    failureCount = existingResult.rows[0].failure_count + 1;
+  const existingFailure = existingResult.rows[0];
+
+  if (existingFailure) {
+    failureId = existingFailure.id;
+    failureCount = existingFailure.failure_count + 1;
 
     // Update existing failure
     const nextRetryAt = calculateNextRetry(failureCount);
