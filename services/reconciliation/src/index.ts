@@ -41,7 +41,7 @@ const useBullMQ = process.env.USE_BULLMQ === 'true' && process.env.REDIS_HOST;
     try {
       const { createReconciliationWorker } = await import('./workers/bullReconciliationWorker');
       const worker = createReconciliationWorker();
-      logger.info('BullMQ reconciliation worker started');
+      logger.info('BullMQ reconciliation worker started', { workerId: worker.name });
     } catch (error) {
       logger.error('Failed to start BullMQ worker, falling back to simple worker', {
         error: error instanceof Error ? error : new Error(String(error)),

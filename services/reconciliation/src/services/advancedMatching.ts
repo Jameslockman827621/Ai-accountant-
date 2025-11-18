@@ -1,8 +1,5 @@
 import { db } from '@ai-accountant/database';
-import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-
-const logger = createLogger('reconciliation-service');
 
 export interface MatchCandidate {
   id: string;
@@ -34,6 +31,10 @@ export async function findFuzzyMatches(
   }
 
   const transaction = txResult.rows[0];
+  if (!transaction) {
+    return [];
+  }
+
   const candidates: MatchCandidate[] = [];
 
   // Find ledger entry matches
@@ -70,7 +71,7 @@ export async function findFuzzyMatches(
         amount: entry.amount,
         date: entry.transaction_date,
         similarity,
-        matchReasons: generateMatchReasons(transaction, entry, similarity),
+        matchReasons: generateMatchReasons(transaction, { description: entry.description, amount: entry.amount, date: entry.transaction_date }, similarity),
       });
     }
   }
@@ -107,6 +108,7 @@ export async function findFuzzyMatches(
       );
 
       if (similarity >= threshold) {
+        const candidateData = { description: doc.file_name, amount: docAmount, date: doc.created_at };
         candidates.push({
           id: doc.id,
           type: 'document',
@@ -114,7 +116,7 @@ export async function findFuzzyMatches(
           amount: docAmount,
           date: doc.created_at,
           similarity,
-          matchReasons: generateMatchReasons(transaction, { description: doc.file_name, amount: docAmount, date: doc.created_at }, similarity),
+          matchReasons: generateMatchReasons(transaction, candidateData, similarity),
         });
       }
     }
@@ -168,24 +170,29 @@ function levenshteinDistance(str1: string, str2: string): number {
   }
 
   for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
+    matrix[0]![j] = j;
   }
 
   for (let i = 1; i <= str2.length; i++) {
+    const row = matrix[i];
+    if (!row) continue;
     for (let j = 1; j <= str1.length; j++) {
+      const prevRow = matrix[i - 1];
+      if (!prevRow) continue;
       if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
+        row[j] = prevRow[j - 1] ?? 0;
       } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
+        row[j] = Math.min(
+          (prevRow[j - 1] ?? 0) + 1,
+          (row[j - 1] ?? 0) + 1,
+          (prevRow[j] ?? 0) + 1
         );
       }
     }
   }
 
-  return matrix[str2.length][str1.length];
+  const finalRow = matrix[str2.length];
+  return finalRow?.[str1.length] ?? 0;
 }
 
 function generateMatchReasons(

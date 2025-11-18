@@ -1,7 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { reconciliationExceptionService } from './reconciliationExceptions';
+import { reconciliationExceptionService, ExceptionType, ExceptionSeverity } from './reconciliationExceptions';
 
 const logger = createLogger('anomaly-detection');
 
@@ -170,19 +170,32 @@ export class AnomalyDetectionService {
     for (const dup of duplicatesResult.rows) {
       const count = parseInt(dup.count, 10);
       const score = Math.min(1, count / 3); // Higher score for more duplicates
+      const firstTransactionId = dup.transaction_ids?.[0];
 
-      anomalies.push({
+      const anomaly: {
+        type: 'duplicate';
+        severity: 'medium' | 'high';
+        score: number;
+        description: string;
+        transactionId?: string;
+        suggestedActions: string[];
+      } = {
         type: 'duplicate',
         severity: count >= 3 ? 'high' : 'medium',
         score,
         description: `${count} duplicate transactions: £${parseFloat(dup.amount.toString()).toFixed(2)} on ${dup.date.toISOString().split('T')[0]}`,
-        transactionId: dup.transaction_ids[0],
         suggestedActions: [
           'Review transactions to identify duplicates',
           'Verify if transactions are legitimate',
           'Remove or void duplicate entries',
         ],
-      });
+      };
+
+      if (firstTransactionId) {
+        anomaly.transactionId = firstTransactionId;
+      }
+
+      anomalies.push(anomaly);
     }
 
     return anomalies;
@@ -306,20 +319,43 @@ export class AnomalyDetectionService {
 
     for (const anomaly of anomalies) {
       try {
-        await reconciliationExceptionService.createException(tenantId, {
-          exceptionType: anomaly.type === 'pattern_anomaly' ? 'anomaly' : anomaly.type,
-          severity: anomaly.severity,
-          bankTransactionId: anomaly.transactionId,
-          documentId: anomaly.documentId,
-          ledgerEntryId: anomaly.ledgerEntryId,
+        const exceptionType: ExceptionType = anomaly.type === 'pattern_anomaly' ? 'anomaly' : (anomaly.type as ExceptionType);
+        const exceptionPayload: {
+          exceptionType: ExceptionType;
+          severity?: ExceptionSeverity;
+          bankTransactionId?: string;
+          documentId?: string;
+          ledgerEntryId?: string;
+          description: string;
+          anomalyScore?: number;
+          remediationPlaybook?: Array<{ step: number; action: string }>;
+        } = {
+          exceptionType,
+          severity: anomaly.severity as ExceptionSeverity,
           description: anomaly.description,
-          anomalyScore: anomaly.score,
-          remediationPlaybook: anomaly.suggestedActions.map((action, index) => ({
+        };
+
+        if (anomaly.transactionId) {
+          exceptionPayload.bankTransactionId = anomaly.transactionId;
+        }
+        if (anomaly.documentId) {
+          exceptionPayload.documentId = anomaly.documentId;
+        }
+        if (anomaly.ledgerEntryId) {
+          exceptionPayload.ledgerEntryId = anomaly.ledgerEntryId;
+        }
+        if (anomaly.score !== undefined) {
+          exceptionPayload.anomalyScore = anomaly.score;
+        }
+        if (anomaly.suggestedActions.length > 0) {
+          exceptionPayload.remediationPlaybook = anomaly.suggestedActions.map((action, index) => ({
             step: index + 1,
             action: action.toLowerCase().replace(/\s+/g, '_'),
             description: action,
-          })),
-        });
+          }));
+        }
+
+        await reconciliationExceptionService.createException(tenantId, exceptionPayload);
         createdCount++;
       } catch (error) {
         logger.error('Failed to create exception from anomaly', {

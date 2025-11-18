@@ -33,8 +33,8 @@ export async function matchBankStatement(
   tenantId: TenantId,
   accountId: string,
   statementLines: BankStatement[],
-  periodStart: Date,
-  periodEnd: Date
+  _periodStart: Date,
+  _periodEnd: Date
 ): Promise<StatementMatch[]> {
   logger.info('Matching bank statement', { tenantId, accountId, lineCount: statementLines.length });
 
@@ -81,7 +81,7 @@ export async function matchBankStatement(
         amount: row.amount,
         date: row.transaction_date,
         description: row.description,
-        confidence: calculateMatchConfidence(statementLine, row),
+        confidence: calculateMatchConfidence(statementLine, { amount: row.amount, date: row.transaction_date, description: row.description }),
       })),
       ...transactionMatches.rows.map(row => ({
         id: row.id,
@@ -89,7 +89,7 @@ export async function matchBankStatement(
         amount: row.amount,
         date: row.date,
         description: row.description,
-        confidence: calculateMatchConfidence(statementLine, row),
+        confidence: calculateMatchConfidence(statementLine, { amount: row.amount, date: row.date, description: row.description }),
       })),
     ].sort((a, b) => b.confidence - a.confidence);
 
@@ -163,20 +163,28 @@ function levenshteinDistance(str1: string, str2: string): number {
     matrix[i] = [i];
   }
   for (let j = 0; j <= str1.length; j++) {
-    matrix[0][j] = j;
+    const firstRow = matrix[0];
+    if (firstRow) {
+      firstRow[j] = j;
+    }
   }
   for (let i = 1; i <= str2.length; i++) {
+    const row = matrix[i];
+    if (!row) continue;
     for (let j = 1; j <= str1.length; j++) {
+      const prevRow = matrix[i - 1];
+      if (!prevRow) continue;
       if (str2.charAt(i - 1) === str1.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
+        row[j] = prevRow[j - 1] ?? 0;
       } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1,
-          matrix[i][j - 1] + 1,
-          matrix[i - 1][j] + 1
+        row[j] = Math.min(
+          (prevRow[j - 1] ?? 0) + 1,
+          (row[j - 1] ?? 0) + 1,
+          (prevRow[j] ?? 0) + 1
         );
       }
     }
   }
-  return matrix[str2.length][str1.length];
+  const finalRow = matrix[str2.length];
+  return finalRow?.[str1.length] ?? 0;
 }
