@@ -17,12 +17,34 @@ export class StripeWebhookHandler {
     payload: string,
     signature: string
   ): boolean {
-    // In production, use Stripe SDK to verify
-    // const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-    // const event = stripe.webhooks.constructEvent(payload, signature, this.webhookSecret);
-    
-    logger.info('Webhook signature verified');
-    return true;
+    if (!this.webhookSecret) {
+      logger.warn('Stripe webhook secret missing; skipping signature verification');
+      return true;
+    }
+
+    if (!signature) {
+      logger.warn('Missing Stripe webhook signature header');
+      return false;
+    }
+
+    const digest = crypto
+      .createHmac('sha256', this.webhookSecret)
+      .update(payload)
+      .digest('hex');
+
+    const provided = Buffer.from(signature, 'utf8');
+    const expected = Buffer.from(digest, 'utf8');
+
+    if (provided.length !== expected.length) {
+      return false;
+    }
+
+    const verified = crypto.timingSafeEqual(provided, expected);
+    if (!verified) {
+      logger.warn('Stripe webhook signature verification failed');
+    }
+
+    return verified;
   }
 
   async handleChargeSucceeded(
@@ -103,12 +125,28 @@ export class StripeWebhookHandler {
     });
 
     // Similar to charge.succeeded
-    await this.handleChargeSucceeded(tenantId, {
+    const chargePayload: {
+      id: string;
+      amount: number;
+      description?: string;
+      created: number;
+      customer?: string;
+    } = {
       id: paymentIntent.id,
       amount: paymentIntent.amount,
-      description: paymentIntent.description,
       created: paymentIntent.created,
-    });
+    };
+
+    if (typeof paymentIntent.description === 'string' && paymentIntent.description.length > 0) {
+      chargePayload.description = paymentIntent.description;
+    }
+
+    const customerId = (paymentIntent as { customer?: string }).customer;
+    if (typeof customerId === 'string' && customerId.length > 0) {
+      chargePayload.customer = customerId;
+    }
+
+    await this.handleChargeSucceeded(tenantId, chargePayload);
   }
 
   async processWebhook(

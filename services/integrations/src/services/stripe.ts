@@ -37,12 +37,18 @@ export async function syncStripeTransactions(
     [tenantId]
   );
 
-  if (connection.rows.length === 0) {
+  const connectionRow = connection.rows[0];
+
+  if (!connectionRow) {
     throw new Error('Stripe not connected');
   }
 
-  const apiKey = connection.rows[0].api_key;
-  const customerId = connection.rows[0].customer_id;
+  const { api_key: apiKey, customer_id: customerId } = connectionRow;
+  logger.info('Stripe connection loaded', {
+    tenantId,
+    apiKeyConfigured: Boolean(apiKey),
+    customerConfigured: Boolean(customerId),
+  });
 
   // In production, use Stripe SDK
   // const stripe = new Stripe(apiKey);
@@ -81,13 +87,16 @@ export async function verifyStripeWebhookSignature(
       .createHmac('sha256', webhookSecret)
       .update(payload)
       .digest('hex');
+    const providedBuffer = Buffer.from(sigHash, 'hex');
+    const expectedBuffer = Buffer.from(expectedSignature, 'hex');
 
-    return crypto.timingSafeEqual(
-      Buffer.from(sigHash),
-      Buffer.from(expectedSignature)
-    );
+    if (providedBuffer.length !== expectedBuffer.length) {
+      return false;
+    }
+
+    return crypto.timingSafeEqual(providedBuffer, expectedBuffer);
   } catch (error) {
-    logger.error('Webhook signature verification failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error('Webhook signature verification failed', { error });
     return false;
   }
 }
@@ -109,12 +118,14 @@ export async function handleStripeWebhook(
       [tenantId]
     );
 
-    if (connection.rows.length > 0 && connection.rows[0].webhook_secret) {
+    const secret = connection.rows[0]?.webhook_secret;
+
+    if (secret) {
       const payload = JSON.stringify(data);
       const isValid = await verifyStripeWebhookSignature(
         payload,
         signature,
-        connection.rows[0].webhook_secret
+        secret
       );
 
       if (!isValid) {
@@ -125,30 +136,58 @@ export async function handleStripeWebhook(
   
   // Handle different Stripe events
   switch (event) {
-    case 'payment_intent.succeeded':
-      // Create ledger entry for successful payment
-      const paymentIntent = data.object as { amount: number; currency: string; description?: string };
+    case 'payment_intent.succeeded': {
+      if (!data.object || typeof data.object !== 'object') {
+        logger.warn('Stripe payment_intent missing payload', { tenantId });
+        break;
+      }
+
+      const paymentIntent = data.object as Record<string, unknown>;
+      const amount = typeof paymentIntent.amount === 'number' ? paymentIntent.amount : null;
+      const currency = typeof paymentIntent.currency === 'string' ? paymentIntent.currency : null;
+      const description =
+        typeof paymentIntent.description === 'string' ? paymentIntent.description : undefined;
+
+      if (amount === null || !currency) {
+        logger.warn('Stripe payment_intent missing amount or currency', { tenantId });
+        break;
+      }
+
       await db.query(
         `INSERT INTO ledger_entries (
           id, tenant_id, entry_type, account_code, account_name, amount, currency, description, transaction_date, created_at
         ) VALUES (
           gen_random_uuid(), $1, 'credit', '4000', 'Sales', $2, $3, $4, CURRENT_DATE, NOW()
         )`,
-        [tenantId, paymentIntent.amount / 100, paymentIntent.currency.toUpperCase(), paymentIntent.description || 'Stripe payment']
+        [tenantId, amount / 100, currency.toUpperCase(), description || 'Stripe payment']
       );
       break;
-    case 'charge.refunded':
-      // Create ledger entry for refund
-      const refund = data.object as { amount: number; currency: string };
+    }
+    case 'charge.refunded': {
+      if (!data.object || typeof data.object !== 'object') {
+        logger.warn('Stripe refund missing payload', { tenantId });
+        break;
+      }
+
+      const refund = data.object as Record<string, unknown>;
+      const amount = typeof refund.amount === 'number' ? refund.amount : null;
+      const currency = typeof refund.currency === 'string' ? refund.currency : null;
+
+      if (amount === null || !currency) {
+        logger.warn('Stripe refund missing amount or currency', { tenantId });
+        break;
+      }
+
       await db.query(
         `INSERT INTO ledger_entries (
           id, tenant_id, entry_type, account_code, account_name, amount, currency, description, transaction_date, created_at
         ) VALUES (
           gen_random_uuid(), $1, 'debit', '4000', 'Sales', $2, $3, 'Stripe refund', CURRENT_DATE, NOW()
         )`,
-        [tenantId, refund.amount / 100, refund.currency.toUpperCase()]
+        [tenantId, amount / 100, currency.toUpperCase()]
       );
       break;
+    }
     default:
       logger.warn('Unhandled Stripe event', { event });
   }
