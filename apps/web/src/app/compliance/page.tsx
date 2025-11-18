@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import ComplianceMode from '@/components/ComplianceMode';
 import ComplianceEvidenceDashboard from '@/components/ComplianceEvidenceDashboard';
-import ComplianceWarning from '@/components/ComplianceWarning';
 import ReadinessDashboard from '@/components/ReadinessDashboard';
 import ComplianceCalendar from '@/components/ComplianceCalendar';
 

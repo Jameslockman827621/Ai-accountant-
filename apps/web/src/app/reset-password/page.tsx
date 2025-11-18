@@ -7,7 +7,7 @@ import { useAuth } from '@/hooks/useAuth';
 export default function ResetPasswordPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const token = searchParams.get('token');
+  const token = searchParams?.get('token') ?? null;
   const { resetPassword } = useAuth();
 
   const [password, setPassword] = useState('');
