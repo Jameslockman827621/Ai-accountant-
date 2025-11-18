@@ -122,9 +122,10 @@ export class EnhancedForecaster {
     const sumY = data.reduce((a, b) => a + b, 0);
     const sumXY = x.reduce((sum, xi, i) => sum + xi * (data[i] ?? 0), 0);
     const sumX2 = x.reduce((sum, xi) => sum + xi * xi, 0);
+    const denominator = n * sumX2 - sumX * sumX;
 
-    const slope = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / n;
+    const slope = denominator === 0 ? 0 : (n * sumXY - sumX * sumY) / denominator;
+    const intercept = n === 0 ? 0 : (sumY - slope * sumX) / n;
 
     const forecast: ForecastResult['periods'] = [];
     for (let i = 0; i < periods; i++) {
@@ -180,7 +181,7 @@ export class EnhancedForecaster {
     periods: number,
     seasonality?: { detected: boolean; period: number; strength: number }
   ): ForecastResult['periods'] {
-    if (!seasonality?.detected) {
+    if (!seasonality?.detected || seasonality.period <= 0) {
       return this.linearForecast(data, periods);
     }
 
@@ -193,20 +194,31 @@ export class EnhancedForecaster {
     for (let i = 0; i < seasonalPeriod; i++) {
       const seasonalValues: number[] = [];
       for (let j = i; j < data.length; j += seasonalPeriod) {
-        seasonalValues.push(data[j]);
+        const point = data[j];
+        if (typeof point === 'number') {
+          seasonalValues.push(point);
+        }
+      }
+      if (seasonalValues.length === 0) {
+        seasonalIndices.push(1);
+        continue;
       }
       const avg = seasonalValues.reduce((a, b) => a + b, 0) / seasonalValues.length;
       const overallAvg = data.reduce((a, b) => a + b, 0) / data.length;
-      seasonalIndices.push(avg / overallAvg);
+      seasonalIndices.push(overallAvg === 0 ? 1 : avg / overallAvg);
+    }
+
+    if (seasonalIndices.length === 0) {
+      return this.linearForecast(data, periods);
     }
 
     // Generate forecast
     const baseTrend = this.calculateTrend(data);
     for (let i = 0; i < periods; i++) {
-      const seasonalIndex = seasonalIndices[i % seasonalPeriod];
+      const seasonalIndex = seasonalIndices[i % seasonalIndices.length] ?? 1;
       const trendValue = baseTrend * (data.length + i);
       const value = trendValue * seasonalIndex;
-      const confidence = seasonality.strength;
+      const confidence = seasonality.strength ?? 0.5;
 
       forecast.push({
         period: `Period ${data.length + i + 1}`,
@@ -269,9 +281,19 @@ export class EnhancedForecaster {
     for (let i = 0; i < period; i++) {
       const values: number[] = [];
       for (let j = i; j < data.length; j += period) {
-        values.push(data[j]);
+        const point = data[j];
+        if (typeof point === 'number') {
+          values.push(point);
+        }
+      }
+      if (values.length === 0) {
+        means.push(0);
+        continue;
       }
       means.push(values.reduce((a, b) => a + b, 0) / values.length);
+    }
+    if (means.length === 0) {
+      return 0;
     }
     const overallMean = means.reduce((a, b) => a + b, 0) / means.length;
     return means.reduce((sum, m) => sum + Math.pow(m - overallMean, 2), 0) / means.length;
@@ -282,18 +304,29 @@ export class EnhancedForecaster {
     const x = Array.from({ length: n }, (_, i) => i);
     const sumX = x.reduce((a, b) => a + b, 0);
     const sumY = data.reduce((a, b) => a + b, 0);
-    const sumXY = x.reduce((sum, xi, i) => sum + xi * data[i], 0);
+    const sumXY = x.reduce((sum, xi, i) => sum + xi * (data[i] ?? 0), 0);
     const sumX2 = x.reduce((sum, xi) => sum + xi * xi, 0);
-    return (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+    const denominator = n * sumX2 - sumX * sumX;
+    if (denominator === 0) {
+      return 0;
+    }
+    return (n * sumXY - sumX * sumY) / denominator;
   }
 
   private calculateStdDev(data: number[]): number {
+    if (data.length === 0) {
+      return 0;
+    }
     const mean = data.reduce((a, b) => a + b, 0) / data.length;
-    const variance = data.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / data.length;
+    const variance =
+      data.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / data.length;
     return Math.sqrt(variance);
   }
 
   private calculateVariance(data: number[]): number {
+    if (data.length === 0) {
+      return 0;
+    }
     const mean = data.reduce((a, b) => a + b, 0) / data.length;
     return data.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / data.length;
   }
@@ -305,23 +338,29 @@ export class EnhancedForecaster {
     // Use last few historical values for validation
     const validationSize = Math.min(3, Math.floor(historical.length * 0.2));
     const validationData = historical.slice(-validationSize);
-    const forecastValues = forecast.slice(0, validationSize).map(f => f.forecast);
+    const forecastValues = forecast
+      .slice(0, validationSize)
+      .map(f => (typeof f?.forecast === 'number' ? f.forecast : 0));
 
     // Calculate MAPE
     let mape = 0;
     for (let i = 0; i < validationData.length; i++) {
-      if (validationData[i] !== 0) {
-        mape += Math.abs((validationData[i] - forecastValues[i]) / validationData[i]);
+      const actual = validationData[i] ?? 0;
+      const predicted = forecastValues[i] ?? 0;
+      if (actual !== 0) {
+        mape += Math.abs((actual - predicted) / actual);
       }
     }
-    mape = (mape / validationData.length) * 100;
+    mape = validationData.length === 0 ? 0 : (mape / validationData.length) * 100;
 
     // Calculate RMSE
     let rmse = 0;
     for (let i = 0; i < validationData.length; i++) {
-      rmse += Math.pow(validationData[i] - forecastValues[i], 2);
+      const actual = validationData[i] ?? 0;
+      const predicted = forecastValues[i] ?? 0;
+      rmse += Math.pow(actual - predicted, 2);
     }
-    rmse = Math.sqrt(rmse / validationData.length);
+    rmse = validationData.length === 0 ? 0 : Math.sqrt(rmse / validationData.length);
 
     return { mape, rmse };
   }

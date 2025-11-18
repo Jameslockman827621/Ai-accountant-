@@ -169,7 +169,6 @@ function buildUpcomingDeadlines(
   });
 
   // PAYE (monthly)
-  const payePeriodEnd = new Date(today.getFullYear(), today.getMonth(), 0);
   const payeDueDate = new Date(today.getFullYear(), today.getMonth(), 19);
   deadlines.push({
     type: FilingType.PAYE,

@@ -59,6 +59,15 @@ export class CalibrationService {
     }
 
     const calibration = result.rows[0];
+    if (!calibration) {
+      return {
+        fieldName,
+        originalConfidence: rawConfidence,
+        calibratedConfidence: rawConfidence,
+        reliabilityScore: 0.5,
+      };
+    }
+
     const params = calibration.calibration_params as CalibrationParams;
     const calibrationType = calibration.calibration_type as CalibrationType;
 
@@ -96,7 +105,7 @@ export class CalibrationService {
       fieldName,
       originalConfidence: rawConfidence,
       calibratedConfidence,
-      reliabilityScore: parseFloat(calibration.reliability_score.toString()),
+      reliabilityScore: parseFloat((calibration.reliability_score ?? 0.5).toString()),
     };
   }
 
@@ -112,11 +121,7 @@ export class CalibrationService {
   /**
    * Isotonic regression calibration
    */
-  private isotonicRegression(
-    confidence: number,
-    thresholds: number[],
-    values: number[]
-  ): number {
+  private isotonicRegression(confidence: number, thresholds: number[], values: number[]): number {
     // Find the interval and interpolate
     if (confidence <= thresholds[0]) {
       return values[0];

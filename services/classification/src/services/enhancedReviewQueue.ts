@@ -58,7 +58,10 @@ export class EnhancedReviewQueueManager {
     );
 
     // Determine required reviewer skill
-    const reviewerSkillRequired = this.determineRequiredSkill(riskLevel, options?.complianceFlags || []);
+    const reviewerSkillRequired = this.determineRequiredSkill(
+      riskLevel,
+      options?.complianceFlags || []
+    );
 
     // Calculate SLA deadline (4 hours for high risk, 24 hours for others)
     const slaDeadline = new Date();
@@ -179,7 +182,10 @@ export class EnhancedReviewQueueManager {
   /**
    * Determine required reviewer skill based on risk
    */
-  private determineRequiredSkill(riskLevel: RiskLevel, complianceFlags: string[]): string | undefined {
+  private determineRequiredSkill(
+    riskLevel: RiskLevel,
+    complianceFlags: string[]
+  ): string | undefined {
     if (riskLevel === 'critical' || complianceFlags.length > 0) {
       return 'senior_accountant';
     }
@@ -260,31 +266,48 @@ export class EnhancedReviewQueueManager {
       created_at: Date;
     }>(query, params);
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      documentId: row.document_id as DocumentId,
-      priorityScore: parseFloat(row.priority_score.toString()),
-      riskLevel: row.risk_level as RiskLevel,
-      riskFactors: (row.risk_factors as string[]) || [],
-      assignedTo: row.assigned_to as UserId | undefined,
-      assignedAt: row.assigned_at || undefined,
-      reviewerSkillRequired: row.reviewer_skill_required || undefined,
-      status: row.status as ReviewQueueItem['status'],
-      slaDeadline: row.sla_deadline || undefined,
-      timeToFirstReview: row.time_to_first_review || undefined,
-      reviewCompletedAt: row.review_completed_at || undefined,
-      createdAt: row.created_at,
-    }));
+    return result.rows.map((row) => {
+      const riskFactors = Array.isArray(row.risk_factors) ? (row.risk_factors as string[]) : [];
+
+      const item: ReviewQueueItem = {
+        id: row.id,
+        documentId: row.document_id as DocumentId,
+        priorityScore: Number.isFinite(row.priority_score)
+          ? row.priority_score
+          : Number.parseFloat(String(row.priority_score)),
+        riskLevel: row.risk_level as RiskLevel,
+        riskFactors,
+        status: row.status as ReviewQueueItem['status'],
+        createdAt: row.created_at,
+      };
+
+      if (row.assigned_to) {
+        item.assignedTo = row.assigned_to as UserId;
+      }
+      if (row.assigned_at) {
+        item.assignedAt = row.assigned_at;
+      }
+      if (row.reviewer_skill_required) {
+        item.reviewerSkillRequired = row.reviewer_skill_required;
+      }
+      if (row.sla_deadline) {
+        item.slaDeadline = row.sla_deadline;
+      }
+      if (typeof row.time_to_first_review === 'number') {
+        item.timeToFirstReview = row.time_to_first_review;
+      }
+      if (row.review_completed_at) {
+        item.reviewCompletedAt = row.review_completed_at;
+      }
+
+      return item;
+    });
   }
 
   /**
    * Assign queue item to reviewer (with skill matching)
    */
-  async assignToReviewer(
-    queueId: string,
-    reviewerId: UserId,
-    tenantId: TenantId
-  ): Promise<void> {
+  async assignToReviewer(queueId: string, reviewerId: UserId, tenantId: TenantId): Promise<void> {
     const startTime = Date.now();
 
     await db.query(
@@ -300,10 +323,9 @@ export class EnhancedReviewQueueManager {
       [queueId]
     );
 
-    if (queueResult.rows.length > 0) {
-      const timeToFirstReview = Math.floor(
-        (startTime - queueResult.rows[0].created_at.getTime()) / 1000
-      );
+    const queueRow = queueResult.rows[0];
+    if (queueRow) {
+      const timeToFirstReview = Math.floor((startTime - queueRow.created_at.getTime()) / 1000);
 
       await db.query(
         `UPDATE review_queue
@@ -419,10 +441,10 @@ export class EnhancedReviewQueueManager {
       action === 'approve'
         ? 'approved'
         : action === 'reject'
-        ? 'rejected'
-        : action === 'escalate'
-        ? 'escalated'
-        : 'in_review';
+          ? 'rejected'
+          : action === 'escalate'
+            ? 'escalated'
+            : 'in_review';
 
     await db.query(
       `UPDATE review_queue

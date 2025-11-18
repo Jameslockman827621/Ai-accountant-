@@ -15,14 +15,15 @@ export interface AuthRequest extends Request {
 export function authenticate(req: AuthRequest, res: Response, next: NextFunction): void {
   // In production, would verify JWT token
   const authHeader = req.headers.authorization;
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
 
   const token = authHeader.substring(7);
-  
+  logger.debug('Authentication header received', { tokenLength: token.length });
+
   // For now, extract user from token (would verify JWT in production)
   // This is a placeholder - in production would decode and verify JWT
   try {
@@ -35,7 +36,10 @@ export function authenticate(req: AuthRequest, res: Response, next: NextFunction
     };
     next();
   } catch (error) {
-    logger.error('Authentication failed', error instanceof Error ? error : new Error(String(error)));
+    logger.error(
+      'Authentication failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
     res.status(401).json({ error: 'Invalid token' });
   }
 }

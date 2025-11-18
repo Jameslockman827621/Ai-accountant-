@@ -37,23 +37,29 @@ export async function predictRevenue(
   );
 
   // Simple linear regression for prediction
-  const revenues = historical.rows.map(r => 
+  const revenues = historical.rows.map(r =>
     typeof r.revenue === 'number' ? r.revenue : parseFloat(String(r.revenue || '0'))
   );
-  
-  const avgRevenue = revenues.reduce((a, b) => a + b, 0) / revenues.length;
-  const trend = revenues.length > 1 
-    ? (revenues[revenues.length - 1] - revenues[0]) / revenues.length 
-    : 0;
 
-  const predictedValue = avgRevenue + (trend * months);
+  const revenueSamples = revenues.length > 0 ? revenues : [0];
+  const avgRevenue = revenueSamples.reduce((a, b) => a + b, 0) / revenueSamples.length;
+  const firstRevenue = revenueSamples[0] ?? 0;
+  const lastRevenue = revenueSamples[revenueSamples.length - 1] ?? firstRevenue;
+  const trend =
+    revenueSamples.length > 1 ? (lastRevenue - firstRevenue) / revenueSamples.length : 0;
+
+  const predictedValue = avgRevenue + trend * months;
   const confidence = revenues.length >= 6 ? 0.85 : 0.65;
+
+  const periodStart = new Date();
+  const periodEnd = new Date(periodStart);
+  periodEnd.setMonth(periodEnd.getMonth() + months);
 
   return {
     type: 'revenue',
     period: {
-      start: new Date(),
-      end: new Date(Date.now() + months * 30 * 24 * 60 * 60 * 1000),
+      start: periodStart,
+      end: periodEnd,
     },
     predictedValue: Math.round(predictedValue * 100) / 100,
     confidence,

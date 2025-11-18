@@ -102,9 +102,7 @@ function quickClassify(text: string): ClassificationResult {
 }
 
 async function llmClassify(text: string): Promise<ClassificationResult> {
-  // First extract structured fields
   const { extractStructuredFields } = await import('./fieldExtraction');
-  const extractedData = await extractStructuredFields(text, 'unknown');
   const prompt = `Classify this document and extract key information. The document text is:
 
 ${text.substring(0, 2000)}
