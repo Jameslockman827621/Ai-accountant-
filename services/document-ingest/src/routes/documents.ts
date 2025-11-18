@@ -266,7 +266,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
         created_at: Date;
         updated_at: Date;
       }>(
-        `SELECT id, file_name, file_type, file_size, document_type, status,
+        `SELECT id, file_name, file_type, file_size, document_type, status, processing_stage,
                 confidence_score, quality_score, quality_issues, upload_checklist,
                 page_count, upload_source, suggested_document_type,
                 created_at, updated_at
@@ -287,8 +287,13 @@ router.get('/', async (req: AuthRequest, res: Response) => {
     const totalRow = countResult.rows[0];
     const total = totalRow ? (typeof totalRow.total === 'number' ? totalRow.total : parseInt(String(totalRow.total || '0'), 10)) : 0;
     
-    res.json({
-      documents: result.rows,
+      const documents = result.rows.map(row => ({
+        ...row,
+        processing_stage: row.processing_stage || getStageForStatus(row.status),
+      }));
+
+      res.json({
+        documents,
       pagination: {
         page,
         limit,
@@ -354,10 +359,10 @@ router.get('/:documentId', async (req: AuthRequest, res: Response) => {
     const { documentId } = req.params;
 
     const result = await db.query(
-      `SELECT id, file_name, file_type, file_size, document_type, status,
+        `SELECT id, file_name, file_type, file_size, document_type, status,
               extracted_data, confidence_score, error_message, quality_score,
               quality_issues, upload_checklist, page_count, upload_source,
-              upload_notes, suggested_document_type,
+                upload_notes, suggested_document_type, processing_stage,
               created_at, updated_at
        FROM documents
        WHERE id = $1 AND tenant_id = $2`,
@@ -369,7 +374,13 @@ router.get('/:documentId', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    res.json({ document: result.rows[0] });
+      const doc = result.rows[0];
+      res.json({
+        document: {
+          ...doc,
+          processing_stage: doc.processing_stage || getStageForStatus(doc.status),
+        },
+      });
   } catch (error) {
     logger.error('Get document failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get document' });
