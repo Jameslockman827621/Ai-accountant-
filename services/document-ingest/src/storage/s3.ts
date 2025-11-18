@@ -1,5 +1,6 @@
 import AWS from 'aws-sdk';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { decryptBuffer, encryptBuffer, getEncryptionKey } from './encryption';
 
 const logger = createLogger('document-ingest-service');
 
@@ -12,6 +13,8 @@ const s3 = new AWS.S3({
 });
 
 const BUCKET_NAME = process.env.S3_BUCKET || 'ai-accountant-documents';
+const encryptionKey = getEncryptionKey();
+const encryptionEnabled = Boolean(encryptionKey);
 
 export async function uploadFile(
   key: string,
@@ -19,12 +22,18 @@ export async function uploadFile(
   contentType: string
 ): Promise<string> {
   try {
+    const payload =
+      encryptionEnabled && encryptionKey
+        ? encryptBuffer(buffer, encryptionKey)
+        : buffer;
+
     await s3
       .putObject({
         Bucket: BUCKET_NAME,
         Key: key,
-        Body: buffer,
+        Body: payload,
         ContentType: contentType,
+        Metadata: encryptionEnabled ? { 'x-ai-encrypted': 'true' } : undefined,
       })
       .promise();
 
@@ -45,7 +54,28 @@ export async function getFile(key: string): Promise<Buffer> {
       })
       .promise();
 
-    return Buffer.from(result.Body as string);
+    if (!result.Body) {
+      throw new Error('Object body is empty');
+    }
+
+    const rawBuffer = (() => {
+      if (Buffer.isBuffer(result.Body)) {
+        return result.Body;
+      }
+      if (typeof result.Body === 'string') {
+        return Buffer.from(result.Body);
+      }
+      if (result.Body instanceof Uint8Array) {
+        return Buffer.from(result.Body);
+      }
+      throw new Error('Unsupported object body type');
+    })();
+
+    if (encryptionEnabled && encryptionKey) {
+      return decryptBuffer(rawBuffer, encryptionKey);
+    }
+
+    return rawBuffer;
   } catch (error) {
     logger.error('S3 download failed', error instanceof Error ? error : new Error(String(error)), { key });
     throw new Error(`Failed to download file: ${error instanceof Error ? error.message : 'Unknown error'}`);

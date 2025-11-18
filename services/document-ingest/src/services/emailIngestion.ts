@@ -1,9 +1,11 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId } from '@ai-accountant/shared-types';
+import { DocumentStatus, DocumentType, TenantId } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
 import { createHash } from 'crypto';
 import { unifiedIngestionService } from '../../ingestion/src/services/unifiedIngestion';
+import { uploadFile } from '../storage/s3';
+import { publishOCRJob } from '../messaging/queue';
 
 const logger = createLogger('email-ingestion');
 
@@ -15,7 +17,7 @@ export interface EmailMessage {
   html?: string;
   attachments?: Array<{
     filename: string;
-    contentType: string;
+    contentType?: string;
     content: Buffer;
   }>;
   headers: Record<string, string>;
@@ -75,8 +77,11 @@ export class EmailIngestionService {
   /**
    * Extract documents from email attachments
    */
-  private async extractDocuments(tenantId: TenantId, email: EmailMessage): Promise<Array<{ id: string; type: string; filename: string }>> {
-    const documents: Array<{ id: string; type: string; filename: string }> = [];
+  private async extractDocuments(
+    tenantId: TenantId,
+    email: EmailMessage
+  ): Promise<Array<{ id: string; type: DocumentType | string; filename: string; storageKey: string }>> {
+    const documents: Array<{ id: string; type: DocumentType | string; filename: string; storageKey: string }> = [];
 
     if (!email.attachments || email.attachments.length === 0) {
       return documents;
@@ -91,10 +96,19 @@ export class EmailIngestionService {
 
       // Create document record
       const documentId = randomUUID();
-      const storageKey = `emails/${tenantId}/${documentId}/${attachment.filename}`;
+      const sanitizedFileName = this.sanitizeFilename(attachment.filename);
+      const storageKey = `emails/${tenantId}/${documentId}/${sanitizedFileName}`;
 
-      // Store document in S3 (in production)
-      // await s3.putObject({ Bucket: bucket, Key: storageKey, Body: attachment.content });
+      try {
+        await uploadFile(storageKey, attachment.content, attachment.contentType || 'application/octet-stream');
+      } catch (error) {
+        logger.error(
+          'Failed to store email attachment',
+          error instanceof Error ? error : new Error(String(error)),
+          { tenantId, storageKey }
+        );
+        continue;
+      }
 
       // Create document record in database
       await db.query(
@@ -106,11 +120,11 @@ export class EmailIngestionService {
           documentId,
           tenantId,
           'system', // Email ingestion
-          attachment.filename,
+            sanitizedFileName,
           attachment.contentType,
           attachment.content.length,
           storageKey,
-          'uploaded',
+            DocumentStatus.UPLOADED,
           'email',
         ]
       );
@@ -118,7 +132,8 @@ export class EmailIngestionService {
       documents.push({
         id: documentId,
         type: this.detectDocumentType(attachment.filename, attachment.contentType),
-        filename: attachment.filename,
+          filename: sanitizedFileName,
+          storageKey,
       });
     }
 
@@ -128,15 +143,51 @@ export class EmailIngestionService {
   /**
    * Process document (queue for OCR and classification)
    */
-  private async processDocument(tenantId: TenantId, doc: { id: string; type: string }, ingestionLogId: string): Promise<void> {
-    // Queue for OCR processing
-    // In production, would publish to RabbitMQ
-    logger.info('Document queued for processing', {
-      tenantId,
-      documentId: doc.id,
-      type: doc.type,
-      ingestionLogId,
-    });
+  private async processDocument(
+    tenantId: TenantId,
+    doc: { id: string; type: DocumentType | string; storageKey: string },
+    ingestionLogId: string
+  ): Promise<void> {
+    try {
+      await publishOCRJob(doc.id, doc.storageKey, {
+        tenantId,
+        source: 'email-ingestion',
+        headers: {
+          'x-trigger': 'email',
+          'x-ingestion-log-id': ingestionLogId,
+        },
+      });
+
+      await db.query(
+        `UPDATE documents
+           SET status = $1,
+               error_message = NULL,
+               updated_at = NOW()
+         WHERE id = $2`,
+        [DocumentStatus.PROCESSING, doc.id]
+      );
+
+      logger.info('Document queued for OCR processing', {
+        tenantId,
+        documentId: doc.id,
+        ingestionLogId,
+      });
+    } catch (error) {
+      logger.error(
+        'Failed to enqueue OCR job for email attachment',
+        error instanceof Error ? error : new Error(String(error)),
+        { tenantId, documentId: doc.id }
+      );
+
+      await db.query(
+        `UPDATE documents
+           SET status = $1,
+               error_message = $2,
+               updated_at = NOW()
+         WHERE id = $3`,
+        [DocumentStatus.ERROR, 'Failed to enqueue OCR job', doc.id]
+      );
+    }
   }
 
   /**
@@ -183,32 +234,38 @@ export class EmailIngestionService {
     ];
 
     const ext = filename.toLowerCase().substring(filename.lastIndexOf('.'));
+    const normalizedType = (contentType || '').toLowerCase();
     return (
       financialExtensions.includes(ext) ||
-      financialContentTypes.includes(contentType.toLowerCase())
+      financialContentTypes.includes(normalizedType)
     );
   }
 
   /**
    * Detect document type from filename
    */
-  private detectDocumentType(filename: string, contentType: string): string {
+  private detectDocumentType(filename: string, contentType: string): DocumentType {
     const filenameLower = filename.toLowerCase();
+    const normalizedType = (contentType || '').toLowerCase();
 
     if (filenameLower.includes('invoice') || filenameLower.includes('inv')) {
-      return 'invoice';
+      return DocumentType.INVOICE;
     }
     if (filenameLower.includes('receipt')) {
-      return 'receipt';
+      return DocumentType.RECEIPT;
     }
     if (filenameLower.includes('statement')) {
-      return 'statement';
+      return DocumentType.STATEMENT;
     }
     if (filenameLower.includes('payslip') || filenameLower.includes('payroll')) {
-      return 'payslip';
+      return DocumentType.PAYSLIP;
     }
 
-    return 'other';
+    if (normalizedType.includes('tax')) {
+      return DocumentType.TAX_FORM;
+    }
+
+    return DocumentType.OTHER;
   }
 
   /**
@@ -233,6 +290,16 @@ export class EmailIngestionService {
     );
 
     return result.rows.length > 0 ? result.rows[0].id : null;
+  }
+
+  private sanitizeFilename(filename: string): string {
+    const fallback = `attachment-${Date.now()}`;
+    if (!filename) {
+      return fallback;
+    }
+
+    const basename = filename.split('/').pop()?.split('\\').pop() || fallback;
+    return basename.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 }
 
