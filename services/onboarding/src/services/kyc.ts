@@ -604,29 +604,6 @@ export class KYCService {
     return 'standard';
   }
 
-  private async callExternalProvider(
-    verificationId: string,
-    provider: KYCProvider,
-    request: KYCVerificationRequest
-  ): Promise<void> {
-    // In production, this would call the actual provider API
-    // For now, simulate async processing
-    logger.info('Calling external KYC provider', {
-      verificationId,
-      provider,
-      verificationType: request.verificationType,
-    });
-
-    // Simulate async processing - in production, this would be a webhook callback
-    setTimeout(async () => {
-      // Mock approval for demo
-      await this.updateVerificationStatus(verificationId, 'approved', {
-        providerVerificationId: `ext_${randomUUID()}`,
-        providerScore: 0.92,
-        providerReason: 'Verification passed',
-      });
-    }, 2000);
-  }
 }
 
 export const kycService = new KYCService();

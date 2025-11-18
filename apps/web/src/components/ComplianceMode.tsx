@@ -19,6 +19,7 @@ interface ConversationMessage {
     result?: unknown;
     error?: string;
     actionId?: string;
+    status?: 'pending' | 'completed' | 'failed';
   }>;
   reasoningTrace?: Array<{ step: string; details: unknown }>;
 }
@@ -42,7 +43,8 @@ interface FilingExplanation {
   sourceEntries: string[];
 }
 
-export default function ComplianceMode({ token, tenantId, userId }: ComplianceModeProps) {
+export default function ComplianceMode({ token, tenantId: tenantIdProp, userId: _userId }: ComplianceModeProps) {
+    const tenantId = tenantIdProp;
   const [conversations, setConversations] = useState<Array<{ id: string; messages: ConversationMessage[] }>>([]);
   const [selectedConversation, setSelectedConversation] = useState<string | null>(null);
   const [toolActionLogs, setToolActionLogs] = useState<ToolActionLog[]>([]);
@@ -286,7 +288,7 @@ export default function ComplianceMode({ token, tenantId, userId }: ComplianceMo
               <div className="max-w-4xl mx-auto space-y-4">
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-4">
                   <div className="flex items-center gap-2">
-                    <span className="text-yellow-800 font-semibold">🔒 Immutable Transcript</div>
+                    <span className="text-yellow-800 font-semibold">🔒 Immutable Transcript</span>
                     <span className="text-xs text-yellow-600">
                       This conversation cannot be modified or deleted
                     </span>
@@ -324,7 +326,7 @@ export default function ComplianceMode({ token, tenantId, userId }: ComplianceMo
                                   </pre>
                                 </div>
                               )}
-                              {tc.result && (
+                                {tc.result !== undefined && tc.result !== null && (
                                 <div className="text-gray-600 mt-1">
                                   <div className="font-medium mb-1">Result:</div>
                                   <pre className="bg-white p-1 rounded text-xs overflow-x-auto">
@@ -356,23 +358,30 @@ export default function ComplianceMode({ token, tenantId, userId }: ComplianceMo
                         </div>
                       )}
 
-                      {message.reasoningTrace && message.reasoningTrace.length > 0 && (
-                        <div className="mt-3 border-t pt-3">
-                          <div className="text-xs font-semibold mb-2">Reasoning Trace:</div>
-                          <div className="space-y-1">
-                            {message.reasoningTrace.map((trace, idx) => (
-                              <div key={idx} className="bg-gray-50 rounded p-2 text-xs">
-                                <div className="font-medium">{trace.step}</div>
-                                {trace.details && (
-                                  <div className="text-gray-600 mt-1">
-                                    {JSON.stringify(trace.details, null, 2)}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
+              {message.reasoningTrace && message.reasoningTrace.length > 0 && (
+                <div className="mt-3 border-t pt-3">
+                  <div className="text-xs font-semibold mb-2">Reasoning Trace:</div>
+                  <div className="space-y-1">
+                    {message.reasoningTrace.map((trace, idx) => {
+                      const hasDetails = trace.details !== undefined && trace.details !== null;
+                      const renderedDetails: string | null =
+                        !hasDetails || typeof trace.details === 'string'
+                          ? (trace.details as string | null)
+                          : JSON.stringify(trace.details, null, 2);
+                      return (
+                        <div key={idx} className="bg-gray-50 rounded p-2 text-xs">
+                          <div className="font-medium">{trace.step}</div>
+                          {renderedDetails ? (
+                            <pre className="text-gray-600 mt-1 whitespace-pre-wrap break-words">
+                              {renderedDetails}
+                            </pre>
+                          ) : null}
                         </div>
-                      )}
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
                     </div>
                   </div>
                 ))}

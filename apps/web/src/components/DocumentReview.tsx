@@ -64,16 +64,18 @@ export default function DocumentReview({
   auditLogLoading = false,
   token,
 }: DocumentReviewProps) {
+  type EditableData = NonNullable<ReviewDocumentData['extractedData']>;
+
   const [isEditing, setIsEditing] = useState(false);
-  const [editedData, setEditedData] = useState<ReviewDocumentData['extractedData']>({});
+  const [editedData, setEditedData] = useState<EditableData>({});
   const [assistantOpen, setAssistantOpen] = useState(false);
 
-  useEffect(() => {
-    setIsEditing(false);
-    setEditedData(document?.extractedData || {});
-  }, [document]);
+    useEffect(() => {
+      setIsEditing(false);
+      setEditedData((document?.extractedData as EditableData) || {});
+    }, [document]);
 
-  const confidenceColor = useMemo(() => {
+    const confidenceColor = useMemo(() => {
     const score = document?.confidenceScore ?? 0;
     if (score >= 0.85) return 'green';
     if (score >= 0.7) return 'yellow';
@@ -86,17 +88,21 @@ export default function DocumentReview({
     red: 'bg-red-100 text-red-800',
   };
 
-  const suggestionColors: Record<AssistantSuggestion['severity'], string> = {
-    info: 'border-blue-200 bg-blue-50',
-    warning: 'border-yellow-200 bg-yellow-50',
-    critical: 'border-red-200 bg-red-50',
-  };
+    const suggestionColors: Record<AssistantSuggestion['severity'], string> = {
+      info: 'border-blue-200 bg-blue-50',
+      warning: 'border-yellow-200 bg-yellow-50',
+      critical: 'border-red-200 bg-red-50',
+    };
 
-  const suggestionBadgeColors: Record<AssistantSuggestion['severity'], string> = {
-    info: 'bg-blue-100 text-blue-800',
-    warning: 'bg-yellow-100 text-yellow-800',
-    critical: 'bg-red-100 text-red-800',
-  };
+    const suggestionBadgeColors: Record<AssistantSuggestion['severity'], string> = {
+      info: 'bg-blue-100 text-blue-800',
+      warning: 'bg-yellow-100 text-yellow-800',
+      critical: 'bg-red-100 text-red-800',
+    };
+
+    const assistantPrompt = document
+      ? `Provide review guidance for document ${document.id} (${document.documentType || 'unknown type'})`
+      : 'Provide assistance with pending document review tasks.';
 
   const formatCurrency = (value?: number | string | null): string => {
     if (typeof value === 'number') {
@@ -198,33 +204,43 @@ export default function DocumentReview({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Total</label>
-              <input
-                type="number"
-                step="0.01"
-                value={editedData?.total ?? ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setEditedData({
-                    ...editedData,
-                    total: value === '' ? undefined : Number(value),
-                  });
-                }}
-                className="w-full border rounded px-3 py-2"
-              />
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editedData.total ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setEditedData((prev) => {
+                      const updated = { ...prev };
+                      if (value === '') {
+                        delete updated.total;
+                      } else {
+                        updated.total = Number(value);
+                      }
+                      return updated;
+                    });
+                  }}
+                  className="w-full border rounded px-3 py-2"
+                />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Tax</label>
               <input
                 type="number"
                 step="0.01"
-                value={editedData?.tax ?? ''}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setEditedData({
-                    ...editedData,
-                    tax: value === '' ? undefined : Number(value),
-                  });
-                }}
+                  value={editedData.tax ?? ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setEditedData((prev) => {
+                      const updated = { ...prev };
+                      if (value === '') {
+                        delete updated.tax;
+                      } else {
+                        updated.tax = Number(value);
+                      }
+                      return updated;
+                    });
+                  }}
                 className="w-full border rounded px-3 py-2"
               />
             </div>
@@ -233,14 +249,14 @@ export default function DocumentReview({
             <label className="block text-sm font-medium mb-1">Invoice Number</label>
             <input
               type="text"
-              value={editedData?.invoiceNumber || ''}
-              onChange={(e) => setEditedData({ ...editedData, invoiceNumber: e.target.value })}
+                value={editedData.invoiceNumber || ''}
+                onChange={(e) => setEditedData({ ...editedData, invoiceNumber: e.target.value })}
               className="w-full border rounded px-3 py-2"
             />
           </div>
           <div className="flex space-x-2">
             <button
-              onClick={() => onEdit(editedData || {})}
+                onClick={() => onEdit(editedData)}
               disabled={actionLoading}
               className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
             >
@@ -328,14 +344,7 @@ export default function DocumentReview({
 
       {assistantOpen && (
         <div className="mt-4 border rounded-lg">
-          <AssistantChat
-            token={token}
-            initialPrompt={
-              document
-                ? `Provide review guidance for document ${document.id} (${document.documentType || 'unknown type'})`
-                : undefined
-            }
-          />
+          <AssistantChat token={token} initialPrompt={assistantPrompt} />
         </div>
       )}
 

@@ -31,7 +31,7 @@ interface CSVUploadProps {
   tenantId: string;
 }
 
-export default function CSVUpload({ token, tenantId }: CSVUploadProps) {
+export default function CSVUpload({ token, tenantId: _tenantId }: CSVUploadProps) {
   const [file, setFile] = useState<File | null>(null);
   const [schema, setSchema] = useState<DetectedSchema | null>(null);
   const [mappings, setMappings] = useState<FieldMapping[]>([]);
@@ -39,9 +39,10 @@ export default function CSVUpload({ token, tenantId }: CSVUploadProps) {
   const [uploadStatus, setUploadStatus] = useState<'idle' | 'success' | 'error'>('idle');
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    if (acceptedFiles.length === 0) return;
-
-    const selectedFile = acceptedFiles[0];
+    const [selectedFile] = acceptedFiles;
+    if (!selectedFile) {
+      return;
+    }
     setFile(selectedFile);
     setUploadStatus('idle');
 
@@ -88,9 +89,30 @@ export default function CSVUpload({ token, tenantId }: CSVUploadProps) {
   });
 
   const updateMapping = (index: number, field: Partial<FieldMapping>) => {
-    const newMappings = [...mappings];
-    newMappings[index] = { ...newMappings[index], ...field };
-    setMappings(newMappings);
+    setMappings((prev) => {
+      const updated = [...prev];
+      const current = updated[index];
+      if (!current) {
+        return prev;
+      }
+      const next: FieldMapping = {
+        csvColumn: field.csvColumn ?? current.csvColumn,
+        targetField: field.targetField ?? current.targetField,
+      };
+      if (field.transformation !== undefined) {
+        if (field.transformation === '') {
+          // Remove transformation when clearing input
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete next.transformation;
+        } else {
+          next.transformation = field.transformation;
+        }
+      } else if (current.transformation !== undefined) {
+        next.transformation = current.transformation;
+      }
+      updated[index] = next;
+      return updated;
+    });
   };
 
   const handleUpload = async () => {
@@ -115,7 +137,6 @@ export default function CSVUpload({ token, tenantId }: CSVUploadProps) {
 
       if (!response.ok) throw new Error('Upload failed');
 
-      const data = await response.json();
       setUploadStatus('success');
       
       // Reset after success

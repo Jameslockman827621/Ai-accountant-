@@ -66,7 +66,7 @@ const categories: PreferenceCategory[] = [
   },
 ];
 
-export default function NotificationPreferences({ token, tenantId }: NotificationPreferencesProps) {
+export default function NotificationPreferences({ token, tenantId: _tenantId }: NotificationPreferencesProps) {
   const [preferences, setPreferences] = useState<Record<string, NotificationPreference[]>>({});
   const [quietHoursEnabled, setQuietHoursEnabled] = useState(false);
   const [quietHoursStart, setQuietHoursStart] = useState('22:00');

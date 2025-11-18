@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('AutopilotDashboard');
 
@@ -44,7 +45,7 @@ interface AutopilotDashboardProps {
   tenantId?: string;
 }
 
-export default function AutopilotDashboard({ token, tenantId }: AutopilotDashboardProps) {
+export default function AutopilotDashboard({ token, tenantId: _tenantId }: AutopilotDashboardProps) {
   const [agenda, setAgenda] = useState<AutopilotAgenda | null>(null);
   const [tasks, setTasks] = useState<AutopilotTask[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,7 +92,8 @@ export default function AutopilotDashboard({ token, tenantId }: AutopilotDashboa
         setTasks(tasksData.tasks || []);
       }
     } catch (error) {
-      logger.error('Failed to load autopilot dashboard', error);
+      const err = toError(error, 'Failed to load autopilot dashboard');
+      logger.error('Failed to load autopilot dashboard', err);
     } finally {
       setLoading(false);
     }
@@ -114,7 +116,8 @@ export default function AutopilotDashboard({ token, tenantId }: AutopilotDashboa
         await loadDashboard();
       }
     } catch (error) {
-      logger.error('Failed to generate agenda', error);
+      const err = toError(error, 'Failed to generate agenda');
+      logger.error('Failed to generate agenda', err);
       alert('Failed to generate agenda');
     }
   };
@@ -268,9 +271,10 @@ function PriorityCard({ priority, count }: { priority: string; count: number }) 
     medium: 'bg-yellow-100 text-yellow-800',
     low: 'bg-gray-100 text-gray-800',
   };
+  const variant = colors[priority] ?? 'bg-gray-100 text-gray-800';
 
   return (
-    <div className="p-4 bg-gray-50 rounded-lg">
+    <div className={`p-4 rounded-lg ${variant}`}>
       <p className="text-sm font-medium text-gray-600 mb-1 capitalize">{priority}</p>
       <p className="text-2xl font-bold">{count}</p>
     </div>
@@ -353,7 +357,6 @@ function TaskDetailPanel({
   onClose: () => void;
 }) {
   const [executing, setExecuting] = useState(false);
-  const [simulation, setSimulation] = useState(false);
 
   const executeTask = async (simulate: boolean) => {
     setExecuting(true);
@@ -380,7 +383,8 @@ function TaskDetailPanel({
         onClose();
       }
     } catch (error) {
-      logger.error('Task execution failed', error);
+      const err = toError(error, 'Task execution failed');
+      logger.error('Task execution failed', err);
       alert('Failed to execute task');
     } finally {
       setExecuting(false);

@@ -1,6 +1,7 @@
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { connectorService } from './connectors';
+import type { ConnectorProvider } from './connectors';
 import { getConnectorCatalog } from './connectorCatalog';
 import { db } from '@ai-accountant/database';
 
@@ -36,7 +37,6 @@ export class ConnectorProvisioningWorker {
       const intent = intentResult.rows[0];
       const jurisdiction = intent.primary_jurisdiction;
       const entityType = intent.entity_type;
-      const industry = intent.industry;
 
       // Get recommended connectors from catalog
       const catalog = await getConnectorCatalog(jurisdiction, entityType);
@@ -51,9 +51,10 @@ export class ConnectorProvisioningWorker {
       const existingProviders = new Set(existingConnectors.map(c => c.provider));
 
       // Suggest connectors that aren't already connected
-      const suggestedConnectors = prioritizedConnectors.filter(
-        c => !existingProviders.has(c.provider)
-      );
+      const suggestedConnectors = prioritizedConnectors.filter(c => {
+        const provider = c.provider as ConnectorProvider;
+        return !existingProviders.has(provider);
+      });
 
       logger.info('Connector suggestions generated', {
         tenantId,

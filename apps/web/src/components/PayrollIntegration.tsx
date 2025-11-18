@@ -23,7 +23,7 @@ interface PayrollIntegrationProps {
   tenantId: string;
 }
 
-export default function PayrollIntegration({ token, tenantId }: PayrollIntegrationProps) {
+export default function PayrollIntegration({ token, tenantId: _tenantId }: PayrollIntegrationProps) {
   const [connectors, setConnectors] = useState<PayrollConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);

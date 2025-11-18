@@ -61,11 +61,14 @@ export default function FilingExplainability({ token, filingId }: FilingExplaina
     );
   }
 
-  const groupedBySection = explanations.reduce((acc, exp) => {
-    if (!acc[exp.section]) acc[exp.section] = [];
-    acc[exp.section].push(exp);
-    return acc;
-  }, {} as Record<string, FilingExplanation[]>);
+  const groupedBySection: Record<string, FilingExplanation[]> = {};
+  for (const exp of explanations) {
+    const sectionKey = exp.section;
+    if (!groupedBySection[sectionKey]) {
+      groupedBySection[sectionKey] = [];
+    }
+    groupedBySection[sectionKey]!.push(exp);
+  }
 
   return (
     <div className="space-y-6">
@@ -147,7 +150,7 @@ export default function FilingExplainability({ token, filingId }: FilingExplaina
                         )}
 
                         {/* Rules Applied */}
-                        {explanation.ruleApplied && explanation.ruleApplied.rules.length > 0 && (
+                          {explanation.ruleApplied?.rules && explanation.ruleApplied.rules.length > 0 && (
                           <div>
                             <h4 className="text-sm font-medium text-gray-700 mb-2">Rules Applied</h4>
                             <div className="flex flex-wrap gap-2">

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('AmendmentWorkflow');
 
@@ -19,6 +20,12 @@ interface Amendment {
   createdAt: string;
 }
 
+type AmendmentChange = {
+  field: string;
+  oldValue: string;
+  newValue: string;
+};
+
 interface AmendmentWorkflowProps {
   filingId: string;
   token: string;
@@ -33,9 +40,12 @@ export default function AmendmentWorkflow({
   const [amendments, setAmendments] = useState<Amendment[]>([]);
   const [loading, setLoading] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    reason: string;
+    changes: AmendmentChange[];
+  }>({
     reason: '',
-    changes: [] as Array<{ field: string; oldValue: string; newValue: string }>,
+    changes: [],
   });
 
   useEffect(() => {
@@ -56,7 +66,8 @@ export default function AmendmentWorkflow({
       const data = await response.json();
       setAmendments(data.amendments || []);
     } catch (error) {
-      logger.error('Failed to load amendments', error);
+      const err = toError(error, 'Failed to load amendments');
+      logger.error('Failed to load amendments', err);
     } finally {
       setLoading(false);
     }
@@ -88,7 +99,8 @@ export default function AmendmentWorkflow({
       setShowCreateForm(false);
       setFormData({ reason: '', changes: [] });
     } catch (error) {
-      logger.error('Failed to create amendment', error);
+      const err = toError(error, 'Failed to create amendment');
+      logger.error('Failed to create amendment', err);
       alert('Failed to create amendment');
     } finally {
       setLoading(false);
@@ -114,7 +126,8 @@ export default function AmendmentWorkflow({
       }
       await loadAmendments();
     } catch (error) {
-      logger.error('Failed to submit amendment', error);
+      const err = toError(error, 'Failed to submit amendment');
+      logger.error('Failed to submit amendment', err);
       alert('Failed to submit amendment');
     } finally {
       setLoading(false);
@@ -135,23 +148,29 @@ export default function AmendmentWorkflow({
   };
 
   const addChange = () => {
-    setFormData({
-      ...formData,
-      changes: [...formData.changes, { field: '', oldValue: '', newValue: '' }],
-    });
+    setFormData((prev) => ({
+      ...prev,
+      changes: [...prev.changes, { field: '', oldValue: '', newValue: '' }],
+    }));
   };
 
-  const updateChange = (index: number, field: string, value: string) => {
-    const newChanges = [...formData.changes];
-    newChanges[index] = { ...newChanges[index], [field]: value };
-    setFormData({ ...formData, changes: newChanges });
+  const updateChange = (index: number, key: keyof AmendmentChange, value: string) => {
+    setFormData((prev) => {
+      const updatedChanges = [...prev.changes];
+      const current = updatedChanges[index];
+      if (!current) {
+        return prev;
+      }
+      updatedChanges[index] = { ...current, [key]: value };
+      return { ...prev, changes: updatedChanges };
+    });
   };
 
   const removeChange = (index: number) => {
-    setFormData({
-      ...formData,
-      changes: formData.changes.filter((_, i) => i !== index),
-    });
+    setFormData((prev) => ({
+      ...prev,
+      changes: prev.changes.filter((_, i) => i !== index),
+    }));
   };
 
   return (

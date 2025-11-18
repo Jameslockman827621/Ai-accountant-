@@ -25,7 +25,6 @@ import ReviewQueue from './ReviewQueue';
 import ErrorRecoveryCenter from './ErrorRecoveryCenter';
 import BankConnectionHealth from './BankConnectionHealth';
 import ReconciliationReport from './ReconciliationReport';
-import FilingReviewPanel from './FilingReviewPanel';
 import RulepackConsole from './RulepackConsole';
 import FilingReadinessPanel from './FilingReadinessPanel';
 import SubmissionWorkflowPanel from './SubmissionWorkflowPanel';
@@ -246,16 +245,15 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
               />
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <StatCard title="Revenue" value={stats.revenue} trend="up" color="green" />
-            <StatCard title="Expenses" value={stats.expenses} trend="down" color="red" />
-            <StatCard
-              title="Net Profit"
-              value={stats.profit}
-              trend={stats.profit >= 0 ? 'up' : 'down'}
-              color={stats.profit >= 0 ? 'green' : 'red'}
-            />
-            <StatCard title="VAT Due" value={stats.vat.net} trend="neutral" color="blue">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <StatCard title="Revenue" value={stats.revenue} color="green" />
+                <StatCard title="Expenses" value={stats.expenses} color="red" />
+                <StatCard
+                  title="Net Profit"
+                  value={stats.profit}
+                  color={stats.profit >= 0 ? 'green' : 'red'}
+                />
+                <StatCard title="VAT Due" value={stats.vat.net} color="blue">
               <p className="text-xs text-gray-500">
                 Output £{stats.vat.output.toLocaleString('en-GB', { minimumFractionDigits: 2 })}
               </p>
@@ -339,13 +337,11 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
 function StatCard({
   title,
   value,
-  trend,
   color,
   children,
 }: {
   title: string;
   value: number;
-  trend: 'up' | 'down' | 'neutral';
   color: 'green' | 'red' | 'blue';
   children?: React.ReactNode;
 }) {

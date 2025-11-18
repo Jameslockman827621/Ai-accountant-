@@ -1,5 +1,4 @@
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId, UserId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('truelayer-oauth');
 
@@ -32,6 +31,23 @@ export interface TrueLayerAccount {
     display_name: string;
     provider_id: string;
   };
+}
+
+interface TrueLayerErrorResponse {
+  error?: string;
+  error_description?: string;
+}
+
+interface TrueLayerAccountsResponse {
+  results?: TrueLayerAccount[];
+}
+
+interface TrueLayerTransactionsResponse {
+  results?: Array<Record<string, unknown>>;
+}
+
+function formatTrueLayerError(error: TrueLayerErrorResponse): string {
+  return error.error_description || error.error || 'Unknown error';
 }
 
 export class TrueLayerOAuthService {
@@ -87,15 +103,15 @@ export class TrueLayerOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`TrueLayer API error: ${error.error || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as TrueLayerErrorResponse;
+          throw new Error(`TrueLayer API error: ${formatTrueLayerError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      logger.info('TrueLayer token exchanged', { scope: data.scope });
+        const data = (await response.json()) as TrueLayerAuthResponse;
+        logger.info('TrueLayer token exchanged', { scope: data.scope });
 
-      return data;
+        return data;
     } catch (error) {
       logger.error('Failed to exchange TrueLayer code', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -123,15 +139,15 @@ export class TrueLayerOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`TrueLayer API error: ${error.error || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as TrueLayerErrorResponse;
+          throw new Error(`TrueLayer API error: ${formatTrueLayerError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      logger.info('TrueLayer token refreshed');
+        const data = (await response.json()) as TrueLayerAuthResponse;
+        logger.info('TrueLayer token refreshed');
 
-      return data;
+        return data;
     } catch (error) {
       logger.error('Failed to refresh TrueLayer token', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -149,13 +165,13 @@ export class TrueLayerOAuthService {
         },
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`TrueLayer API error: ${error.error || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as TrueLayerErrorResponse;
+          throw new Error(`TrueLayer API error: ${formatTrueLayerError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      return data.results || [];
+        const data = (await response.json()) as TrueLayerAccountsResponse;
+        return data.results || [];
     } catch (error) {
       logger.error('Failed to get TrueLayer accounts', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -185,13 +201,13 @@ export class TrueLayerOAuthService {
         }
       );
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`TrueLayer API error: ${error.error || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as TrueLayerErrorResponse;
+          throw new Error(`TrueLayer API error: ${formatTrueLayerError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      return data.results || [];
+        const data = (await response.json()) as TrueLayerTransactionsResponse;
+        return data.results || [];
     } catch (error) {
       logger.error('Failed to get TrueLayer transactions', error instanceof Error ? error : new Error(String(error)));
       throw error;

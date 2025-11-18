@@ -17,10 +17,8 @@ interface Message {
   clarificationQuestions?: string[];
 }
 
-const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
-
 export default function AICopilot({
-  token,
+  token: _token,
   question,
   context,
   onSuggestion,
@@ -56,14 +54,17 @@ export default function AICopilot({
       const assistantMessage: Message = {
         role: 'assistant',
         content: response.answer,
-        suggestions: response.suggestions,
-        clarificationQuestions: response.clarificationQuestions,
+        ...(response.suggestions ? { suggestions: response.suggestions } : {}),
+        ...(response.clarificationQuestions ? { clarificationQuestions: response.clarificationQuestions } : {}),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
 
       if (response.suggestions && response.suggestions.length > 0) {
-        onSuggestion?.(response.suggestions[0]);
+        const [firstSuggestion] = response.suggestions;
+        if (firstSuggestion) {
+          onSuggestion?.(firstSuggestion);
+        }
       }
 
       if (response.clarificationQuestions && response.clarificationQuestions.length > 0) {
@@ -83,7 +84,7 @@ export default function AICopilot({
 
   const simulateAIResponse = async (
     q: string,
-    ctx?: Record<string, unknown>
+    _ctx?: Record<string, unknown>
   ): Promise<{
     answer: string;
     suggestions?: string[];

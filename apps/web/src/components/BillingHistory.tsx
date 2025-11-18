@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('BillingHistory');
 
@@ -44,7 +45,8 @@ export default function BillingHistory() {
       const data = await response.json();
       setInvoices(data.invoices || []);
     } catch (error) {
-      logger.error('Failed to load invoices', error);
+      const err = toError(error, 'Failed to load invoices');
+      logger.error('Failed to load invoices', err);
     } finally {
       setLoading(false);
     }
@@ -71,7 +73,8 @@ export default function BillingHistory() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
-      logger.error('Failed to download invoice', error);
+      const err = toError(error, 'Failed to download invoice');
+      logger.error('Failed to download invoice', err);
       alert('Failed to download invoice');
     }
   };

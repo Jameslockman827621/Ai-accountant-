@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Brain, TrendingDown, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { Brain, AlertTriangle } from 'lucide-react';
 
 interface Model {
   id: string;

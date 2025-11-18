@@ -13,7 +13,7 @@ export interface CircuitBreakerOptions {
 export class CircuitBreaker {
   private state: CircuitState = 'closed';
   private failures: number = 0;
-  private lastFailureTime?: Date;
+  private lastFailureTime: Date | undefined;
   private successCount: number = 0;
   private options: CircuitBreakerOptions;
 

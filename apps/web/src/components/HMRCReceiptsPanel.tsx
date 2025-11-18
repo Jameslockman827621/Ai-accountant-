@@ -51,18 +51,25 @@ export default function HMRCReceiptsPanel({ token }: HMRCReceiptsPanelProps) {
           throw new Error(`Receipts request failed: ${response.status}`);
         }
 
-        const data = (await response.json()) as ReceiptsResponse;
+          const data = (await response.json()) as ReceiptsResponse;
           setReceipts(
-            data.receipts.map((receipt) => ({
-              id: receipt.id,
-              filingId: receipt.filingId,
-              submissionId: receipt.submissionId,
-              filingType: receipt.filingType,
-              filingStatus: receipt.filingStatus,
-              receivedAt: receipt.receivedAt,
-              hmrcReference: receipt.hmrcReference,
-              hasArtifact: receipt.hasArtifact,
-            }))
+            data.receipts.map((receipt) => {
+              const normalized: FilingReceipt = {
+                id: receipt.id,
+                filingId: receipt.filingId,
+                submissionId: receipt.submissionId,
+                filingType: receipt.filingType,
+                filingStatus: receipt.filingStatus,
+                receivedAt: receipt.receivedAt,
+              };
+              if (receipt.hmrcReference) {
+                normalized.hmrcReference = receipt.hmrcReference;
+              }
+              if (receipt.hasArtifact !== undefined) {
+                normalized.hasArtifact = receipt.hasArtifact;
+              }
+              return normalized;
+            })
           );
         setError(null);
       } catch (err) {

@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 
 export default function VerifyEmailPage() {
   const searchParams = useSearchParams();
-  const token = searchParams.get('token');
+  const token = searchParams?.get('token') ?? null;
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState<string>('');
 

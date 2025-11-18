@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('BackupStatus');
 
@@ -39,7 +40,8 @@ export default function BackupStatus() {
       const data = await response.json();
       setBackups(data.backups || []);
     } catch (error) {
-      logger.error('Failed to load backups', error);
+      const err = toError(error, 'Failed to load backups');
+      logger.error('Failed to load backups', err);
     } finally {
       setLoading(false);
     }
@@ -63,7 +65,8 @@ export default function BackupStatus() {
       alert('Backup started. You will be notified when it completes.');
       await loadBackups();
     } catch (error) {
-      logger.error('Failed to create backup', error);
+      const err = toError(error, 'Failed to create backup');
+      logger.error('Failed to create backup', err);
       alert('Failed to create backup');
     } finally {
       setCreating(false);
@@ -91,7 +94,8 @@ export default function BackupStatus() {
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (error) {
-      logger.error('Failed to download backup', error);
+      const err = toError(error, 'Failed to download backup');
+      logger.error('Failed to download backup', err);
       alert('Failed to download backup');
     }
   };

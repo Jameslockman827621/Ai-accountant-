@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('BenchmarkComparison');
 
@@ -23,7 +24,7 @@ interface BenchmarkComparisonProps {
 
 export default function BenchmarkComparison({
   token,
-  tenantId,
+  tenantId: _tenantId,
   industry,
   period = '2024',
 }: BenchmarkComparisonProps) {
@@ -51,7 +52,8 @@ export default function BenchmarkComparison({
       const data = await response.json();
       setComparisons(data.comparisons || []);
     } catch (error) {
-      logger.error('Failed to load benchmarks', error);
+      const err = toError(error, 'Failed to load benchmarks');
+      logger.error('Failed to load benchmarks', err);
     } finally {
       setLoading(false);
     }

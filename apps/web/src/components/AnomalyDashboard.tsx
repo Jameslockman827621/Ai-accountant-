@@ -3,11 +3,10 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   ExclamationTriangleIcon,
-  ChartBarIcon,
   ArrowTrendingUpIcon,
-  ArrowTrendingDownIcon,
   DocumentMagnifyingGlassIcon,
 } from '@heroicons/react/24/outline';
+import { toError, toErrorMessage } from '@/utils/error';
 
 interface Anomaly {
   id: string;
@@ -68,8 +67,8 @@ export default function AnomalyDashboard({
     return () => clearInterval(interval);
   }, [startDate, endDate]);
 
-  async function fetchData() {
-    try {
+    async function fetchData() {
+      try {
       setLoading(true);
       setError(null);
 
@@ -94,9 +93,10 @@ export default function AnomalyDashboard({
 
       setAnomalies(anomaliesData.anomalies || []);
       setVarianceAlerts(varianceData.alerts || []);
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : 'Failed to load anomaly data');
+      } catch (err) {
+        const normalizedError = toError(err, 'Failed to load anomaly data');
+        console.error(normalizedError);
+        setError(toErrorMessage(err, 'Failed to load anomaly data'));
     } finally {
       setLoading(false);
     }

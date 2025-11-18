@@ -1,5 +1,4 @@
 import { createLogger } from '@ai-accountant/shared-utils';
-import { TenantId, UserId } from '@ai-accountant/shared-types';
 
 const logger = createLogger('hmrc-oauth');
 
@@ -85,15 +84,15 @@ export class HMRCOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`HMRC API error: ${error.error || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as HMRCErrorResponse;
+          throw new Error(`HMRC API error: ${formatHMRCError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      logger.info('HMRC token exchanged', { scope: data.scope });
+        const data = (await response.json()) as HMRCAuthResponse;
+        logger.info('HMRC token exchanged', { scope: data.scope });
 
-      return data;
+        return data;
     } catch (error) {
       logger.error('Failed to exchange HMRC code', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -122,15 +121,15 @@ export class HMRCOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`HMRC API error: ${error.error || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as HMRCErrorResponse;
+          throw new Error(`HMRC API error: ${formatHMRCError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      logger.info('HMRC token refreshed');
+        const data = (await response.json()) as HMRCAuthResponse;
+        logger.info('HMRC token refreshed');
 
-      return data;
+        return data;
     } catch (error) {
       logger.error('Failed to refresh HMRC token', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -152,13 +151,13 @@ export class HMRCOAuthService {
         }
       );
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`HMRC API error: ${error.message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as HMRCErrorResponse;
+          throw new Error(`HMRC API error: ${formatHMRCError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      return data.obligations || [];
+        const data = (await response.json()) as { obligations?: unknown[] };
+        return data.obligations || [];
     } catch (error) {
       logger.error('Failed to get HMRC VAT obligations', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -180,13 +179,13 @@ export class HMRCOAuthService {
         }
       );
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`HMRC API error: ${error.message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as HMRCErrorResponse;
+          throw new Error(`HMRC API error: ${formatHMRCError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      return data;
+        const data = (await response.json()) as HMRCVATReturn;
+        return data;
     } catch (error) {
       logger.error('Failed to get HMRC VAT return', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -215,20 +214,30 @@ export class HMRCOAuthService {
         }
       );
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`HMRC API error: ${error.message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as HMRCErrorResponse;
+          throw new Error(`HMRC API error: ${formatHMRCError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      logger.info('HMRC VAT return submitted', { vrn, formBundleNumber: data.formBundleNumber });
+        const data = (await response.json()) as { processingDate: string; paymentIndicator?: string; formBundleNumber: string };
+        logger.info('HMRC VAT return submitted', { vrn, formBundleNumber: data.formBundleNumber });
 
-      return data;
+        return data;
     } catch (error) {
       logger.error('Failed to submit HMRC VAT return', error instanceof Error ? error : new Error(String(error)));
       throw error;
     }
   }
+}
+
+interface HMRCErrorResponse {
+  error?: string;
+  error_description?: string;
+  message?: string;
+}
+
+function formatHMRCError(error: HMRCErrorResponse): string {
+  return error.error_description || error.error || error.message || 'Unknown error';
 }
 
 export function createHMRCService(config: HMRCConfig): HMRCOAuthService {

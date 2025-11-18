@@ -1,7 +1,3 @@
-import { createLogger } from '@ai-accountant/shared-utils';
-
-const logger = createLogger('error-handling-service');
-
 export interface UserFriendlyError {
   originalError: string;
   userMessage: string;

@@ -46,16 +46,21 @@ export default function SubscriptionManagement({ token }: SubscriptionManagement
       setLoading(true);
       setError(null);
 
-      const [subscriptionRes, usageRes] = await Promise.all([
-        fetch(`${API_BASE}/api/billing/subscription`, {
+        const subscriptionRequest: RequestInit = {
           headers: { Authorization: `Bearer ${token}` },
-          signal,
-        }),
-        fetch(`${API_BASE}/api/billing/usage`, {
+        };
+        const usageRequest: RequestInit = {
           headers: { Authorization: `Bearer ${token}` },
-          signal,
-        }),
-      ]);
+        };
+        if (signal) {
+          subscriptionRequest.signal = signal;
+          usageRequest.signal = signal;
+        }
+
+        const [subscriptionRes, usageRes] = await Promise.all([
+          fetch(`${API_BASE}/api/billing/subscription`, subscriptionRequest),
+          fetch(`${API_BASE}/api/billing/usage`, usageRequest),
+        ]);
 
       if (!subscriptionRes.ok) {
         throw new Error(`Subscription request failed (${subscriptionRes.status})`);
@@ -245,31 +250,36 @@ export default function SubscriptionManagement({ token }: SubscriptionManagement
       </div>
 
       {usage && (
-        <div>
-          <h3 className="font-semibold mb-3">Usage ({usage.period})</h3>
-          <div className="space-y-4">
-            <UsageBar
-              label="Documents processed"
-              value={usage.documents_processed}
-              limit={limits.documents}
-            />
-            <UsageBar
-              label="Storage used"
-              value={usage.storage_used}
-              limit={limits.storage}
-              formatter={(value) => `${(value / 1_000_000).toFixed(1)} MB`}
-            />
+        <>
+          <div>
+            <h3 className="font-semibold mb-3">Usage ({usage.period})</h3>
+            <div className="space-y-4">
+              <UsageBar
+                label="Documents processed"
+                value={usage.documentsProcessed}
+                limit={limits.documents}
+              />
+              <UsageBar
+                label="Storage used"
+                value={usage.storageUsed}
+                limit={limits.storage}
+                formatter={(value) => `${(value / 1_000_000).toFixed(1)} MB`}
+              />
+            </div>
           </div>
-        </div>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <UsageStat label="OCR requests" value={usage.ocrRequests} />
+              <UsageStat label="LLM queries" value={usage.llmQueries} />
+              <UsageStat label="Filings submitted" value={usage.filingsSubmitted} />
+              <UsageStat label="Documents processed" value={usage.documentsProcessed} />
+            </div>
+          </div>
+        </>
       )}
 
       <div className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <UsageStat label="OCR requests" value={usage.ocrRequests} />
-          <UsageStat label="LLM queries" value={usage.llmQueries} />
-          <UsageStat label="Filings submitted" value={usage.filingsSubmitted} />
-          <UsageStat label="Documents processed" value={usage.documentsProcessed} />
-        </div>
         <div className="flex flex-wrap gap-2">
           {(['freelancer', 'sme', 'accountant', 'enterprise'] as Tier[]).map((tier) => (
             <button

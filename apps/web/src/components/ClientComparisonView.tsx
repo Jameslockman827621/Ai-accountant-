@@ -90,10 +90,6 @@ export default function ClientComparisonView({
     return Math.max(...metrics.map(m => m[field] as number), 0);
   };
 
-  const getMin = (field: keyof ClientMetric): number => {
-    return Math.min(...metrics.map(m => m[field] as number), 0);
-  };
-
   if (selectedClients.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow p-6">

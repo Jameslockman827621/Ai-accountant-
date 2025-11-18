@@ -45,7 +45,7 @@ interface TaskBoardProps {
   clientTenantId?: string; // For accountant view
 }
 
-export default function TaskBoard({ token, tenantId, clientTenantId }: TaskBoardProps) {
+export default function TaskBoard({ token, tenantId: _tenantId, clientTenantId }: TaskBoardProps) {
   const [tasks, setTasks] = useState<AutopilotTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<{
@@ -69,7 +69,19 @@ export default function TaskBoard({ token, tenantId, clientTenantId }: TaskBoard
     }
   }, [selectedTask]);
 
-  const loadTasks = async () => {
+    const updateFilter = (key: keyof typeof filter, value?: string) => {
+      setFilter((prev) => {
+        const next = { ...prev };
+        if (value === undefined) {
+          delete next[key];
+        } else {
+          next[key] = value;
+        }
+        return next;
+      });
+    };
+
+    const loadTasks = async () => {
     try {
       const params = new URLSearchParams();
       if (filter.status) params.append('status', filter.status);
@@ -89,11 +101,11 @@ export default function TaskBoard({ token, tenantId, clientTenantId }: TaskBoard
       let tasksList = data.tasks || [];
 
       // Filter by client if in accountant view
-      if (clientTenantId) {
-        tasksList = tasksList.filter((t: AutopilotTask) => {
-          // Would need tenant_id in task - for now show all
-          return true;
-        });
+        if (clientTenantId) {
+          tasksList = tasksList.filter(() => {
+            // Would need tenant_id in task - for now show all
+            return true;
+          });
       }
 
       setTasks(tasksList);
@@ -167,27 +179,31 @@ export default function TaskBoard({ token, tenantId, clientTenantId }: TaskBoard
           <p className="text-gray-600 mt-1">Manage and track autopilot tasks</p>
         </div>
         <div className="flex items-center space-x-2">
-          <select
-            value={filter.status || 'all'}
-            onChange={(e) => setFilter({ ...filter, status: e.target.value === 'all' ? undefined : e.target.value })}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-          >
-            <option value="all">All Status</option>
-            <option value="pending">Pending</option>
-            <option value="in_progress">In Progress</option>
-            <option value="completed">Completed</option>
-          </select>
-          <select
-            value={filter.priority || 'all'}
-            onChange={(e) => setFilter({ ...filter, priority: e.target.value === 'all' ? undefined : e.target.value })}
-            className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
-          >
-            <option value="all">All Priorities</option>
-            <option value="urgent">Urgent</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
+            <select
+              value={filter.status || 'all'}
+              onChange={(e) =>
+                updateFilter('status', e.target.value === 'all' ? undefined : e.target.value)
+              }
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            >
+              <option value="all">All Status</option>
+              <option value="pending">Pending</option>
+              <option value="in_progress">In Progress</option>
+              <option value="completed">Completed</option>
+            </select>
+            <select
+              value={filter.priority || 'all'}
+              onChange={(e) =>
+                updateFilter('priority', e.target.value === 'all' ? undefined : e.target.value)
+              }
+              className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+            >
+              <option value="all">All Priorities</option>
+              <option value="urgent">Urgent</option>
+              <option value="high">High</option>
+              <option value="medium">Medium</option>
+              <option value="low">Low</option>
+            </select>
         </div>
       </div>
 

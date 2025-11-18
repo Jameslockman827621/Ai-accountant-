@@ -45,14 +45,14 @@ export default function ExtractionEditor({ documentId, onSave }: ExtractionEdito
       const extracted = data.document?.extracted_data || {};
       const confidence = data.document?.confidence_score || 0;
 
-      const fieldList: Field[] = [
-        { name: 'vendor', label: 'Vendor', value: extracted.vendor, confidence, type: 'text', required: true },
-        { name: 'date', label: 'Date', value: extracted.date, confidence, type: 'date', required: true },
-        { name: 'total', label: 'Total Amount', value: extracted.total, confidence, type: 'currency', required: true },
-        { name: 'tax', label: 'Tax Amount', value: extracted.tax, confidence, type: 'currency', required: false },
-        { name: 'description', label: 'Description', value: extracted.description, confidence, type: 'text', required: false },
-        { name: 'invoice_number', label: 'Invoice Number', value: extracted.invoice_number, confidence, type: 'text', required: false },
-      ].filter(f => f.value !== undefined && f.value !== null);
+        const fieldList: Field[] = [
+          { name: 'vendor', label: 'Vendor', value: extracted.vendor, confidence, type: 'text' as const, required: true },
+          { name: 'date', label: 'Date', value: extracted.date, confidence, type: 'date' as const, required: true },
+          { name: 'total', label: 'Total Amount', value: extracted.total, confidence, type: 'currency' as const, required: true },
+          { name: 'tax', label: 'Tax Amount', value: extracted.tax, confidence, type: 'currency' as const, required: false },
+          { name: 'description', label: 'Description', value: extracted.description, confidence, type: 'text' as const, required: false },
+          { name: 'invoice_number', label: 'Invoice Number', value: extracted.invoice_number, confidence, type: 'text' as const, required: false },
+        ].filter(f => f.value !== undefined && f.value !== null);
 
       setFields(fieldList);
     } catch (error) {

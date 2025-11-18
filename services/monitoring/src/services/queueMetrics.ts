@@ -121,9 +121,11 @@ export function recordQueueEvent(event: QueueEvent): void {
       stats.failed += 1;
       const errorMessage =
         (typeof event.metadata?.error === 'string' && event.metadata.error) || 'Queue job failed';
+      const documentId =
+        typeof event.metadata?.documentId === 'string' ? event.metadata.documentId : undefined;
       stats.lastError = {
         message: errorMessage,
-        documentId: event.metadata?.documentId as string | undefined,
+        ...(documentId ? { documentId } : {}),
         at: timestamp,
         service: event.serviceName,
       };
@@ -133,9 +135,11 @@ export function recordQueueEvent(event: QueueEvent): void {
       stats.dlqDepth += 1;
       const errorMessage =
         (typeof event.metadata?.error === 'string' && event.metadata.error) || 'Job moved to DLQ';
+      const documentId =
+        typeof event.metadata?.documentId === 'string' ? event.metadata.documentId : undefined;
       stats.lastError = {
         message: errorMessage,
-        documentId: event.metadata?.documentId as string | undefined,
+        ...(documentId ? { documentId } : {}),
         at: timestamp,
         service: event.serviceName,
       };

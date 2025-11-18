@@ -32,7 +32,7 @@ interface DailyDigestProps {
   tenantId: string;
 }
 
-export default function DailyDigest({ token, tenantId }: DailyDigestProps) {
+export default function DailyDigest({ token, tenantId: _tenantId }: DailyDigestProps) {
   const [digest, setDigest] = useState<DailyDigest | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -61,8 +61,11 @@ export default function DailyDigest({ token, tenantId }: DailyDigestProps) {
           priority: 'medium',
         }));
 
+        const todayIso = new Date().toISOString();
+        const [datePart] = todayIso.split('T');
+        const digestDate = datePart ?? todayIso;
         setDigest({
-          date: new Date().toISOString().split('T')[0],
+          date: digestDate,
           items,
           summary: {
             totalItems: items.length,

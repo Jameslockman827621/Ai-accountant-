@@ -1,7 +1,7 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
-import { retryHandler } from '@ai-accountant/resilience/circuitBreaker';
+import { retryHandler } from '@ai-accountant/resilience-service/circuitBreaker';
 
 const logger = createLogger('error-handling-service');
 
@@ -42,11 +42,10 @@ export async function recoverError(
     [errorId, tenantId]
   );
 
-  if (error.rows.length === 0) {
+  const errorData = error.rows[0];
+  if (!errorData) {
     throw new Error('Error record not found');
   }
-
-  const errorData = error.rows[0];
   const strategy = await getRecoveryStrategy(tenantId, errorData.error_type, errorData.entity_type);
 
   if (!strategy) {
@@ -110,8 +109,8 @@ async function getRecoveryStrategy(
     [tenantId, errorType, entityType]
   );
 
-  if (result.rows.length === 0) {
-    // Default strategy
+  const row = result.rows[0];
+  if (!row) {
     return {
       id: 'default',
       errorType,
@@ -122,20 +121,24 @@ async function getRecoveryStrategy(
     };
   }
 
-  const row = result.rows[0];
-  return {
+  const recoveryStrategy: RecoveryStrategy = {
     id: row.id,
     errorType: row.error_type,
     entityType: row.entity_type,
     strategy: row.strategy as RecoveryStrategy['strategy'],
     maxRetries: row.max_retries,
     retryDelay: row.retry_delay,
-    transformFunction: row.transform_function || undefined,
   };
+
+  if (row.transform_function) {
+    recoveryStrategy.transformFunction = row.transform_function;
+  }
+
+  return recoveryStrategy;
 }
 
 async function executeAutoRetry(
-  tenantId: TenantId,
+  _tenantId: TenantId,
   errorId: string,
   errorData: { entity_type: string; entity_id: string; error_message: string; retry_count: number },
   strategy: RecoveryStrategy
@@ -206,7 +209,7 @@ async function executeAutoRetry(
 }
 
 async function executeTransform(
-  tenantId: TenantId,
+  _tenantId: TenantId,
   errorId: string,
   errorData: { entity_id: string },
   strategy: RecoveryStrategy
@@ -251,9 +254,9 @@ async function executeTransform(
 }
 
 async function executeSkip(
-  tenantId: TenantId,
+  _tenantId: TenantId,
   errorId: string,
-  errorData: { entity_id: string }
+  _errorData: { entity_id: string }
 ): Promise<RecoveryResult> {
   // Mark error as skipped
   await db.query(

@@ -156,7 +156,7 @@ export class TutorialEngine {
   /**
    * Get available tutorials for a user
    */
-  getAvailableTutorials(tenantId: TenantId, userId: UserId): Tutorial[] {
+  getAvailableTutorials(_tenantId: TenantId, _userId: UserId): Tutorial[] {
     return Array.from(this.tutorials.values());
   }
 

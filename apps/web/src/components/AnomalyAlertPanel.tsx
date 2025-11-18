@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('AnomalyAlertPanel');
 
@@ -48,7 +49,8 @@ export default function AnomalyAlertPanel({ token, onAnomalyClick }: AnomalyAler
       const data = await response.json();
       setAnomalies(data.anomalies || []);
     } catch (error) {
-      logger.error('Failed to load anomalies', error);
+      const err = toError(error, 'Failed to load anomalies');
+      logger.error('Failed to load anomalies', err);
     } finally {
       setLoading(false);
     }
@@ -67,7 +69,8 @@ export default function AnomalyAlertPanel({ token, onAnomalyClick }: AnomalyAler
 
       setAnomalies(prev => prev.map(a => a.id === anomalyId ? { ...a, resolved: true } : a));
     } catch (error) {
-      logger.error('Failed to resolve anomaly', error);
+      const err = toError(error, 'Failed to resolve anomaly');
+      logger.error('Failed to resolve anomaly', err);
       alert('Failed to mark anomaly as resolved');
     }
   };

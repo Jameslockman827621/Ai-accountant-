@@ -88,15 +88,21 @@ export default function DocumentReviewPanel({ token }: DocumentReviewPanelProps)
       const activeQueue = queueOverride || queue;
       const queueItem = activeQueue.find(item => item.documentId === documentId);
 
-      setSelectedDocument({
+        const nextDocument: ReviewDocumentData = {
         id: doc.id,
         fileName: doc.file_name,
         documentType: doc.document_type,
         confidenceScore: doc.confidence_score,
-        extractedData: doc.extracted_data,
         status: doc.status,
-        reason: queueItem?.reason,
-      });
+      };
+        if (doc.extracted_data !== undefined) {
+          nextDocument.extractedData = doc.extracted_data ?? null;
+        }
+      if (queueItem?.reason) {
+        nextDocument.reason = queueItem.reason;
+      }
+
+      setSelectedDocument(nextDocument);
     } catch (err) {
       console.error(err);
       setError(err instanceof Error ? err.message : 'Failed to load document details');
@@ -109,17 +115,26 @@ export default function DocumentReviewPanel({ token }: DocumentReviewPanelProps)
     setQueueLoading(true);
     setError(null);
     try {
-      const data = await apiRequest<{ queue: Array<ReviewQueueItem & { extractedData?: Record<string, unknown>; requiresReview: boolean }> }>(
-        '/api/documents/review/queue',
-        token
-      );
-      const items = data.queue.map(item => ({
-        documentId: item.documentId,
-        fileName: item.fileName,
-        documentType: item.documentType,
-        confidenceScore: item.confidenceScore,
-        reason: item.reason,
-      }));
+      const data = await apiRequest<{
+        queue: Array<
+          ReviewQueueItem & {
+            extractedData?: Record<string, unknown>;
+            requiresReview: boolean;
+          }
+        >;
+      }>('/api/documents/review/queue', token);
+      const items: ReviewQueueItem[] = data.queue.map((item) => {
+        const queueEntry: ReviewQueueItem = {
+          documentId: item.documentId,
+          fileName: item.fileName,
+          documentType: item.documentType,
+          confidenceScore: item.confidenceScore,
+        };
+        if (item.reason) {
+          queueEntry.reason = item.reason;
+        }
+        return queueEntry;
+      });
 
       setQueue(items);
 

@@ -3,22 +3,24 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { context, propagation } from '@opentelemetry/api';
+import { context, propagation, trace } from '@opentelemetry/api';
 
-export function tracingMiddleware(req: Request, res: Response, next: NextFunction) {
-  // Extract trace context from headers (W3C Trace Context)
+export function tracingMiddleware(req: Request, res: Response, next: NextFunction): void {
   const parentContext = propagation.extract(context.active(), req.headers);
 
-  // Set trace context
   context.with(parentContext, () => {
-    // Store trace ID in environment for logging
-    const traceId = context.active().traceId;
+    const activeSpan = trace.getSpan(context.active());
+    const traceId = activeSpan?.spanContext().traceId;
     if (traceId) {
       process.env.TRACE_ID = traceId;
+      res.setHeader('x-trace-id', traceId);
     }
 
-    // Inject trace context into response headers
-    propagation.inject(context.active(), res.getHeaders());
+    const responseHeaders: Record<string, string> = {};
+    propagation.inject(context.active(), responseHeaders);
+    Object.entries(responseHeaders).forEach(([key, value]) => {
+      res.setHeader(key, value);
+    });
 
     next();
   });

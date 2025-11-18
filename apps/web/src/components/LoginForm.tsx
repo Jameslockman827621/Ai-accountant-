@@ -127,19 +127,23 @@ function AuthCard({ googleEnabled }: { googleEnabled: boolean }) {
     }
   };
 
-  const handleGoogleSuccess = async (credential?: string) => {
-    if (!credential) {
-      setError('Google did not return an identity token.');
-      return;
-    }
-    setLoading(true);
-    const result = await loginWithGoogle(credential, {
-      tenantName: form.googleTenantName || undefined,
-      country: form.googleCountry,
-    });
-    handleLoginResponse(result);
-    setLoading(false);
-  };
+    const handleGoogleSuccess = async (credential?: string) => {
+      if (!credential) {
+        setError('Google did not return an identity token.');
+        return;
+      }
+      setLoading(true);
+      const googleOptions: { tenantName?: string; country?: string } = {};
+      if (form.googleTenantName) {
+        googleOptions.tenantName = form.googleTenantName;
+      }
+      if (form.googleCountry) {
+        googleOptions.country = form.googleCountry;
+      }
+      const result = await loginWithGoogle(credential, googleOptions);
+      handleLoginResponse(result);
+      setLoading(false);
+    };
 
   const renderLogin = () => (
     <form className="space-y-5" onSubmit={handleLogin}>

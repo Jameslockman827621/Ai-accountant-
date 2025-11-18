@@ -22,6 +22,22 @@ export interface PlaidExchangeTokenResponse {
   request_id: string;
 }
 
+interface PlaidErrorResponse {
+  error_message?: string;
+}
+
+interface PlaidAccountsResponse {
+  accounts?: Array<Record<string, unknown>>;
+}
+
+interface PlaidTransactionsResponse {
+  transactions?: Array<Record<string, unknown>>;
+}
+
+function formatPlaidError(error: PlaidErrorResponse): string {
+  return error.error_message || 'Unknown error';
+}
+
 export class PlaidOAuthService {
   private config: PlaidConfig;
   private baseUrl: string;
@@ -63,15 +79,15 @@ export class PlaidOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Plaid API error: ${error.error_message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as PlaidErrorResponse;
+          throw new Error(`Plaid API error: ${formatPlaidError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      logger.info('Plaid link token created', { tenantId, userId, requestId: data.request_id });
+        const data = (await response.json()) as PlaidLinkTokenResponse;
+        logger.info('Plaid link token created', { tenantId, userId, requestId: data.request_id });
 
-      return data;
+        return data;
     } catch (error) {
       logger.error('Failed to create Plaid link token', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -95,15 +111,15 @@ export class PlaidOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Plaid API error: ${error.error_message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as PlaidErrorResponse;
+          throw new Error(`Plaid API error: ${formatPlaidError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      logger.info('Plaid public token exchanged', { requestId: data.request_id });
+        const data = (await response.json()) as PlaidExchangeTokenResponse;
+        logger.info('Plaid public token exchanged', { requestId: data.request_id });
 
-      return data;
+        return data;
     } catch (error) {
       logger.error('Failed to exchange Plaid public token', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -127,13 +143,13 @@ export class PlaidOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Plaid API error: ${error.error_message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as PlaidErrorResponse;
+          throw new Error(`Plaid API error: ${formatPlaidError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      return data.accounts || [];
+        const data = (await response.json()) as PlaidAccountsResponse;
+        return data.accounts || [];
     } catch (error) {
       logger.error('Failed to get Plaid accounts', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -165,13 +181,13 @@ export class PlaidOAuthService {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(`Plaid API error: ${error.error_message || 'Unknown error'}`);
-      }
+        if (!response.ok) {
+          const errorBody = (await response.json()) as PlaidErrorResponse;
+          throw new Error(`Plaid API error: ${formatPlaidError(errorBody)}`);
+        }
 
-      const data = await response.json();
-      return data.transactions || [];
+        const data = (await response.json()) as PlaidTransactionsResponse;
+        return data.transactions || [];
     } catch (error) {
       logger.error('Failed to get Plaid transactions', error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -203,8 +219,12 @@ export class PlaidOAuthService {
         break;
 
       case 'ITEM':
-        if (webhookData.webhook_code === 'ERROR') {
-          logger.error('Plaid item error', { itemId: webhookData.item_id, error: webhookData });
+          if (webhookData.webhook_code === 'ERROR') {
+            logger.error(
+              'Plaid item error',
+              undefined,
+              { itemId: webhookData.item_id, error: webhookData }
+            );
         }
         break;
 

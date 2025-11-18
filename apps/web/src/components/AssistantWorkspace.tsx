@@ -11,10 +11,27 @@ function uuidv4() {
   });
 }
 
+function formatDate(date: Date): string {
+  const iso = date.toISOString();
+  const [dateOnly] = iso.split('T');
+  return dateOnly ?? iso;
+}
+
 interface AssistantWorkspaceProps {
   token: string;
   tenantId?: string;
   userId?: string;
+}
+
+interface ToolCall {
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+  requiresApproval: boolean;
+  isIrreversible: boolean;
+  actionId?: string;
+  confidenceScore?: number;
 }
 
 interface Message {
@@ -22,15 +39,7 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   citations?: Array<{ type: string; id: string; reference: string }>;
-  toolCalls?: Array<{
-    toolName: string;
-    args: Record<string, unknown>;
-    result?: unknown;
-    error?: string;
-    requiresApproval: boolean;
-    isIrreversible: boolean;
-    actionId?: string;
-  }>;
+  toolCalls?: ToolCall[];
   confidenceScore?: number;
   reasoningTrace?: Array<{ step: string; details: unknown }>;
   timestamp: Date;
@@ -50,7 +59,36 @@ interface CitationHoverData {
   content?: string;
 }
 
-export default function AssistantWorkspace({ token, tenantId, userId }: AssistantWorkspaceProps) {
+type PendingApproval = {
+  actionId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result?: unknown;
+  confidence: number;
+  requiresApproval: boolean;
+  isIrreversible: boolean;
+};
+
+interface AssistantQueryResponse {
+  response: {
+    answer: string;
+    citations?: Array<{ type: string; id: string; reference: string }>;
+    toolCalls?: ToolCall[];
+    confidenceScore?: number;
+    reasoningTrace?: Array<{ step: string; details: unknown }>;
+  };
+}
+
+type DocumentSummaryResponse = {
+  content?: string;
+  extracted_data?: unknown;
+};
+
+type MessagePart =
+  | { type: 'text'; content: string }
+  | { type: 'citation'; content: string; citation: { type: string; id: string; reference: string } };
+
+export default function AssistantWorkspace({ token, tenantId, userId: _userId }: AssistantWorkspaceProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -58,15 +96,8 @@ export default function AssistantWorkspace({ token, tenantId, userId }: Assistan
   const [contextSummary, setContextSummary] = useState<ContextSummary | null>(null);
   const [hoveredCitation, setHoveredCitation] = useState<CitationHoverData | null>(null);
   const [selectedDocument, setSelectedDocument] = useState<string | null>(null);
-  const [pendingApprovals, setPendingApprovals] = useState<Array<{
-    actionId: string;
-    toolName: string;
-    args: Record<string, unknown>;
-    result?: unknown;
-    confidence: number;
-    requiresApproval: boolean;
-    isIrreversible: boolean;
-  }>>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
+  const activeCitation = hoveredCitation;
 
   // Load context summary on mount
   useEffect(() => {
@@ -76,16 +107,19 @@ export default function AssistantWorkspace({ token, tenantId, userId }: Assistan
   const loadContextSummary = async () => {
     try {
       // In production, would fetch from API
+      const now = new Date();
+      const periodStart = formatDate(new Date(now.getFullYear(), now.getMonth(), 1));
+      const periodEnd = formatDate(new Date(now.getFullYear(), now.getMonth() + 1, 0));
+      const upcomingVatDue = formatDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+
       setContextSummary({
         tenantName: 'Demo Company',
         currentPeriod: {
-          start: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString().split('T')[0],
-          end: new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).toISOString().split('T')[0],
+          start: periodStart,
+          end: periodEnd,
         },
         openTasks: 3,
-        upcomingDeadlines: [
-          { type: 'VAT Return', dueDate: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0] },
-        ],
+        upcomingDeadlines: [{ type: 'VAT Return', dueDate: upcomingVatDue }],
       });
     } catch (error) {
       console.error('Failed to load context summary', error);
@@ -125,29 +159,44 @@ export default function AssistantWorkspace({ token, tenantId, userId }: Assistan
         throw new Error('Failed to get response');
       }
 
-      const data = await response.json();
+      const data = (await response.json()) as AssistantQueryResponse;
+      const assistantResponse = data?.response;
+
+      if (!assistantResponse || typeof assistantResponse.answer !== 'string') {
+        throw new Error('Invalid assistant response payload');
+      }
+
       const assistantMessage: Message = {
         id: uuidv4(),
         role: 'assistant',
-        content: data.response.answer,
-        citations: data.response.citations,
-        toolCalls: data.response.toolCalls || [],
-        confidenceScore: data.response.confidenceScore,
-        reasoningTrace: data.response.reasoningTrace,
+        content: assistantResponse.answer,
+        ...(assistantResponse.citations && assistantResponse.citations.length > 0
+          ? { citations: assistantResponse.citations }
+          : {}),
+        ...(assistantResponse.toolCalls && assistantResponse.toolCalls.length > 0
+          ? { toolCalls: assistantResponse.toolCalls }
+          : {}),
+        ...(typeof assistantResponse.confidenceScore === 'number'
+          ? { confidenceScore: assistantResponse.confidenceScore }
+          : {}),
+        ...(assistantResponse.reasoningTrace && assistantResponse.reasoningTrace.length > 0
+          ? { reasoningTrace: assistantResponse.reasoningTrace }
+          : {}),
         timestamp: new Date(),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
 
       // Check for actions requiring approval
-      const approvals = (data.response.toolCalls || [])
-        .filter((tc: { requiresApproval: boolean; actionId?: string }) => tc.requiresApproval && tc.actionId)
-        .map((tc: { actionId: string; toolName: string; args: Record<string, unknown>; result?: unknown; requiresApproval: boolean; isIrreversible: boolean; confidenceScore?: number }) => ({
+      const toolCalls = assistantResponse.toolCalls ?? [];
+      const approvals = toolCalls
+        .filter((tc) => tc.requiresApproval && tc.actionId)
+        .map((tc) => ({
           actionId: tc.actionId!,
           toolName: tc.toolName,
           args: tc.args,
           result: tc.result,
-          confidence: tc.confidenceScore || 0.8,
+          confidence: tc.confidenceScore ?? 0.8,
           requiresApproval: tc.requiresApproval,
           isIrreversible: tc.isIrreversible,
         }));
@@ -196,11 +245,15 @@ export default function AssistantWorkspace({ token, tenantId, userId }: Assistan
         }
       );
       if (response.ok) {
-        const data = await response.json();
-        setHoveredCitation({
-          ...citation,
-          content: data.content || data.extracted_data ? JSON.stringify(data.extracted_data).substring(0, 200) : undefined,
-        });
+        const data = (await response.json()) as DocumentSummaryResponse;
+        const snippet =
+          typeof data.content === 'string' && data.content.length > 0
+            ? data.content.substring(0, 200)
+            : data.extracted_data
+              ? JSON.stringify(data.extracted_data).substring(0, 200)
+              : undefined;
+
+        setHoveredCitation(snippet ? { ...citation, content: snippet } : { ...citation });
       } else {
         setHoveredCitation(citation);
       }
@@ -394,7 +447,7 @@ export default function AssistantWorkspace({ token, tenantId, userId }: Assistan
       </div>
 
       {/* Citation hover card */}
-      {hoveredCitation && (
+      {activeCitation && (
         <div
           className="fixed bg-white border border-gray-200 rounded-lg shadow-lg p-4 z-50 max-w-sm"
           style={{
@@ -404,14 +457,14 @@ export default function AssistantWorkspace({ token, tenantId, userId }: Assistan
           }}
           onMouseLeave={() => setHoveredCitation(null)}
         >
-          <h4 className="font-semibold text-sm mb-2">{hoveredCitation.reference}</h4>
-          <p className="text-xs text-gray-500 mb-1">Type: {hoveredCitation.type}</p>
-          {hoveredCitation.content && (
-            <p className="text-sm text-gray-700 mt-2">{hoveredCitation.content}</p>
+          <h4 className="font-semibold text-sm mb-2">{activeCitation.reference}</h4>
+          <p className="text-xs text-gray-500 mb-1">Type: {activeCitation.type}</p>
+          {activeCitation.content && (
+            <p className="text-sm text-gray-700 mt-2">{activeCitation.content}</p>
           )}
           <button
             onClick={() => {
-              setSelectedDocument(hoveredCitation.id);
+              setSelectedDocument(activeCitation.id);
               setHoveredCitation(null);
             }}
             className="mt-2 text-xs text-blue-600 hover:text-blue-800"
@@ -440,7 +493,7 @@ function MessageBubble({
 }) {
   // Parse citations from content
   const citationRegex = /\[(\d+)\]/g;
-  const parts: Array<{ type: 'text' | 'citation'; content: string; citation?: { type: string; id: string; reference: string } }> = [];
+  const parts: MessagePart[] = [];
   let lastIndex = 0;
   let match;
 
@@ -451,13 +504,25 @@ function MessageBubble({
         parts.push({ type: 'text', content: message.content.substring(lastIndex, match.index) });
       }
 
+      const matchGroup = match[1];
+      if (typeof matchGroup !== 'string') {
+        parts.push({ type: 'text', content: match[0] });
+        lastIndex = match.index + match[0].length;
+        continue;
+      }
+
       // Add citation
-      const citationIndex = parseInt(match[1], 10) - 1;
-      if (citationIndex >= 0 && citationIndex < message.citations.length) {
+      const citationIndex = parseInt(matchGroup, 10) - 1;
+      const referencedCitation =
+        citationIndex >= 0 && citationIndex < message.citations.length
+          ? message.citations[citationIndex]
+          : undefined;
+
+      if (referencedCitation) {
         parts.push({
           type: 'citation',
           content: match[0],
-          citation: message.citations[citationIndex],
+          citation: referencedCitation,
         });
       } else {
         parts.push({ type: 'text', content: match[0] });
@@ -492,8 +557,8 @@ function MessageBubble({
                 <span
                   key={idx}
                   className="underline cursor-pointer hover:bg-yellow-200 px-1 rounded"
-                  onMouseEnter={() => onCitationHover(part.citation!)}
-                  onClick={() => onDocumentClick(part.citation!.id)}
+                  onMouseEnter={() => onCitationHover(part.citation)}
+                  onClick={() => onDocumentClick(part.citation.id)}
                 >
                   {part.content}
                 </span>
@@ -529,14 +594,7 @@ function ApprovalCard({
   onApprove,
   onReject,
 }: {
-  approval: {
-    actionId: string;
-    toolName: string;
-    args: Record<string, unknown>;
-    result?: unknown;
-    confidence: number;
-    isIrreversible: boolean;
-  };
+  approval: PendingApproval;
   onApprove: (actionId: string, comment?: string) => void;
   onReject: (actionId: string, reason: string) => void;
 }) {
@@ -591,14 +649,7 @@ function ApprovalModal({
   onReject,
   onClose,
 }: {
-  approval: {
-    actionId: string;
-    toolName: string;
-    args: Record<string, unknown>;
-    result?: unknown;
-    confidence: number;
-    isIrreversible: boolean;
-  };
+  approval: PendingApproval;
   comment: string;
   onCommentChange: (comment: string) => void;
   onApprove: () => void;
@@ -628,7 +679,7 @@ function ApprovalModal({
             </pre>
           </div>
 
-          {approval.result && (
+          {approval.result !== undefined && approval.result !== null && (
             <div className="mb-4">
               <div className="text-sm font-medium text-gray-700 mb-1">Result:</div>
               <pre className="bg-gray-50 p-3 rounded text-xs overflow-x-auto">
@@ -650,6 +701,17 @@ function ApprovalModal({
             />
           </div>
 
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Rejection reason</label>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm"
+              rows={2}
+              placeholder="Optional details for rejection..."
+            />
+          </div>
+
           <div className="flex gap-3 justify-end">
             <button
               onClick={onClose}
@@ -663,7 +725,8 @@ function ApprovalModal({
                   alert('Comment is required for irreversible actions');
                   return;
                 }
-                onReject(rejectReason || 'Rejected by reviewer');
+                const reasonText = rejectReason.trim() || 'Rejected by reviewer';
+                onReject(reasonText);
               }}
               className="px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700"
             >

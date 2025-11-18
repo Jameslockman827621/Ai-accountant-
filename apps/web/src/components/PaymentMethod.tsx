@@ -18,20 +18,17 @@ interface PaymentMethod {
 
 interface PaymentMethodProps {
   token: string;
-  onMethodAdded?: () => void;
   onMethodRemoved?: () => void;
   onDefaultChanged?: () => void;
 }
 
 export default function PaymentMethod({
   token,
-  onMethodAdded,
   onMethodRemoved,
   onDefaultChanged,
 }: PaymentMethodProps) {
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
   const [processing, setProcessing] = useState(false);
 
   useEffect(() => {

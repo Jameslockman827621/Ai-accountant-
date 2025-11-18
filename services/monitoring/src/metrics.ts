@@ -3,7 +3,7 @@
  * Exports metrics to Prometheus for observability
  */
 
-import { MeterProvider, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
+import { MeterProvider, MetricReader } from '@opentelemetry/sdk-metrics';
 import { PrometheusExporter } from '@opentelemetry/exporter-prometheus';
 import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
@@ -11,11 +11,13 @@ import { createLogger } from '@ai-accountant/shared-utils';
 
 const logger = createLogger('metrics');
 
-// Create Prometheus exporter
-const prometheusExporter = new PrometheusExporter({
+const exporterOptions = {
   port: parseInt(process.env.PROMETHEUS_EXPORTER_PORT || '9464', 10),
   endpoint: '/metrics',
-});
+};
+
+// Create Prometheus exporter
+const prometheusExporter = new PrometheusExporter(exporterOptions);
 
 // Create meter provider
 const meterProvider = new MeterProvider({
@@ -23,12 +25,7 @@ const meterProvider = new MeterProvider({
     [SemanticResourceAttributes.SERVICE_NAME]: process.env.SERVICE_NAME || 'ai-accountant',
     [SemanticResourceAttributes.SERVICE_VERSION]: process.env.SERVICE_VERSION || '1.0.0',
   }),
-  readers: [
-    new PeriodicExportingMetricReader({
-      exporter: prometheusExporter,
-      exportIntervalMillis: 10000, // Export every 10 seconds
-    }),
-  ],
+  readers: [prometheusExporter as unknown as MetricReader],
 });
 
 // Get meter
@@ -182,8 +179,8 @@ export const errorCount = meter.createCounter('errors_total', {
 // Initialize metrics server
 export function initializeMetrics() {
   logger.info('Metrics initialized', {
-    port: prometheusExporter.getPort(),
-    endpoint: prometheusExporter.getEndpoint(),
+    port: exporterOptions.port,
+    endpoint: exporterOptions.endpoint,
   });
 }
 

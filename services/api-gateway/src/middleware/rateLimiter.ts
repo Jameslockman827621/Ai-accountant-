@@ -13,6 +13,12 @@ interface RateLimitConfig {
 
 const rateLimitStore: Map<string, { count: number; resetAt: Date }> = new Map();
 
+type RequestWithUser = Request & {
+  user?: {
+    tenantId?: string;
+  };
+};
+
 /**
  * Advanced rate limiting with per-tenant and per-endpoint limits
  */
@@ -48,12 +54,13 @@ export function createRateLimiter(config: RateLimitConfig) {
     });
 
     // Track in database for analytics
-    if (req.user?.tenantId) {
+    const tenantId = getTenantId(req);
+    if (tenantId) {
       await db.query(
         `INSERT INTO rate_limit_logs (id, tenant_id, endpoint, ip_address, created_at)
          VALUES (gen_random_uuid(), $1, $2, $3, NOW())
          ON CONFLICT DO NOTHING`,
-        [req.user.tenantId, req.path, req.ip]
+        [tenantId, req.path, req.ip]
       ).catch(err => logger.error('Rate limit logging failed', err));
     }
 
@@ -63,10 +70,14 @@ export function createRateLimiter(config: RateLimitConfig) {
 
 function getRateLimitIdentifier(req: Request): string {
   // Per-tenant + per-endpoint + per-IP
-  const tenantId = (req.user as { tenantId?: string })?.tenantId || 'anonymous';
+  const tenantId = getTenantId(req) || 'anonymous';
   const endpoint = req.path;
   const ip = req.ip || 'unknown';
   return `${tenantId}:${endpoint}:${ip}`;
+}
+
+function getTenantId(req: Request): string | undefined {
+  return (req as RequestWithUser).user?.tenantId;
 }
 
 /**

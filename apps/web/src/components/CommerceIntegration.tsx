@@ -23,7 +23,7 @@ interface CommerceIntegrationProps {
   tenantId: string;
 }
 
-export default function CommerceIntegration({ token, tenantId }: CommerceIntegrationProps) {
+export default function CommerceIntegration({ token, tenantId: _tenantId }: CommerceIntegrationProps) {
   const [connectors, setConnectors] = useState<CommerceConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState<string | null>(null);

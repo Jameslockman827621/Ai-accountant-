@@ -13,6 +13,12 @@ export default function TrueLayerCallbackPage() {
   const [message, setMessage] = useState('Completing bank connection…');
 
   useEffect(() => {
+    if (!searchParams) {
+      setStatus('error');
+      setMessage('Missing callback parameters.');
+      return;
+    }
+
     const code = searchParams.get('code');
     const state = searchParams.get('state');
     const errorParam = searchParams.get('error');

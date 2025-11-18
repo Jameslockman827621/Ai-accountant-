@@ -87,7 +87,7 @@ export class ConnectorHealthMonitoringService {
       await connectorService.updateHealthStatus(connectorId, healthStatus);
 
       // Raise alert if needed
-      if (needsAlert) {
+      if (needsAlert && (healthStatus === 'unhealthy' || healthStatus === 'unknown')) {
         await this.raiseHealthAlert(connectorId, connector, healthStatus);
       }
 

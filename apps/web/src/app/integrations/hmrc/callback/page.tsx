@@ -21,6 +21,12 @@ export default function HMRCCallbackPage() {
   }, []);
 
   useEffect(() => {
+    if (!searchParams) {
+      setStatus('error');
+      setMessage('Missing HMRC authorization parameters.');
+      return;
+    }
+
     const code = searchParams.get('code');
     const state = searchParams.get('state');
 

@@ -31,7 +31,7 @@ interface ComplianceCalendarProps {
   tenantId?: string;
 }
 
-export default function ComplianceCalendar({ token, tenantId }: ComplianceCalendarProps) {
+export default function ComplianceCalendar({ token, tenantId: _tenantId }: ComplianceCalendarProps) {
   const [obligations, setObligations] = useState<ComplianceObligation[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedObligation, setSelectedObligation] = useState<ComplianceObligation | null>(null);

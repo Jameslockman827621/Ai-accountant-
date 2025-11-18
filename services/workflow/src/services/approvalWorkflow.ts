@@ -193,8 +193,8 @@ export class ApprovalWorkflowService {
     stepNumber: number,
     approverId: UserId,
     reason: string,
-    ipAddress?: string,
-    userAgent?: string
+    _ipAddress?: string,
+    _userAgent?: string
   ): Promise<void> {
     const workflow = await this.getWorkflow(workflowId);
     if (!workflow) {
