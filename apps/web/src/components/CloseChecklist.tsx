@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   CheckCircleIcon,
   ClockIcon,
@@ -255,13 +255,15 @@ export default function CloseChecklist({
     }
   }
 
+  type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'blocked';
+
   const progress = useMemo(() => {
     if (tasks.length === 0) return 0;
     const completed = tasks.filter((t) => t.status === 'completed').length;
     return (completed / tasks.length) * 100;
   }, [tasks]);
 
-  const tasksByStatus = useMemo(() => {
+  const tasksByStatus = useMemo<Record<TaskStatus, CloseTask[]>>(() => {
     return {
       pending: tasks.filter((t) => t.status === 'pending'),
       in_progress: tasks.filter((t) => t.status === 'in_progress'),

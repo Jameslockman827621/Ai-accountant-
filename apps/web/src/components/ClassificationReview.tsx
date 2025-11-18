@@ -38,7 +38,7 @@ interface ClassificationReviewProps {
   tenantId: string;
 }
 
-export default function ClassificationReview({ token, tenantId }: ClassificationReviewProps) {
+export default function ClassificationReview({ token, tenantId: _tenantId }: ClassificationReviewProps) {
   const [queue, setQueue] = useState<ReviewItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedItem, setSelectedItem] = useState<ReviewItem | null>(null);

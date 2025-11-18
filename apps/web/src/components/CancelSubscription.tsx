@@ -18,7 +18,7 @@ interface CancelSubscriptionProps {
 export default function CancelSubscription({
   token,
   subscriptionId,
-  currentTier,
+  currentTier: _currentTier,
   cancelAtPeriodEnd,
   periodEnd,
   onCancelled,

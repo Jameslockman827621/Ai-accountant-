@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('BankConnectionHealth');
 
@@ -60,7 +61,8 @@ export default function BankConnectionHealth() {
         setSummary(summaryData.summary);
       }
     } catch (error) {
-      logger.error('Failed to load health', error);
+      const err = toError(error, 'Failed to load bank connection health');
+      logger.error('Failed to load health', err);
     } finally {
       setLoading(false);
     }

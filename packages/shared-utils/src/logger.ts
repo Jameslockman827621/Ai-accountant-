@@ -97,14 +97,26 @@ class Logger {
     this.log(entry);
   }
 
-  error(message: string, error?: Error, metadata?: Record<string, unknown>): void {
+  error(message: string, error?: unknown, metadata?: Record<string, unknown>): void {
     const entry: LogEntry = {
       level: LogLevel.ERROR,
       message,
       timestamp: new Date(),
     };
-    if (error) {
+    if (error instanceof Error) {
       entry.error = error;
+    } else if (error !== undefined && error !== null) {
+      const fallback =
+        typeof error === 'string'
+          ? error
+          : (() => {
+              try {
+                return JSON.stringify(error);
+              } catch {
+                return String(error);
+              }
+            })();
+      entry.error = new Error(fallback);
     }
     if (metadata) {
       entry.metadata = metadata;

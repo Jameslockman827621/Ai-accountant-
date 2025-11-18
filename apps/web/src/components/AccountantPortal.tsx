@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('AccountantPortal');
 
@@ -45,7 +46,7 @@ interface AccountantPortalProps {
   userId: string;
 }
 
-export default function AccountantPortal({ token, userId }: AccountantPortalProps) {
+export default function AccountantPortal({ token, userId: _userId }: AccountantPortalProps) {
   const [overview, setOverview] = useState<FirmOverview | null>(null);
   const [selectedClient, setSelectedClient] = useState<string | null>(null);
   const [clientSummary, setClientSummary] = useState<ClientSummary | null>(null);
@@ -75,7 +76,8 @@ export default function AccountantPortal({ token, userId }: AccountantPortalProp
       const data = await response.json();
       setOverview(data.overview);
     } catch (error) {
-      logger.error('Failed to load firm overview', error);
+      const err = toError(error, 'Failed to load firm overview');
+      logger.error('Failed to load firm overview', err);
     } finally {
       setLoading(false);
     }
@@ -94,7 +96,8 @@ export default function AccountantPortal({ token, userId }: AccountantPortalProp
         setClientSummary(data.summary);
       }
     } catch (error) {
-      logger.error('Failed to load client summary', error);
+      const err = toError(error, 'Failed to load client summary');
+      logger.error('Failed to load client summary', err);
     }
   };
 

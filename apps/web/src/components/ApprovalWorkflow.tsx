@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { toError } from '@/utils/error';
 
 const logger = createLogger('ApprovalWorkflow');
 
@@ -71,7 +72,8 @@ export default function ApprovalWorkflow({ token, workflowId }: ApprovalWorkflow
       const data = await response.json();
       setWorkflow(data.workflow);
     } catch (error) {
-      logger.error('Failed to load workflow', error);
+      const err = toError(error, 'Failed to load workflow');
+      logger.error('Failed to load workflow', err);
     } finally {
       setLoading(false);
     }
@@ -90,7 +92,8 @@ export default function ApprovalWorkflow({ token, workflowId }: ApprovalWorkflow
         setHistory(data.history || []);
       }
     } catch (error) {
-      logger.error('Failed to load history', error);
+      const err = toError(error, 'Failed to load history');
+      logger.error('Failed to load history', err);
     }
   };
 
@@ -117,7 +120,8 @@ export default function ApprovalWorkflow({ token, workflowId }: ApprovalWorkflow
       setComments('');
       setCurrentStep(null);
     } catch (error) {
-      logger.error('Failed to approve step', error);
+      const err = toError(error, 'Failed to approve step');
+      logger.error('Failed to approve step', err);
       alert('Failed to approve step');
     } finally {
       setApproving(false);
@@ -144,7 +148,8 @@ export default function ApprovalWorkflow({ token, workflowId }: ApprovalWorkflow
       await loadWorkflow();
       await loadHistory();
     } catch (error) {
-      logger.error('Failed to reject workflow', error);
+      const err = toError(error, 'Failed to reject workflow');
+      logger.error('Failed to reject workflow', err);
       alert('Failed to reject workflow');
     } finally {
       setApproving(false);
@@ -198,8 +203,8 @@ export default function ApprovalWorkflow({ token, workflowId }: ApprovalWorkflow
       {/* Workflow Steps */}
       <div className="rounded-lg border border-gray-200 bg-white p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Approval Steps</h2>
-        <div className="space-y-4">
-          {workflow.steps.map((step, index) => (
+          <div className="space-y-4">
+            {workflow.steps.map((step) => (
             <div
               key={step.stepNumber}
               className={`p-4 rounded-lg border ${

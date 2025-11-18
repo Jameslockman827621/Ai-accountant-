@@ -105,6 +105,9 @@ export default function ConnectorAuthorization({
       if (!id) {
         id = await registerConnector();
       }
+      if (!id) {
+        throw new Error('Unable to determine connector id');
+      }
 
       const response = await fetch(`${API_BASE}/api/connectors/${id}/connect`, {
         method: 'POST',
@@ -211,6 +214,8 @@ export default function ConnectorAuthorization({
     return descriptions[provider] || 'Connect your account';
   };
 
+  const isConnecting = status === 'connecting';
+
   return (
     <div className="rounded-lg border border-gray-200 p-6 space-y-4">
       <div className="flex items-start justify-between">
@@ -228,60 +233,62 @@ export default function ConnectorAuthorization({
         )}
       </div>
 
-      {status === 'connected' ? (
-        <div className="space-y-3">
-          <div className="flex items-center space-x-2 text-green-600">
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <span className="font-medium">Connected</span>
+        {status === 'connected' ? (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2 text-green-600">
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
+              <span className="font-medium">Connected</span>
+            </div>
+            {connectionId && (
+              <p className="text-sm text-gray-600">Connection ID: {connectionId.substring(0, 8)}...</p>
+            )}
+            <button
+              onClick={handleDisconnect}
+              className="text-sm text-red-600 hover:text-red-700 underline"
+            >
+              Disconnect
+            </button>
           </div>
-          {connectionId && (
-            <p className="text-sm text-gray-600">Connection ID: {connectionId.substring(0, 8)}...</p>
-          )}
-          <button
-            onClick={handleDisconnect}
-            className="text-sm text-red-600 hover:text-red-700 underline"
-          >
-            Disconnect
-          </button>
-        </div>
-      ) : status === 'connecting' ? (
-        <div className="space-y-3">
-          <div className="flex items-center space-x-2 text-blue-600">
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
-            <span className="font-medium">Connecting...</span>
+        ) : isConnecting ? (
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2 text-blue-600">
+              <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+              <span className="font-medium">Connecting...</span>
+            </div>
+            <p className="text-sm text-gray-600">
+              {authorizationUrl
+                ? 'Redirecting to authorization page...'
+                : 'Setting up connection...'}
+            </p>
           </div>
-          <p className="text-sm text-gray-600">
-            {authorizationUrl
-              ? 'Redirecting to authorization page...'
-              : 'Setting up connection...'}
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {error && (
-            <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>
-          )}
+        ) : (
+          <div className="space-y-3">
+            {error && (
+              <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</div>
+            )}
 
-          <button
-            onClick={initiateConnection}
-            disabled={status === 'connecting'}
-            className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {status === 'connecting' ? 'Connecting...' : `Connect ${connectorName}`}
-          </button>
+            <button
+              onClick={initiateConnection}
+              disabled={isConnecting}
+              className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isConnecting ? 'Connecting...' : `Connect ${connectorName}`}
+            </button>
 
-          <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-            <p><strong>Security:</strong> This connection is read-only and uses bank-level encryption.</p>
-            <p className="mt-1">You can disconnect anytime from your settings.</p>
+            <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+              <p>
+                <strong>Security:</strong> This connection is read-only and uses bank-level encryption.
+              </p>
+              <p className="mt-1">You can disconnect anytime from your settings.</p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
     </div>
   );
 }

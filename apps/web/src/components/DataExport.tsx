@@ -61,7 +61,6 @@ export default function DataExport() {
 
       if (!response.ok) throw new Error('Failed to request export');
 
-      const data = await response.json();
       alert('Data export started. You will be notified when it\'s ready.');
       await loadExports();
     } catch (error) {

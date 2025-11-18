@@ -337,8 +337,11 @@ export default function BankConnectionsPanel({ token, variant = 'dashboard' }: B
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {connections.map(connection => {
-                const accounts = (connection.metadata?.accounts as Array<{ account_id: string; display_name?: string }> | undefined) || [];
+                {connections.map(connection => {
+                  const accounts =
+                    (connection.metadata?.accounts as Array<{ account_id: string; display_name?: string }> | undefined) || [];
+                  const hasAccounts = accounts.length > 0;
+                  const defaultAccountId = hasAccounts ? accounts[0]!.account_id : '';
                 const statusColor =
                   connection.status === 'healthy'
                     ? 'bg-green-100 text-green-800'
@@ -361,10 +364,10 @@ export default function BankConnectionsPanel({ token, variant = 'dashboard' }: B
                       {connection.nextSync ? new Date(connection.nextSync).toLocaleString() : 'Queued'}
                     </td>
                     <td className="px-3 py-3 space-y-2">
-                      {connection.provider === 'truelayer' && accounts.length > 0 && (
+                        {connection.provider === 'truelayer' && hasAccounts && (
                         <select
                           className="w-full rounded border px-2 py-1 text-xs"
-                          value={accountSelections[connection.id] || accounts[0].account_id}
+                            value={accountSelections[connection.id] ?? defaultAccountId}
                           onChange={e =>
                             setAccountSelections(prev => ({
                               ...prev,

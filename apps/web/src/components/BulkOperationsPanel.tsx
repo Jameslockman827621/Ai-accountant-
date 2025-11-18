@@ -69,7 +69,6 @@ export default function BulkOperationsPanel({ token }: BulkOperationsPanelProps)
 
       if (!response.ok) throw new Error('Failed to start operation');
 
-      const data = await response.json();
       await loadOperations();
       setShowForm(false);
       setSelectedItems([]);
