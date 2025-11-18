@@ -6,11 +6,11 @@ const logger = createLogger('automation-service');
 
 export function errorHandler(
   err: Error,
-  req: Request,
+  _req: Request,
   res: Response,
-  next: NextFunction
+  _next: NextFunction
 ): void {
-  logger.error('Request error', err);
+  logger.error('Request error', { error: err });
 
   if (err instanceof ValidationError) {
     res.status(400).json({ error: err.message });

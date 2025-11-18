@@ -3,7 +3,6 @@ import { db } from '@ai-accountant/database';
 import { randomUUID } from 'crypto';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
 import { policyEngine } from './policyEngine';
-import { taskAssignmentService } from './taskAssignment';
 
 const logger = createLogger('task-execution');
 
@@ -39,11 +38,10 @@ export class TaskExecutionService {
       [taskId, tenantId]
     );
 
-    if (taskResult.rows.length === 0) {
+    const task = taskResult.rows[0];
+    if (!task) {
       throw new Error('Task not found');
     }
-
-    const task = taskResult.rows[0];
 
     // Check policy
     const policyResult = await policyEngine.evaluateAction(
@@ -92,12 +90,8 @@ export class TaskExecutionService {
 
     try {
       // Execute based on task type
-      const result = await this.executeTaskByType(
-        task.task_type,
-        tenantId,
-        task.source_evidence as Record<string, unknown>,
-        simulation
-      );
+      const evidence = (task.source_evidence as Record<string, unknown> | null) ?? {};
+      const result = await this.executeTaskByType(task.task_type, tenantId, evidence, simulation);
 
       if (simulation) {
         // Return simulation result without updating task
@@ -120,7 +114,15 @@ export class TaskExecutionService {
       await slaTrackingService.markCompleted(taskId);
 
       // Log completion
-      await this.logExecution(taskId, 'completed', executedBy, executionMethod, 'in_progress', 'completed', result.result);
+      await this.logExecution(
+        taskId,
+        'completed',
+        executedBy,
+        executionMethod,
+        'in_progress',
+        'completed',
+        result.result
+      );
 
       return result;
     } catch (error) {
@@ -188,12 +190,12 @@ export class TaskExecutionService {
 
   private async executeReconciliation(
     tenantId: TenantId,
-    evidence: Record<string, unknown>,
+    _evidence: Record<string, unknown>,
     simulation: boolean
   ): Promise<TaskExecutionResult> {
     // In production, would call reconciliation service
     logger.info('Executing reconciliation task', { tenantId, simulation });
-    
+
     if (simulation) {
       return {
         success: true,
@@ -217,11 +219,11 @@ export class TaskExecutionService {
 
   private async executePosting(
     tenantId: TenantId,
-    evidence: Record<string, unknown>,
+    _evidence: Record<string, unknown>,
     simulation: boolean
   ): Promise<TaskExecutionResult> {
     logger.info('Executing posting task', { tenantId, simulation });
-    
+
     if (simulation) {
       return {
         success: true,
@@ -242,11 +244,11 @@ export class TaskExecutionService {
 
   private async executeFiling(
     tenantId: TenantId,
-    evidence: Record<string, unknown>,
+    _evidence: Record<string, unknown>,
     simulation: boolean
   ): Promise<TaskExecutionResult> {
     logger.info('Executing filing task', { tenantId, simulation });
-    
+
     if (simulation) {
       return {
         success: true,
@@ -268,11 +270,11 @@ export class TaskExecutionService {
 
   private async executeJournalEntry(
     tenantId: TenantId,
-    evidence: Record<string, unknown>,
+    _evidence: Record<string, unknown>,
     simulation: boolean
   ): Promise<TaskExecutionResult> {
     logger.info('Executing journal entry task', { tenantId, simulation });
-    
+
     if (simulation) {
       return {
         success: true,
@@ -293,11 +295,11 @@ export class TaskExecutionService {
 
   private async executeReview(
     tenantId: TenantId,
-    evidence: Record<string, unknown>,
+    _evidence: Record<string, unknown>,
     simulation: boolean
   ): Promise<TaskExecutionResult> {
     logger.info('Executing review task', { tenantId, simulation });
-    
+
     return {
       success: true,
       result: {
@@ -319,9 +321,7 @@ export class TaskExecutionService {
     changes: Record<string, unknown> = {},
     error?: string
   ): Promise<void> {
-    const { randomUUID } = await import('crypto');
     const historyId = randomUUID();
-
     await db.query(
       `INSERT INTO task_execution_history (
         id, task_id, action_type, action_by, action_method,
@@ -360,11 +360,12 @@ export class TaskExecutionService {
       [taskId]
     );
 
-    if (historyResult.rows.length === 0) {
+    const historyRow = historyResult.rows[0];
+    if (!historyRow) {
       throw new Error('No rollback data available');
     }
 
-    const rollbackData = historyResult.rows[0].rollback_data as Record<string, unknown>;
+    const rollbackData = historyRow.rollback_data as Record<string, unknown>;
 
     // Perform rollback (implementation depends on task type)
     logger.info('Rolling back task', { taskId, tenantId });
@@ -379,7 +380,15 @@ export class TaskExecutionService {
     );
 
     // Log rollback
-    await this.logExecution(taskId, 'rolled_back', rolledBackBy, 'human', 'completed', 'cancelled', rollbackData);
+    await this.logExecution(
+      taskId,
+      'rolled_back',
+      rolledBackBy,
+      'human',
+      'completed',
+      'cancelled',
+      rollbackData
+    );
   }
 }
 

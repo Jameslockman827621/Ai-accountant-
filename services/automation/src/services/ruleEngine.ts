@@ -9,10 +9,7 @@ import { sendEmail } from '@ai-accountant/notification-service/services/email';
 const logger = createLogger('automation-service');
 
 export class RuleEngine {
-  async evaluateRule(
-    rule: AutomationRule,
-    context: Record<string, unknown>
-  ): Promise<boolean> {
+  async evaluateRule(rule: AutomationRule, context: Record<string, unknown>): Promise<boolean> {
     // Evaluate trigger conditions
     switch (rule.trigger.type) {
       case 'transaction':
@@ -28,10 +25,7 @@ export class RuleEngine {
     }
   }
 
-  async executeActions(
-    rule: AutomationRule,
-    context: Record<string, unknown>
-  ): Promise<void> {
+  async executeActions(rule: AutomationRule, context: Record<string, unknown>): Promise<void> {
     for (const action of rule.actions) {
       try {
         await this.executeAction(action, context, rule.tenantId);
@@ -82,9 +76,7 @@ export class RuleEngine {
     return true;
   }
 
-  private evaluateScheduleTrigger(
-    conditions: Record<string, unknown>
-  ): boolean {
+  private evaluateScheduleTrigger(conditions: Record<string, unknown>): boolean {
     // Schedule triggers are evaluated by the scheduler
     const schedule = conditions.schedule as string;
     const currentTime = new Date();
@@ -92,9 +84,9 @@ export class RuleEngine {
     if (schedule === 'daily') {
       return true; // Scheduler handles timing
     } else if (schedule === 'weekly') {
-      return currentTime.getDay() === (conditions.dayOfWeek as number || 0);
+      return currentTime.getDay() === ((conditions.dayOfWeek as number) || 0);
     } else if (schedule === 'monthly') {
-      return currentTime.getDate() === (conditions.dayOfMonth as number || 1);
+      return currentTime.getDate() === ((conditions.dayOfMonth as number) || 1);
     }
 
     return false;
@@ -168,8 +160,8 @@ export class RuleEngine {
   ): Promise<void> {
     const documentId = context.documentId as string;
     const accountCode = parameters.accountCode as string;
-    const accountName = parameters.accountName as string || `Account ${accountCode}`;
-    const amount = parameters.amount as number || (context.amount as number) || 0;
+    const accountName = (parameters.accountName as string) || `Account ${accountCode}`;
+    const amount = (parameters.amount as number) || (context.amount as number) || 0;
 
     if (!documentId || !accountCode || amount <= 0) {
       return;
@@ -179,12 +171,12 @@ export class RuleEngine {
     await createLedgerEntry({
       tenantId,
       documentId,
-      entryType: parameters.entryType as 'debit' | 'credit' || 'debit',
+      entryType: (parameters.entryType as 'debit' | 'credit') || 'debit',
       accountCode,
       accountName,
       amount,
-      description: parameters.description as string || 'Automated posting',
-      transactionDate: new Date(parameters.transactionDate as string || Date.now()),
+      description: (parameters.description as string) || 'Automated posting',
+      transactionDate: new Date((parameters.transactionDate as string) || Date.now()),
     });
 
     logger.info('Posted to ledger', { documentId, accountCode, tenantId });
@@ -192,12 +184,12 @@ export class RuleEngine {
 
   private async sendNotification(
     parameters: Record<string, unknown>,
-    context: Record<string, unknown>,
+    _context: Record<string, unknown>,
     tenantId: TenantId
   ): Promise<void> {
     const email = parameters.email as string;
-    const subject = parameters.subject as string || 'Automation Notification';
-    const message = parameters.message as string || 'An automation rule was triggered';
+    const subject = (parameters.subject as string) || 'Automation Notification';
+    const message = (parameters.message as string) || 'An automation rule was triggered';
 
     if (!email) {
       // Get tenant email
@@ -209,12 +201,13 @@ export class RuleEngine {
         [tenantId]
       );
 
-      if (tenantResult.rows.length === 0) {
+      const recipientRow = tenantResult.rows[0];
+      if (!recipientRow) {
         logger.warn('No email found for notification', { tenantId });
         return;
       }
 
-      const recipientEmail = tenantResult.rows[0].email;
+      const recipientEmail = recipientRow.email;
       await sendEmail(recipientEmail, subject, `<p>${message}</p>`);
     } else {
       await sendEmail(email, subject, `<p>${message}</p>`);
@@ -229,7 +222,12 @@ export class RuleEngine {
     tenantId: TenantId
   ): Promise<void> {
     const entityType = (parameters.entityType as string) || 'document';
-    const entityId = (context.documentId || context.transactionId) as string;
+    const contextRecord = context as Record<string, unknown>;
+    const contextDocumentId =
+      typeof contextRecord.documentId === 'string' ? contextRecord.documentId : undefined;
+    const contextTransactionId =
+      typeof contextRecord.transactionId === 'string' ? contextRecord.transactionId : undefined;
+    const entityId = contextDocumentId || contextTransactionId;
     const priority = (parameters.priority as 'low' | 'medium' | 'high') || 'medium';
 
     if (!entityId) {

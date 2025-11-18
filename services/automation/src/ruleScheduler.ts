@@ -32,6 +32,7 @@ export class RuleScheduler {
           trigger: rule.trigger as AutomationRule['trigger'],
           actions: rule.actions as AutomationRule['actions'],
           isActive: true,
+          priority: 0,
         };
 
         const context = {};
@@ -54,7 +55,7 @@ export class RuleScheduler {
 
   startScheduler(intervalMs: number = 60000): void {
     setInterval(() => {
-      this.executeScheduledRules().catch(error => {
+      this.executeScheduledRules().catch((error) => {
         logger.error('Scheduler error', error instanceof Error ? error : new Error(String(error)));
       });
     }, intervalMs);

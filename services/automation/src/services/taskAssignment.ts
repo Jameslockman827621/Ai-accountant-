@@ -1,8 +1,5 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
-
-const logger = createLogger('task-assignment');
 
 export type AssignmentMethod = 'auto' | 'round_robin' | 'skill_based' | 'manual' | 'ai_suggestion';
 
@@ -79,13 +76,9 @@ export class TaskAssignmentService {
     const taskResult = await db.query<{
       priority: string;
       task_type: string;
-    }>(
-      `SELECT priority, task_type FROM autopilot_tasks WHERE id = $1`,
-      [taskId]
-    );
+    }>(`SELECT priority, task_type FROM autopilot_tasks WHERE id = $1`, [taskId]);
 
     if (taskResult.rows.length === 0) return null;
-    const task = taskResult.rows[0];
 
     // Find available staff with lowest workload
     const staffResult = await db.query<{
@@ -111,8 +104,9 @@ export class TaskAssignmentService {
       [tenantId]
     );
 
-    if (staffResult.rows.length === 0) return null;
-    return staffResult.rows[0].user_id;
+    const staff = staffResult.rows[0];
+    if (!staff) return null;
+    return staff.user_id;
   }
 
   /**
@@ -139,8 +133,9 @@ export class TaskAssignmentService {
       [tenantId]
     );
 
-    if (staffResult.rows.length === 0) return null;
-    return staffResult.rows[0].user_id;
+    const staff = staffResult.rows[0];
+    if (!staff) return null;
+    return staff.user_id;
   }
 
   /**
@@ -150,13 +145,11 @@ export class TaskAssignmentService {
     // Get task type
     const taskResult = await db.query<{
       task_type: string;
-    }>(
-      `SELECT task_type FROM autopilot_tasks WHERE id = $1`,
-      [taskId]
-    );
+    }>(`SELECT task_type FROM autopilot_tasks WHERE id = $1`, [taskId]);
 
-    if (taskResult.rows.length === 0) return null;
-    const taskType = taskResult.rows[0].task_type;
+    const taskRow = taskResult.rows[0];
+    if (!taskRow) return null;
+    const taskType = taskRow.task_type;
 
     // Find staff with matching skills
     const staffResult = await db.query<{
@@ -179,8 +172,9 @@ export class TaskAssignmentService {
       [tenantId, taskType]
     );
 
-    if (staffResult.rows.length === 0) return null;
-    return staffResult.rows[0].user_id;
+    const staff = staffResult.rows[0];
+    if (!staff) return null;
+    return staff.user_id;
   }
 
   /**
@@ -192,13 +186,10 @@ export class TaskAssignmentService {
       task_type: string;
       priority: string;
       title: string;
-    }>(
-      `SELECT task_type, priority, title FROM autopilot_tasks WHERE id = $1`,
-      [taskId]
-    );
+    }>(`SELECT task_type, priority, title FROM autopilot_tasks WHERE id = $1`, [taskId]);
 
-    if (taskResult.rows.length === 0) return null;
     const task = taskResult.rows[0];
+    if (!task) return null;
 
     // Get staff with performance metrics
     const staffResult = await db.query<{
@@ -238,9 +229,8 @@ export class TaskAssignmentService {
       [tenantId, task.task_type]
     );
 
-    if (staffResult.rows.length === 0) return null;
-
     const staff = staffResult.rows[0];
+    if (!staff) return null;
     const reasons: string[] = [];
 
     if (staff.skill_tags.includes(task.task_type)) {

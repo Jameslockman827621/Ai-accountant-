@@ -22,11 +22,54 @@ import { slaTrackingService } from '../services/slaTracking';
 const router = Router();
 const logger = createLogger('automation-service');
 
+type RequiredUser = NonNullable<AuthRequest['user']>;
+
+function ensureAuthenticated(
+  req: AuthRequest,
+  res: Response
+): req is AuthRequest & { user: RequiredUser } {
+  if (!req.user) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return false;
+  }
+  return true;
+}
+
+function requireParam(
+  value: string | undefined,
+  res: Response,
+  message: string
+): value is string {
+  if (!value) {
+    res.status(400).json({ error: message });
+    return false;
+  }
+  return true;
+}
+
+function getQueryString(value: unknown): string | undefined {
+  if (typeof value === 'string') {
+    return value;
+  }
+  if (Array.isArray(value) && value.length > 0) {
+    return value[0];
+  }
+  return undefined;
+}
+
+function getQueryNumber(value: unknown, fallback: number): number {
+  const strValue = getQueryString(value);
+  if (!strValue) {
+    return fallback;
+  }
+  const parsed = Number(strValue);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
 // Create automation rule
 router.post('/rules', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
@@ -65,8 +108,7 @@ router.get('/playbooks/templates', (_req: AuthRequest, res: Response) => {
 
 router.get('/playbooks', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
     const playbooks = await listPlaybooks(req.user.tenantId);
@@ -79,8 +121,7 @@ router.get('/playbooks', async (req: AuthRequest, res: Response) => {
 
 router.post('/playbooks', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
     const { templateKey, name, description, config, cadenceMinutes, confirmationRequired, status } =
@@ -110,11 +151,13 @@ router.post('/playbooks', async (req: AuthRequest, res: Response) => {
 
 router.patch('/playbooks/:playbookId', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
     const { playbookId } = req.params;
+    if (!requireParam(playbookId, res, 'playbookId is required')) {
+      return;
+    }
     const { status, config, cadenceMinutes, confirmationRequired } = req.body;
     const playbook = await updatePlaybook(req.user.tenantId, playbookId, {
       status,
@@ -135,11 +178,13 @@ router.patch('/playbooks/:playbookId', async (req: AuthRequest, res: Response) =
 
 router.post('/playbooks/:playbookId/run', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
     const { playbookId } = req.params;
+    if (!requireParam(playbookId, res, 'playbookId is required')) {
+      return;
+    }
     const { force } = req.body ?? {};
     const run = await runPlaybookById(req.user.tenantId, playbookId, {
       triggeredBy: `user:${req.user.userId}`,
@@ -158,12 +203,14 @@ router.post('/playbooks/:playbookId/run', async (req: AuthRequest, res: Response
 
 router.get('/playbooks/:playbookId/runs', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
     const { playbookId } = req.params;
-    const limit = Number(req.query.limit ?? 10);
+    if (!requireParam(playbookId, res, 'playbookId is required')) {
+      return;
+    }
+    const limit = getQueryNumber(req.query.limit, 10);
     const runs = await listPlaybookRuns(req.user.tenantId, playbookId, limit);
     res.json({ runs });
   } catch (error) {
@@ -174,11 +221,14 @@ router.get('/playbooks/:playbookId/runs', async (req: AuthRequest, res: Response
 
 router.post('/playbooks/:playbookId/runs/:runId/confirm', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
     const { playbookId, runId } = req.params;
+    if (!requireParam(playbookId, res, 'playbookId is required') ||
+        !requireParam(runId, res, 'runId is required')) {
+      return;
+    }
     const run = await confirmPlaybookRun(req.user.tenantId, playbookId, runId, req.user.userId);
     res.json({ run });
   } catch (error) {
@@ -197,8 +247,7 @@ router.post('/playbooks/:playbookId/runs/:runId/confirm', async (req: AuthReques
 // Get all rules
 router.get('/rules', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
@@ -217,12 +266,14 @@ router.get('/rules', async (req: AuthRequest, res: Response) => {
 // Update rule
 router.put('/rules/:ruleId', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { ruleId } = req.params;
+    if (!requireParam(ruleId, res, 'ruleId is required')) {
+      return;
+    }
     const { name, description, trigger, actions, isActive } = req.body;
 
     // Verify rule belongs to tenant
@@ -262,12 +313,14 @@ router.put('/rules/:ruleId', async (req: AuthRequest, res: Response) => {
 // Delete rule
 router.delete('/rules/:ruleId', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { ruleId } = req.params;
+    if (!requireParam(ruleId, res, 'ruleId is required')) {
+      return;
+    }
 
     // Verify rule belongs to tenant
     const rule = await getRule(ruleId);
@@ -291,12 +344,14 @@ router.delete('/rules/:ruleId', async (req: AuthRequest, res: Response) => {
 // Execute rule manually
 router.post('/rules/:ruleId/execute', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { ruleId } = req.params;
+    if (!requireParam(ruleId, res, 'ruleId is required')) {
+      return;
+    }
     const { context } = req.body;
 
     // Verify rule belongs to tenant
@@ -318,11 +373,9 @@ router.post('/rules/:ruleId/execute', async (req: AuthRequest, res: Response) =>
 // Generate daily agenda
 router.post('/autopilot/agenda', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
-
     const { date } = req.body;
     const agenda = await autopilotEngine.generateDailyAgenda(req.user.tenantId, date);
 
@@ -336,12 +389,14 @@ router.post('/autopilot/agenda', async (req: AuthRequest, res: Response) => {
 // Get agenda
 router.get('/autopilot/agenda/:agendaId', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { agendaId } = req.params;
+    if (!requireParam(agendaId, res, 'agendaId is required')) {
+      return;
+    }
     const agenda = await autopilotEngine.getAgenda(agendaId);
 
     res.json({ agenda });
@@ -354,12 +409,15 @@ router.get('/autopilot/agenda/:agendaId', async (req: AuthRequest, res: Response
 // List tasks
 router.get('/tasks', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
-    const { status, priority, assignedTo, limit = 50, offset = 0 } = req.query;
+    const statusFilter = getQueryString(req.query.status);
+    const priorityFilter = getQueryString(req.query.priority);
+    const assignedToFilter = getQueryString(req.query.assignedTo);
+    const limit = getQueryNumber(req.query.limit, 50);
+    const offset = getQueryNumber(req.query.offset, 0);
 
     let query = `
       SELECT * FROM autopilot_tasks
@@ -368,23 +426,23 @@ router.get('/tasks', async (req: AuthRequest, res: Response) => {
     const params: unknown[] = [req.user.tenantId];
     let paramCount = 2;
 
-    if (status) {
+    if (statusFilter) {
       query += ` AND status = $${paramCount++}`;
-      params.push(status);
+      params.push(statusFilter);
     }
 
-    if (priority) {
+    if (priorityFilter) {
       query += ` AND priority = $${paramCount++}`;
-      params.push(priority);
+      params.push(priorityFilter);
     }
 
-    if (assignedTo) {
+    if (assignedToFilter) {
       query += ` AND assigned_to = $${paramCount++}`;
-      params.push(assignedTo);
+      params.push(assignedToFilter);
     }
 
     query += ` ORDER BY created_at DESC LIMIT $${paramCount++} OFFSET $${paramCount++}`;
-    params.push(parseInt(limit as string, 10), parseInt(offset as string, 10));
+    params.push(limit, offset);
 
     const result = await db.query(query, params);
 
@@ -398,15 +456,17 @@ router.get('/tasks', async (req: AuthRequest, res: Response) => {
 // Get task
 router.get('/tasks/:taskId', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { taskId } = req.params;
+    if (!requireParam(taskId, res, 'taskId is required')) {
+      return;
+    }
     const task = await autopilotEngine.getTask(taskId);
 
-    if (task.tenantId !== req.user.tenantId) {
+    if (!task || task.tenantId !== req.user.tenantId) {
       res.status(403).json({ error: 'Access denied' });
       return;
     }
@@ -421,12 +481,13 @@ router.get('/tasks/:taskId', async (req: AuthRequest, res: Response) => {
 // Assign task
 router.post('/tasks/:taskId/assign', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
-
     const { taskId } = req.params;
+    if (!requireParam(taskId, res, 'taskId is required')) {
+      return;
+    }
     const { method, userId } = req.body;
 
     if (!method) {
@@ -452,12 +513,14 @@ router.post('/tasks/:taskId/assign', async (req: AuthRequest, res: Response) => 
 // Get assignment suggestion
 router.get('/tasks/:taskId/suggest-assignment', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { taskId } = req.params;
+    if (!requireParam(taskId, res, 'taskId is required')) {
+      return;
+    }
     const suggestion = await taskAssignmentService.getAISuggestion(taskId, req.user.tenantId);
 
     res.json({ suggestion });
@@ -470,12 +533,14 @@ router.get('/tasks/:taskId/suggest-assignment', async (req: AuthRequest, res: Re
 // Execute task
 router.post('/tasks/:taskId/execute', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { taskId } = req.params;
+    if (!requireParam(taskId, res, 'taskId is required')) {
+      return;
+    }
     const { executionMethod, simulation } = req.body;
 
     const result = await taskExecutionService.executeTask(
@@ -496,12 +561,14 @@ router.post('/tasks/:taskId/execute', async (req: AuthRequest, res: Response) =>
 // Get task execution history
 router.get('/tasks/:taskId/history', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
     const { taskId } = req.params;
+    if (!requireParam(taskId, res, 'taskId is required')) {
+      return;
+    }
 
     const result = await db.query(
       `SELECT * FROM task_execution_history
@@ -520,11 +587,9 @@ router.get('/tasks/:taskId/history', async (req: AuthRequest, res: Response) => 
 // Evaluate policy
 router.post('/policies/evaluate', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
-
     const { actionType, context } = req.body;
 
     if (!actionType) {
@@ -550,11 +615,9 @@ router.post('/policies/evaluate', async (req: AuthRequest, res: Response) => {
 // Create policy
 router.post('/policies', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
-
     const { policyName, policyType, scope, scopeId, conditions, actions, riskThreshold, priority } = req.body;
 
     if (!policyName || !policyType || !scope || !conditions || !actions) {
@@ -585,12 +648,11 @@ router.post('/policies', async (req: AuthRequest, res: Response) => {
 // Get SLA statistics
 router.get('/sla/stats', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
-    const days = parseInt(req.query.days as string) || 30;
+    const days = getQueryNumber(req.query.days, 30);
     const stats = await slaTrackingService.getSLAStats(req.user.tenantId, days);
 
     res.json({ stats });
@@ -603,12 +665,11 @@ router.get('/sla/stats', async (req: AuthRequest, res: Response) => {
 // Get at-risk tasks
 router.get('/sla/at-risk', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
+    if (!ensureAuthenticated(req, res)) {
       return;
     }
 
-    const limit = parseInt(req.query.limit as string) || 50;
+    const limit = getQueryNumber(req.query.limit, 50);
     const tasks = await slaTrackingService.getAtRiskTasks(req.user.tenantId, limit);
 
     res.json({ tasks });

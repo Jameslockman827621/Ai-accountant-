@@ -60,6 +60,17 @@ export interface PlaybookRun {
   completedAt: string | null;
 }
 
+type PlaybookRunRow = {
+  id: string;
+  status: PlaybookRunStatus;
+  triggered_by: string;
+  message: string | null;
+  context: Record<string, unknown>;
+  action_summary: Record<string, unknown>;
+  created_at: Date;
+  completed_at: Date | null;
+};
+
 interface PlaybookEvaluation {
   matches: PlaybookMatch[];
   summary: Record<string, unknown>;
@@ -100,7 +111,8 @@ const PLAYBOOK_TEMPLATES: PlaybookTemplate[] = [
   {
     key: 'reconciliation_backlog',
     name: 'Reconciliation Backlog Escalation',
-    description: 'Monitor unreconciled transactions and auto-create review tasks when the backlog grows beyond your tolerance.',
+    description:
+      'Monitor unreconciled transactions and auto-create review tasks when the backlog grows beyond your tolerance.',
     category: 'cashflow',
     triggerType: 'schedule',
     cadenceMinutes: 360,
@@ -135,12 +147,14 @@ const PLAYBOOK_TEMPLATES: PlaybookTemplate[] = [
       },
     ],
     metrics: ['Pending bank transactions', 'Average age of unreconciled items'],
-    callToAction: 'Creates review tasks for the oldest high-priority transactions and emails the finance owner.',
+    callToAction:
+      'Creates review tasks for the oldest high-priority transactions and emails the finance owner.',
   },
   {
     key: 'filing_deadline_guard',
     name: 'Filing Deadline Guard',
-    description: 'Daily sweep for VAT/PAYE/CT filings due soon or overdue, with reminders and optional tasks.',
+    description:
+      'Daily sweep for VAT/PAYE/CT filings due soon or overdue, with reminders and optional tasks.',
     category: 'compliance',
     triggerType: 'schedule',
     cadenceMinutes: 1440,
@@ -159,7 +173,8 @@ const PLAYBOOK_TEMPLATES: PlaybookTemplate[] = [
     ],
     confirmationRequired: true,
     metrics: ['Upcoming filings', 'Overdue filings'],
-    callToAction: 'Emails the compliance owner with due filings and prepares review tasks for overdue items once approved.',
+    callToAction:
+      'Emails the compliance owner with due filings and prepares review tasks for overdue items once approved.',
   },
 ];
 
@@ -168,7 +183,7 @@ export function listPlaybookTemplates(): PlaybookTemplate[] {
 }
 
 function getTemplate(key: string): PlaybookTemplate | undefined {
-  return PLAYBOOK_TEMPLATES.find(template => template.key === key);
+  return PLAYBOOK_TEMPLATES.find((template) => template.key === key);
 }
 
 export async function listPlaybooks(tenantId: TenantId): Promise<AutomationPlaybook[]> {
@@ -234,10 +249,11 @@ export async function getPlaybook(
     [tenantId, playbookId]
   );
 
-  if (rows.rows.length === 0) {
+  const row = rows.rows[0];
+  if (!row) {
     return null;
   }
-  return mapPlaybookRow(rows.rows[0]);
+  return mapPlaybookRow(row);
 }
 
 export async function createPlaybook(
@@ -281,7 +297,11 @@ export async function createPlaybook(
     ]
   );
 
-  const created = await getPlaybook(tenantId, insert.rows[0].id);
+  const insertedRow = insert.rows[0];
+  if (!insertedRow) {
+    throw new Error('Failed to create playbook record');
+  }
+  const created = await getPlaybook(tenantId, insertedRow.id);
   if (!created) {
     throw new Error('Failed to load created playbook');
   }
@@ -342,16 +362,7 @@ export async function listPlaybookRuns(
   playbookId: string,
   limit: number = 10
 ): Promise<PlaybookRun[]> {
-  const result = await db.query<{
-    id: string;
-    status: PlaybookRunStatus;
-    triggered_by: string;
-    message: string | null;
-    context: Record<string, unknown>;
-    action_summary: Record<string, unknown>;
-    created_at: Date;
-    completed_at: Date | null;
-  }>(
+  const result = await db.query<PlaybookRunRow>(
     `SELECT *
      FROM automation_playbook_runs
      WHERE tenant_id = $1 AND playbook_id = $2
@@ -382,18 +393,7 @@ export async function confirmPlaybookRun(
   runId: string,
   userId: UserId
 ): Promise<PlaybookRun> {
-  const run = await db.query<{
-    id: string;
-    playbook_id: string;
-    tenant_id: string;
-    status: PlaybookRunStatus;
-    triggered_by: string;
-    message: string | null;
-    context: Record<string, unknown>;
-    action_summary: Record<string, unknown>;
-    created_at: Date;
-    completed_at: Date | null;
-  }>(
+  const run = await db.query<PlaybookRunRow>(
     `SELECT * FROM automation_playbook_runs
      WHERE id = $1 AND playbook_id = $2 AND tenant_id = $3`,
     [runId, playbookId, tenantId]
@@ -443,12 +443,17 @@ export async function confirmPlaybookRun(
     [playbook.id, JSON.stringify(result.actionSummary)]
   );
 
-  const updated = await db.query(
+  const updated = await db.query<PlaybookRunRow>(
     `SELECT * FROM automation_playbook_runs WHERE id = $1`,
     [runId]
   );
 
-  return mapRunRow(updated.rows[0]);
+  const updatedRow = updated.rows[0];
+  if (!updatedRow) {
+    throw new Error('Failed to load updated run');
+  }
+
+  return mapRunRow(updatedRow);
 }
 
 export async function runDuePlaybooks(): Promise<void> {
@@ -522,10 +527,9 @@ async function runPlaybook(
 
   const evaluation =
     options.evaluation ||
-    (await evaluateTemplate(playbook.templateKey, playbook.tenantId, playbook.config, playbook));
+    (await evaluateTemplate(playbook.templateKey, playbook.tenantId, playbook));
 
-  const threshold =
-    Number(playbook.config.threshold ?? template.defaultConfig.threshold ?? 1);
+  const threshold = Number(playbook.config.threshold ?? template.defaultConfig.threshold ?? 1);
 
   if (evaluation.matches.length < threshold) {
     return recordPlaybookRun(playbook, {
@@ -558,7 +562,7 @@ async function runPlaybook(
     });
   }
 
-    const result = await executeTemplateActions(playbook, evaluation, options);
+  const result = await executeTemplateActions(playbook, evaluation, options);
 
   return recordPlaybookRun(playbook, {
     status: 'success',
@@ -576,7 +580,6 @@ async function runPlaybook(
 async function evaluateTemplate(
   templateKey: string,
   tenantId: TenantId,
-  config: Record<string, unknown>,
   playbook: AutomationPlaybook
 ): Promise<PlaybookEvaluation> {
   switch (templateKey) {
@@ -646,7 +649,7 @@ async function evaluateReconciliationBacklog(
   const summaryRow = metrics.rows[0];
 
   return {
-    matches: matchesQuery.rows.map(row => ({
+    matches: matchesQuery.rows.map((row) => ({
       id: row.id,
       reference: row.description || 'Bank transaction',
       amount: Number(row.amount),
@@ -724,10 +727,10 @@ async function evaluateFilingDeadlineGuard(
     [tenantId, daysAhead]
   );
 
-  const overdue = result.rows.filter(row => row.due_date < new Date());
+  const overdue = result.rows.filter((row) => row.due_date < new Date());
 
   return {
-    matches: result.rows.map(row => ({
+    matches: result.rows.map((row) => ({
       id: row.id,
       reference: row.filing_type,
       date: row.due_date.toISOString(),
@@ -753,7 +756,7 @@ async function executeFilingDeadlineGuard(
   const contact = await getPrimaryContact(tenantId);
   let notifiedUsers = 0;
   if (contact?.email) {
-    const overdueCount = evaluation.matches.filter(match => match.metadata?.overdue).length;
+    const overdueCount = evaluation.matches.filter((match) => match.metadata?.overdue).length;
     await sendEmail(
       contact.email,
       'Upcoming HMRC filings',
@@ -833,7 +836,11 @@ async function recordPlaybookRun(
     [playbook.id, params.status, JSON.stringify(params.actionSummary)]
   );
 
-  return mapRunRow(insert.rows[0]);
+  const insertedRow = insert.rows[0];
+  if (!insertedRow) {
+    throw new Error('Failed to record playbook run');
+  }
+  return mapRunRow(insertedRow);
 }
 
 function mapPlaybookRow(row: {
@@ -868,16 +875,7 @@ function mapPlaybookRow(row: {
   };
 }
 
-function mapRunRow(row: {
-  id: string;
-  status: PlaybookRunStatus;
-  triggered_by: string;
-  message: string | null;
-  context: Record<string, unknown>;
-  action_summary: Record<string, unknown>;
-  created_at: Date;
-  completed_at: Date | null;
-}): PlaybookRun {
+function mapRunRow(row: PlaybookRunRow): PlaybookRun {
   return {
     id: row.id,
     status: row.status,

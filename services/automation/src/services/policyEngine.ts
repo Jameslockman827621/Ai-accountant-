@@ -1,8 +1,5 @@
-import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
-
-const logger = createLogger('policy-engine');
 
 export type PolicyAction = 'auto' | 'require_review' | 'block';
 export type PolicyScope = 'tenant' | 'role' | 'user' | 'playbook';
@@ -116,7 +113,7 @@ export class PolicyEngine {
       [tenantId, userRole, userId, actionType]
     );
 
-    return result.rows.map(row => ({
+    return result.rows.map((row) => ({
       id: row.id,
       tenantId: row.tenant_id as TenantId | null,
       policyName: row.policy_name,
@@ -141,7 +138,7 @@ export class PolicyEngine {
     // Simple condition evaluation (in production, use a proper expression evaluator)
     for (const [key, value] of Object.entries(conditions)) {
       const contextValue = context[key];
-      
+
       if (typeof value === 'object' && value !== null) {
         const condition = value as { operator: string; value: unknown };
         switch (condition.operator) {
