@@ -6,6 +6,7 @@ import { db } from '@ai-accountant/database';
 import { DocumentStatus, ProcessingQueues } from '@ai-accountant/shared-types';
 import { postDocumentToLedger } from './services/posting';
 import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
+import { recordDocumentStageTransition } from '@ai-accountant/document-ingest-service/services/documentWorkflow';
 
 config();
 
@@ -95,30 +96,37 @@ async function startWorker(): Promise<void> {
           },
         });
 
-      try {
-        const doc = await db.transaction(async (client) => {
-          const result = await client.query<{
-            tenant_id: string;
-            uploaded_by: string;
-          }>('SELECT tenant_id, uploaded_by FROM documents WHERE id = $1 FOR UPDATE', [payload.documentId]);
+        try {
+          const doc = await db.transaction(async (client) => {
+            const result = await client.query<{
+              tenant_id: string;
+              uploaded_by: string;
+            }>('SELECT tenant_id, uploaded_by FROM documents WHERE id = $1 FOR UPDATE', [payload.documentId]);
 
-          if (result.rows.length === 0) {
-            throw new Error('Document not found');
-          }
+            if (result.rows.length === 0) {
+              throw new Error('Document not found');
+            }
 
-          await client.query(
-            `UPDATE documents
-             SET status = $1,
-                 error_message = NULL,
-                 updated_at = NOW()
-             WHERE id = $2`,
-            [DocumentStatus.PROCESSING, payload.documentId]
-          );
+            await client.query(
+              `UPDATE documents
+               SET error_message = NULL,
+                   updated_at = NOW()
+               WHERE id = $1`,
+              [payload.documentId]
+            );
 
-          return result.rows[0];
-        });
+            return result.rows[0];
+          });
 
-          await postDocumentToLedger(doc.tenant_id, payload.documentId, doc.uploaded_by);
+          await recordDocumentStageTransition({
+            documentId: payload.documentId,
+            tenantId: doc.tenant_id,
+            toStatus: DocumentStatus.PROCESSING,
+            trigger: 'ledger_posting_enqueued',
+            metadata: { jobId: msg.properties.messageId || randomUUID() },
+          });
+
+            await postDocumentToLedger(doc.tenant_id, payload.documentId, doc.uploaded_by);
           recordQueueEvent({
             serviceName: 'ledger-service',
             queueName: LEDGER_QUEUE,
@@ -170,17 +178,23 @@ async function handleLedgerFailure(
   });
 
   try {
-    await db.query(
-      `UPDATE documents
-       SET status = $1,
-           error_message = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [statusOnFailure, errorMessage, payload.documentId]
-    );
+    const tenantId = await resolveTenantId(payload.documentId);
+    if (tenantId) {
+      await recordDocumentStageTransition({
+        documentId: payload.documentId,
+        tenantId,
+        toStatus: statusOnFailure,
+        trigger: shouldRetry ? 'ledger_retry_scheduled' : 'ledger_failed',
+        metadata: {
+          attempts: nextAttempt,
+          validationError: isValidationError,
+        },
+        errorMessage,
+      });
+    }
   } catch (updateError) {
     logger.error(
-      'Failed to update document status after ledger failure',
+      'Failed to record ledger failure stage',
       updateError instanceof Error ? updateError : new Error(String(updateError))
     );
   }
@@ -265,3 +279,11 @@ async function handleLedgerFailure(
 }
 
 void startWorker();
+
+async function resolveTenantId(documentId: string): Promise<string | null> {
+  const result = await db.query<{ tenant_id: string }>(
+    'SELECT tenant_id FROM documents WHERE id = $1',
+    [documentId]
+  );
+  return result.rows[0]?.tenant_id || null;
+}

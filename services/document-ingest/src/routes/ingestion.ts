@@ -10,6 +10,7 @@ import { ValidationError } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { publishOCRJob } from '../messaging/queue';
 import { DocumentStatus } from '@ai-accountant/shared-types';
+import { recordDocumentStageTransition } from '../services/documentWorkflow';
 
 const router = Router();
 const logger = createLogger('ingestion-routes');
@@ -333,6 +334,15 @@ router.post('/csv/process', async (req: AuthRequest, res: Response) => {
       ]
     );
 
+    await recordDocumentStageTransition({
+      documentId,
+      tenantId: req.user.tenantId,
+      toStatus: DocumentStatus.UPLOADED,
+      trigger: 'csv_upload',
+      metadata: { userId: req.user.userId },
+      updateDocumentStatus: false,
+    });
+
     // Evaluate ingestion rules
     const rulesResult = await ingestionRulesService.evaluateRules(req.user.tenantId, {
       sourceType: 'csv',
@@ -348,10 +358,13 @@ router.post('/csv/process', async (req: AuthRequest, res: Response) => {
       },
     });
 
-    await db.query(
-      'UPDATE documents SET status = $1 WHERE id = $2',
-      [DocumentStatus.PROCESSING, documentId]
-    );
+    await recordDocumentStageTransition({
+      documentId,
+      tenantId: req.user.tenantId,
+      toStatus: DocumentStatus.PROCESSING,
+      trigger: 'ocr_enqueued',
+      metadata: { source: 'csv_upload' },
+    });
 
     res.json({ message: 'CSV file queued for processing', documentId });
   } catch (error) {

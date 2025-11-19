@@ -1,12 +1,13 @@
 import { db } from '@ai-accountant/database';
 import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
-import { TenantId, UserId } from '@ai-accountant/shared-types';
+import { DocumentStatus, TenantId, UserId } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
 import { createLedgerEntry, CreateLedgerEntryInput } from './ledger';
 import { enforceConfidenceThreshold } from '@ai-accountant/validation-service/services/confidenceThreshold';
 import {
   validateDocumentForPosting,
 } from '@ai-accountant/validation-service/services/documentPostingValidator';
+import { recordDocumentStageTransition } from '@ai-accountant/document-ingest-service/services/documentWorkflow';
 
 const logger = createLogger('ledger-service');
 
@@ -212,8 +213,18 @@ export async function postDocumentToLedger(
   // Update document status
   await db.query(
     'UPDATE documents SET status = $1, updated_at = NOW() WHERE id = $2 AND tenant_id = $3',
-    ['posted', documentId, tenantId]
+    [DocumentStatus.POSTED, documentId, tenantId]
   );
+
+  await recordDocumentStageTransition({
+    documentId,
+    tenantId,
+    toStatus: DocumentStatus.POSTED,
+    trigger: 'ledger_posted',
+    metadata: {
+      transactionId: result.transactionId,
+    },
+  });
 
   logger.info('Document posted to ledger', { documentId, transactionId: result.transactionId, tenantId });
 

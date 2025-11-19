@@ -8,6 +8,7 @@ import { DocumentStatus, DocumentType, ProcessingQueues } from '@ai-accountant/s
 import { validateDocumentForPosting } from '@ai-accountant/validation-service/services/documentPostingValidator';
 import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
 import { routeToReviewQueue } from './services/reviewQueueManager';
+import { recordDocumentStageTransition } from '@ai-accountant/document-ingest-service/services/documentWorkflow';
 
 config();
 
@@ -89,17 +90,22 @@ async function handleClassificationFailure(
   });
 
   try {
-    await db.query(
-      `UPDATE documents
-       SET status = $1,
-           error_message = $2,
-           updated_at = NOW()
-       WHERE id = $3`,
-      [statusOnFailure, errorMessage, payload.documentId]
-    );
+    const tenantId = await resolveTenantId(payload.documentId);
+    if (tenantId) {
+      await recordDocumentStageTransition({
+        documentId: payload.documentId,
+        tenantId,
+        toStatus: statusOnFailure,
+        trigger: shouldRetry ? 'classification_retry_scheduled' : 'classification_failed',
+        metadata: {
+          attempts: nextAttempt,
+        },
+        errorMessage,
+      });
+    }
   } catch (updateError) {
     logger.error(
-      'Failed to update document status after classification failure',
+      'Failed to record classification failure stage',
       updateError instanceof Error ? updateError : new Error(String(updateError))
     );
   }
@@ -251,19 +257,30 @@ async function startWorker(): Promise<void> {
                    true
                  ),
                  confidence_score = $3,
-                 status = $4,
                  error_message = NULL,
                  updated_at = NOW()
-             WHERE id = $5`,
+             WHERE id = $4`,
             [
               result.documentType,
               JSON.stringify(result.extractedData),
               result.confidenceScore,
-              DocumentStatus.CLASSIFIED,
               payload.documentId,
             ]
           );
         });
+
+        if (tenantId) {
+          await recordDocumentStageTransition({
+            documentId: payload.documentId,
+            tenantId,
+            toStatus: DocumentStatus.CLASSIFIED,
+            trigger: 'classification_completed',
+            metadata: {
+              documentType: result.documentType,
+              confidence: result.confidenceScore,
+            },
+          });
+        }
 
         // Route to review queue if confidence or quality is low
         if (tenantId) {
@@ -354,3 +371,11 @@ async function startWorker(): Promise<void> {
 }
 
 void startWorker();
+
+async function resolveTenantId(documentId: string): Promise<string | null> {
+  const result = await db.query<{ tenant_id: string }>(
+    'SELECT tenant_id FROM documents WHERE id = $1',
+    [documentId]
+  );
+  return result.rows[0]?.tenant_id || null;
+}
