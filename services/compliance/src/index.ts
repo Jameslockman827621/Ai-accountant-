@@ -2,17 +2,20 @@ import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import { complianceRouter } from './routes/compliance';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
 config();
 
+const SERVICE_NAME = 'compliance-service';
 const app: Express = express();
-const logger = createLogger('compliance-service');
+const logger = createServiceLogger(SERVICE_NAME);
 const PORT = process.env.PORT || 3010;
 
+app.use(createTracingMiddleware(SERVICE_NAME));
+app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
