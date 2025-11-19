@@ -3,7 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config } from 'dotenv';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import { authRouter } from './routes/auth';
 import { userRouter } from './routes/users';
 import { tenantRouter } from './routes/tenants';
@@ -12,11 +12,14 @@ import { errorHandler } from './middleware/errorHandler';
 
 config();
 
+const SERVICE_NAME = 'auth-service';
 const app: Express = express();
-const logger = createLogger('auth-service');
+const logger = createServiceLogger(SERVICE_NAME);
 const PORT = process.env.PORT || 3001;
 
 // Security middleware
+app.use(createTracingMiddleware(SERVICE_NAME));
+app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
