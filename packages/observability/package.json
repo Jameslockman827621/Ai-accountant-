@@ -1,0 +1,20 @@
+{
+  "name": "@ai-accountant/observability",
+  "version": "1.0.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@ai-accountant/shared-utils": "*",
+    "@opentelemetry/api": "^1.7.0",
+    "@opentelemetry/exporter-prometheus": "^0.45.0",
+    "@opentelemetry/resources": "^1.18.0",
+    "@opentelemetry/sdk-metrics": "^1.18.0",
+    "@opentelemetry/semantic-conventions": "^1.18.0",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.10.5"
+  }
+}

@@ -1,4 +1,9 @@
-import { createLogger } from '@ai-accountant/shared-utils';
+import {
+  createServiceLogger,
+  recordExternalApiCall,
+  recordExternalApiError,
+  withExponentialBackoff,
+} from '@ai-accountant/observability';
 import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
 import {
@@ -10,7 +15,8 @@ import {
 import { recordSyncError, recordSyncSuccess } from './connectionHealth';
 import { syncRetryEngine } from './syncRetryEngine';
 
-const logger = createLogger('bank-feed-service');
+const SERVICE_NAME = 'bank-feed-service';
+const logger = createServiceLogger(SERVICE_NAME);
 
 const TRUELAYER_CLIENT_ID = process.env.TRUELAYER_CLIENT_ID || '';
 const TRUELAYER_CLIENT_SECRET = process.env.TRUELAYER_CLIENT_SECRET || '';
@@ -78,13 +84,35 @@ async function trueLayerRequest(
     fetchOptions.body = JSON.stringify(body);
   }
 
-  const response = await fetch(`${TRUELAYER_BASE_URL}${endpoint}`, fetchOptions);
+  const operation = `${method.toUpperCase()} ${endpoint}`;
+  const start = Date.now();
 
-  if (!response.ok) {
-    throw new Error(`TrueLayer request failed: ${response.statusText}`);
+  try {
+    const response = await withExponentialBackoff(
+      () => fetch(`${TRUELAYER_BASE_URL}${endpoint}`, fetchOptions),
+      {
+        maxAttempts: 3,
+        baseDelayMs: 400,
+        onRetry: (attempt, error) => {
+          logger.warn('TrueLayer API retry scheduled', {
+            operation,
+            attempt,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        },
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`TrueLayer request failed: ${response.statusText}`);
+    }
+
+    recordExternalApiCall('truelayer', operation, Date.now() - start, SERVICE_NAME);
+    return response.json();
+  } catch (error) {
+    recordExternalApiError('truelayer', operation, SERVICE_NAME);
+    throw error;
   }
-
-  return response.json();
 }
 
 export async function createTrueLayerAuthLink(

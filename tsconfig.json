@@ -94,8 +94,10 @@
       "@ai-accountant/support-service/*": ["services/support/src/*"],
       "@ai-accountant/validation-service": ["services/validation/src"],
       "@ai-accountant/validation-service/*": ["services/validation/src/*"],
-      "@ai-accountant/workflow-service": ["services/workflow/src"],
-      "@ai-accountant/workflow-service/*": ["services/workflow/src/*"]
+        "@ai-accountant/workflow-service": ["services/workflow/src"],
+        "@ai-accountant/workflow-service/*": ["services/workflow/src/*"],
+        "@ai-accountant/observability": ["packages/observability/src"],
+        "@ai-accountant/observability/*": ["packages/observability/src/*"]
     }
   },
   "exclude": ["node_modules", "dist", "build", ".next"]

@@ -4,14 +4,13 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config } from 'dotenv';
-import { createLogger } from '@ai-accountant/shared-utils';
-import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
-import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 
 config();
 
+const SERVICE_NAME = 'api-gateway';
 const app: Express = express();
-const logger = createLogger('api-gateway');
+const logger = createServiceLogger(SERVICE_NAME);
 const PORT = process.env.PORT || 3000;
 
 // Service URLs
@@ -41,8 +40,8 @@ const BACKUP_SERVICE = process.env.BACKUP_SERVICE_URL || 'http://localhost:3023'
 const ERROR_HANDLING_SERVICE = process.env.ERROR_HANDLING_SERVICE_URL || 'http://localhost:3024';
 
 // Security middleware
-app.use(tracingMiddleware);
-app.use(metricsMiddleware);
+app.use(createTracingMiddleware(SERVICE_NAME));
+app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
