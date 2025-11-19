@@ -4,26 +4,23 @@
  */
 
 import express, { Express } from 'express';
-import { initializeMetrics } from './metrics';
 import { initializeTracing } from './tracing';
-import { metricsMiddleware } from './middleware/metricsMiddleware';
-import { tracingMiddleware } from './middleware/tracingMiddleware';
 import { registerAlertRules } from './alertRules';
 import { alertingService } from './alerts';
-import { createLogger } from './logging';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 
-const logger = createLogger('monitoring-service');
+const SERVICE_NAME = 'monitoring-service';
+const logger = createServiceLogger(SERVICE_NAME);
 const app: Express = express();
 const PORT = process.env.PORT || 3010;
 
 // Initialize observability
-initializeMetrics();
 initializeTracing();
 registerAlertRules();
 
 app.use(express.json());
-app.use(metricsMiddleware);
-app.use(tracingMiddleware);
+app.use(createMetricsMiddleware(SERVICE_NAME));
+app.use(createTracingMiddleware(SERVICE_NAME));
 
 // Health check
 app.get('/health', (_req, res) => {

@@ -1,33 +1,21 @@
-import express, { Express, Request, Response, NextFunction } from 'express';
+import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import integrationsRouter from './routes/integrations';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
-import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
-import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
 
 config();
 
 const app: Express = express();
-const logger = createLogger('integrations-service');
-const PORT = process.env.PORT || 3015;
 const SERVICE_NAME = 'integrations-service';
+const logger = createServiceLogger(SERVICE_NAME);
+const PORT = process.env.PORT || 3015;
 
-const tracingHandler = (req: Request, res: Response, next: NextFunction): void => {
-  res.locals.serviceName = SERVICE_NAME;
-  tracingMiddleware(req, res, next);
-};
-
-const metricsHandler = (req: Request, res: Response, next: NextFunction): void => {
-  res.locals.serviceName = SERVICE_NAME;
-  metricsMiddleware(req, res, next);
-};
-
-app.use(tracingHandler);
-app.use(metricsHandler);
+app.use(createTracingMiddleware(SERVICE_NAME));
+app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(helmet());
 app.use(
   cors({

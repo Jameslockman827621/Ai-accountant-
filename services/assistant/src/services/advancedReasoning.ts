@@ -1,13 +1,9 @@
-import OpenAI from 'openai';
 import { db } from '@ai-accountant/database';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createServiceLogger } from '@ai-accountant/observability';
 import { TenantId } from '@ai-accountant/shared-types';
+import { runChatCompletion } from '../clients/openaiClient';
 
-const logger = createLogger('assistant-service');
-
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const logger = createServiceLogger('assistant-service');
 
 export interface FinancialCalculation {
   type: 'vat' | 'tax' | 'profit' | 'cashflow' | 'forecast';
@@ -87,7 +83,7 @@ Respond in JSON format:
 If no calculation is needed, return null.`;
 
   try {
-    const completion = await openai.chat.completions.create({
+      const completion = await runChatCompletion({
       model: 'gpt-4',
       messages: [
         {
@@ -163,7 +159,7 @@ Provide a forecast in JSON format:
 }`;
 
   try {
-    const completion = await openai.chat.completions.create({
+      const completion = await runChatCompletion({
       model: 'gpt-4',
       messages: [
         {

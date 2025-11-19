@@ -2,7 +2,7 @@ import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import { notificationRouter } from './routes/notifications';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
@@ -10,10 +10,13 @@ import { startScheduler } from './scheduler';
 
 config();
 
+const SERVICE_NAME = 'notification-service';
 const app: Express = express();
-const logger = createLogger('notification-service');
+const logger = createServiceLogger(SERVICE_NAME);
 const PORT = process.env.PORT || 3009;
 
+app.use(createTracingMiddleware(SERVICE_NAME));
+app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],

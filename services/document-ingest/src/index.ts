@@ -2,23 +2,22 @@ import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import { documentRouter } from './routes/documents';
 import { ingestionRouter } from './routes/ingestion';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 import { connectQueue } from './messaging/queue';
-import { metricsMiddleware } from '@ai-accountant/monitoring-service/middleware/metricsMiddleware';
-import { tracingMiddleware } from '@ai-accountant/monitoring-service/middleware/tracingMiddleware';
 
 config();
 
+const SERVICE_NAME = 'document-ingest-service';
 const app: Express = express();
-const logger = createLogger('document-ingest-service');
+const logger = createServiceLogger(SERVICE_NAME);
 const PORT = process.env.PORT || 3002;
 
-app.use(tracingMiddleware('document-ingest-service'));
-app.use(metricsMiddleware('document-ingest-service'));
+app.use(createTracingMiddleware(SERVICE_NAME));
+app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],

@@ -6,7 +6,12 @@ import {
   Products,
   LinkTokenCreateRequest,
 } from 'plaid';
-import { createLogger } from '@ai-accountant/shared-utils';
+import {
+  createServiceLogger,
+  recordExternalApiCall,
+  recordExternalApiError,
+  withExponentialBackoff,
+} from '@ai-accountant/observability';
 import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
 import {
@@ -18,7 +23,8 @@ import {
 import { recordSyncError, recordSyncSuccess } from './connectionHealth';
 import { syncRetryEngine } from './syncRetryEngine';
 
-const logger = createLogger('bank-feed-service');
+const SERVICE_NAME = 'bank-feed-service';
+const logger = createServiceLogger(SERVICE_NAME);
 
 const PLAID_CLIENT_ID = process.env.PLAID_CLIENT_ID || '';
 const PLAID_SECRET = process.env.PLAID_SECRET || '';
@@ -41,6 +47,28 @@ const configuration = new Configuration({
 
 export const plaidClient = new PlaidApi(configuration);
 
+async function callPlaid<T>(operation: string, fn: () => Promise<T>): Promise<T> {
+  const start = Date.now();
+  try {
+    const result = await withExponentialBackoff(fn, {
+      maxAttempts: 3,
+      baseDelayMs: 400,
+      onRetry: (attempt, error) => {
+        logger.warn('Plaid API retry scheduled', {
+          operation,
+          attempt,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    });
+    recordExternalApiCall('plaid', operation, Date.now() - start, SERVICE_NAME);
+    return result;
+  } catch (error) {
+    recordExternalApiError('plaid', operation, SERVICE_NAME);
+    throw error;
+  }
+}
+
 export async function createLinkToken(userId: string): Promise<string> {
   try {
     const request: LinkTokenCreateRequest = {
@@ -57,7 +85,7 @@ export async function createLinkToken(userId: string): Promise<string> {
       request.webhook = process.env.PLAID_WEBHOOK_URL;
     }
 
-    const response = await plaidClient.linkTokenCreate(request);
+      const response = await callPlaid('linkTokenCreate', () => plaidClient.linkTokenCreate(request));
 
     return response.data.link_token;
   } catch (error) {
@@ -75,9 +103,11 @@ export async function exchangePublicToken(
   metadata?: Record<string, unknown>
 ): Promise<{ connectionId: string; itemId: string }> {
   try {
-    const response = await plaidClient.itemPublicTokenExchange({
-      public_token: publicToken,
-    });
+      const response = await callPlaid('itemPublicTokenExchange', () =>
+        plaidClient.itemPublicTokenExchange({
+          public_token: publicToken,
+        })
+      );
 
       const { access_token: accessToken, item_id: itemId } = response.data;
     const connectionId = await persistConnectionTokens({
@@ -106,14 +136,16 @@ export async function syncPlaidTransactions(
 ): Promise<number> {
   const secrets = await getConnectionSecrets(connectionId, tenantId);
   try {
-    const response = await plaidClient.transactionsGet({
-      access_token: secrets.accessToken,
-      start_date: startDate.toISOString().split('T')[0],
-      end_date: endDate.toISOString().split('T')[0],
-      options: {
-        include_personal_finance_category: true,
-      },
-    });
+      const response = await callPlaid('transactionsGet', () =>
+        plaidClient.transactionsGet({
+          access_token: secrets.accessToken,
+          start_date: startDate.toISOString().split('T')[0],
+          end_date: endDate.toISOString().split('T')[0],
+          options: {
+            include_personal_finance_category: true,
+          },
+        })
+      );
 
     const transactions = response.data.transactions;
     for (const transaction of transactions) {

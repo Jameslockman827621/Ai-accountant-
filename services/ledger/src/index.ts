@@ -2,7 +2,7 @@ import express, { Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { config } from 'dotenv';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import { ledgerRouter } from './routes/ledger';
 import { periodCloseRouter } from './routes/periodClose';
 import { errorHandler } from './middleware/errorHandler';
@@ -10,10 +10,13 @@ import { authenticate } from './middleware/auth';
 
 config();
 
+const SERVICE_NAME = 'ledger-service';
 const app: Express = express();
-const logger = createLogger('ledger-service');
+const logger = createServiceLogger(SERVICE_NAME);
 const PORT = process.env.PORT || 3003;
 
+app.use(createTracingMiddleware(SERVICE_NAME));
+app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(helmet());
 app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
