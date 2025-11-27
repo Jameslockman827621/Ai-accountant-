@@ -226,6 +226,42 @@ export class KnowledgeBaseEngine {
   }
 
   /**
+   * Provide contextual article links for major product flows
+   */
+  getContextualArticles(): Record<string, { articleId: string; title: string }> {
+    return {
+      onboarding_profile: {
+        articleId: 'kb-onboarding-profile',
+        title: 'Complete your business profile',
+      },
+      bank_connections: {
+        articleId: 'kb-bank-connections',
+        title: 'Connect bank and accounting feeds',
+      },
+      document_ingest: {
+        articleId: 'kb-document-ingest',
+        title: 'Upload and classify receipts',
+      },
+      ledger_review: {
+        articleId: 'kb-ledger-review',
+        title: 'Review auto-posted ledger entries',
+      },
+      reconciliation: {
+        articleId: 'kb-bank-reconciliation',
+        title: 'Bank reconciliation best practices',
+      },
+      filings: {
+        articleId: 'kb-filing-walkthrough',
+        title: 'Prepare and submit filings',
+      },
+      automation_rules: {
+        articleId: 'kb-automation-rules',
+        title: 'Tune automation and classification rules',
+      },
+    };
+  }
+
+  /**
    * Record article feedback
    */
   async recordFeedback(articleId: string, helpful: boolean): Promise<void> {

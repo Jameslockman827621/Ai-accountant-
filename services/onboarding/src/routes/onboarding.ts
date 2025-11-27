@@ -15,6 +15,12 @@ import { generateSampleData } from '../services/sampleDataGenerator';
 import { tutorialEngine } from '../services/tutorialEngine';
 import { getOnboardingSchema, validateStepData, saveStepData } from '../services/onboardingSchema';
 import { emitOnboardingEvent } from '../services/onboardingEvents';
+import {
+  completeDatasetTask,
+  completeTourStep,
+  getGuidedExperience,
+  updateChecklistItem,
+} from '../services/guidedExperience';
 
 const router = Router();
 const logger = createLogger('onboarding-service');
@@ -390,6 +396,88 @@ router.post('/tutorials/:tutorialId/steps/:stepId/complete', async (req: AuthReq
   } catch (error) {
     logger.error('Complete tutorial step failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to complete tutorial step' });
+  }
+});
+
+// Guided tours, checklists, and sample datasets
+router.get('/guided-experience', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const experience = await getGuidedExperience(req.user.tenantId);
+    res.json(experience);
+  } catch (error) {
+    logger.error('Get guided experience failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to load guided experience' });
+  }
+});
+
+router.post('/guided-experience/tours/:tourId/steps/:stepId/complete', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { tourId, stepId } = req.params;
+    const tours = await completeTourStep(req.user.tenantId, req.user.userId, tourId, stepId);
+    res.json({ tours });
+  } catch (error) {
+    logger.error('Complete guided tour step failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to complete guided tour step' });
+  }
+});
+
+router.post('/guided-experience/checklists/:checklistId/items/:itemId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { checklistId, itemId } = req.params;
+    const { completed } = req.body as { completed?: boolean };
+
+    if (completed === undefined) {
+      throw new ValidationError('Completed flag is required');
+    }
+
+    const checklists = await updateChecklistItem(
+      req.user.tenantId,
+      req.user.userId,
+      checklistId,
+      itemId,
+      Boolean(completed)
+    );
+
+    res.json({ checklists });
+  } catch (error) {
+    logger.error('Update checklist item failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to update checklist item' });
+  }
+});
+
+router.post('/guided-experience/datasets/:datasetId/tasks/:taskId/complete', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { datasetId, taskId } = req.params;
+    const sampleDatasets = await completeDatasetTask(req.user.tenantId, req.user.userId, datasetId, taskId);
+
+    res.json({ sampleDatasets });
+  } catch (error) {
+    logger.error('Complete sample dataset task failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to complete sample dataset task' });
   }
 });
 
