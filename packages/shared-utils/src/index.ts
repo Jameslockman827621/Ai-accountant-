@@ -3,3 +3,4 @@ export * from './validation';
 export * from './jwt';
 export * from './errors';
 export * from './logger';
+export * from './knowledge';
