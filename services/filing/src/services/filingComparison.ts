@@ -1,4 +1,4 @@
-import { db } from '@ai-accountant/database';
+import { db, getLatestFilingVersion, recordFilingDiff, recordFilingVersion } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 
@@ -218,6 +218,32 @@ export async function compareFilings(
         }
       }
     }
+  }
+
+  try {
+    const latestVersion = await getLatestFilingVersion(filingId, tenantId);
+    const { versionNumber } = await recordFilingVersion({
+      filingId,
+      tenantId,
+      snapshot: current.filing_data,
+      source: 'comparison',
+    });
+
+    if (previousFiling && latestVersion) {
+      await recordFilingDiff({
+        filingId,
+        tenantId,
+        fromVersion: latestVersion.versionNumber,
+        toVersion: versionNumber,
+        diff: {
+          differences,
+          warnings,
+          previousFiling: previousFiling.data,
+        },
+      });
+    }
+  } catch (err) {
+    logger.warn('Failed to persist filing version comparison', err as Error);
   }
 
   return {

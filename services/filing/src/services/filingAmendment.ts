@@ -1,4 +1,4 @@
-import { db } from '@ai-accountant/database';
+import { db, recordFilingDiff, recordFilingVersion } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
@@ -112,6 +112,26 @@ export async function createAmendmentDraft(
 
   logger.info('Amendment draft created', { amendmentId, originalFilingId });
 
+  try {
+    const { versionNumber } = await recordFilingVersion({
+      filingId: amendmentId,
+      tenantId,
+      snapshot: amendedData,
+      changedBy: userId,
+      source: 'amendment',
+    });
+
+    await recordFilingDiff({
+      filingId: amendmentId,
+      tenantId,
+      fromVersion: Math.max(1, versionNumber - 1),
+      toVersion: versionNumber,
+      diff: { changes },
+    });
+  } catch (err) {
+    logger.warn('Unable to persist amendment version metadata', err as Error);
+  }
+
   return amendmentId;
 }
 
@@ -214,4 +234,61 @@ export async function submitAmendment(
   );
 
   logger.info('Amendment submitted', { amendmentFilingId, originalFilingId: amendment.original_filing_id });
+}
+
+export async function getAmendmentById(
+  amendmentId: string,
+  tenantId: TenantId
+): Promise<FilingAmendment | null> {
+  const result = await db.query<{
+    id: string;
+    original_filing_id: string;
+    tenant_id: string;
+    amendment_filing_id: string;
+    reason: string;
+    changes: string;
+    status: string;
+    created_by: string;
+    created_at: Date;
+    period_start: Date;
+    period_end: Date;
+    filing_type: string;
+  }>(
+    `SELECT fa.id,
+            fa.original_filing_id,
+            fa.tenant_id,
+            fa.amendment_filing_id,
+            fa.reason,
+            fa.changes,
+            fa.status,
+            fa.created_by,
+            fa.created_at,
+            f.period_start,
+            f.period_end,
+            f.filing_type
+       FROM filing_amendments fa
+       JOIN filings f ON fa.amendment_filing_id = f.id
+      WHERE fa.id = $1 AND fa.tenant_id = $2
+      LIMIT 1`,
+    [amendmentId, tenantId]
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: row.id,
+    originalFilingId: row.original_filing_id,
+    tenantId: row.tenant_id as TenantId,
+    filingType: row.filing_type,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    reason: row.reason,
+    changes: JSON.parse(row.changes) as FilingAmendment['changes'],
+    status: row.status as FilingAmendment['status'],
+    createdBy: row.created_by as UserId,
+    createdAt: row.created_at,
+  };
 }

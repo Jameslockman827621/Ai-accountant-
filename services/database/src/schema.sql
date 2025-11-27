@@ -189,6 +189,31 @@ CREATE TABLE filings (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE filing_versions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    filing_id UUID NOT NULL REFERENCES filings(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    version_number INTEGER NOT NULL,
+    snapshot JSONB NOT NULL,
+    changed_by UUID REFERENCES users(id),
+    source VARCHAR(50),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(filing_id, version_number)
+);
+
+CREATE TABLE filing_version_diffs (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    filing_id UUID NOT NULL REFERENCES filings(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    from_version INTEGER NOT NULL,
+    to_version INTEGER NOT NULL,
+    diff JSONB NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(filing_id, from_version, to_version)
+);
+
 -- Audit Logs table (immutable)
 CREATE TABLE audit_logs (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -257,7 +282,8 @@ CREATE TABLE validation_results (
     errors JSONB NOT NULL DEFAULT '[]'::jsonb,
     warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
     confidence DECIMAL(5, 4),
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE(tenant_id, entity_id, validation_type)
 );
 
 CREATE TABLE validation_runs (
@@ -348,6 +374,8 @@ CREATE INDEX idx_ledger_entries_reconciled ON ledger_entries(reconciled);
 CREATE INDEX idx_filings_tenant_id ON filings(tenant_id);
 CREATE INDEX idx_filings_status ON filings(status);
 CREATE INDEX idx_filings_period ON filings(period_start, period_end);
+CREATE INDEX idx_filing_versions_tenant ON filing_versions(tenant_id, filing_id);
+CREATE INDEX idx_filing_version_diffs_tenant ON filing_version_diffs(tenant_id, filing_id);
 CREATE INDEX idx_audit_logs_tenant_id ON audit_logs(tenant_id);
 CREATE INDEX idx_audit_logs_user_id ON audit_logs(user_id);
 CREATE INDEX idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
@@ -365,6 +393,8 @@ ALTER TABLE documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chart_of_accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ledger_entries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE filings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE filing_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE filing_version_diffs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE bank_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
@@ -383,6 +413,14 @@ CREATE POLICY tenant_isolation_users ON users
 CREATE POLICY tenant_isolation_documents ON documents
     FOR ALL
     USING (true); -- Will be filtered by application
+
+CREATE POLICY tenant_isolation_filing_versions ON filing_versions
+    FOR ALL
+    USING (tenant_id = current_setting('app.current_tenant')::uuid);
+
+CREATE POLICY tenant_isolation_filing_version_diffs ON filing_version_diffs
+    FOR ALL
+    USING (tenant_id = current_setting('app.current_tenant')::uuid);
 
 CREATE POLICY tenant_isolation_ledger_entries ON ledger_entries
     FOR ALL

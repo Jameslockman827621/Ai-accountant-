@@ -23,6 +23,7 @@ import { compareFilings } from '../services/filingComparison';
 import {
   createAmendmentDraft as createAmendment,
   getFilingAmendments,
+  getAmendmentById,
   submitAmendment,
 } from '../services/filingAmendment';
 import {
@@ -46,6 +47,7 @@ import { generateClientSummary } from '../services/clientSummary';
 import { filingLifecycleService } from '../services/filingLifecycle';
 import { filingWorkflowService } from '../services/filingWorkflows';
 import { runHmrcSubmissionFlow } from '../services/hmrcFlowManager';
+import { validateFilingPreSubmission } from '../services/preSubmissionValidation';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -325,6 +327,22 @@ router.get('/:filingId', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get filing failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get filing' });
+  }
+});
+
+router.post('/:filingId/validate', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { filingId } = req.params;
+    const validation = await validateFilingPreSubmission(req.user.tenantId, filingId);
+    res.json({ validation });
+  } catch (error) {
+    logger.error('Pre-submission validation failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to validate filing' });
   }
 });
 
@@ -754,9 +772,12 @@ router.get('/:filingId/review/checklist', async (req: AuthRequest, res: Response
 
     const { filingId } = req.params;
 
-    const checklist = await getFilingReviewChecklist(filingId, req.user.tenantId);
+    const [checklist, validation] = await Promise.all([
+      getFilingReviewChecklist(filingId, req.user.tenantId),
+      validateFilingPreSubmission(req.user.tenantId, filingId),
+    ]);
 
-    res.json({ checklist });
+    res.json({ checklist, validation });
   } catch (error) {
     logger.error('Get filing review checklist failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get filing review checklist' });
@@ -778,7 +799,7 @@ router.post('/:filingId/review/approve', async (req: AuthRequest, res: Response)
       throw new ValidationError('reviewId is required');
     }
 
-    await approveFilingReview(reviewId, req.user.userId, notes);
+    await approveFilingReview(reviewId, req.user.tenantId, req.user.userId, notes);
 
     res.json({ message: 'Filing review approved' });
   } catch (error) {
@@ -806,7 +827,7 @@ router.post('/:filingId/review/reject', async (req: AuthRequest, res: Response) 
       throw new ValidationError('reviewId and reason are required');
     }
 
-    await rejectFilingReview(reviewId, req.user.userId, reason);
+    await rejectFilingReview(reviewId, req.user.tenantId, req.user.userId, reason);
 
     res.json({ message: 'Filing review rejected' });
   } catch (error) {
@@ -892,6 +913,44 @@ router.post('/:filingId/amendments', async (req: AuthRequest, res: Response) => 
       return;
     }
     res.status(500).json({ error: 'Failed to create amendment' });
+  }
+});
+
+router.get('/amendments/:amendmentId', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const amendment = await getAmendmentById(req.params.amendmentId, req.user.tenantId);
+    if (!amendment) {
+      res.status(404).json({ error: 'Amendment not found' });
+      return;
+    }
+    res.json({ amendment });
+  } catch (error) {
+    logger.error('Get amendment failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to load amendment' });
+  }
+});
+
+router.post('/amendments/:amendmentId/submit', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    await submitAmendment(req.params.amendmentId, req.user.tenantId, req.user.userId);
+    res.json({ message: 'Amendment submitted' });
+  } catch (error) {
+    logger.error('Submit amendment failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to submit amendment' });
   }
 });
 

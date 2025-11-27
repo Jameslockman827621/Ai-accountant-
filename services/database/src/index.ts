@@ -80,6 +80,7 @@ export class Database {
 }
 
 export const db = new Database();
+export * from './filingVersions';
 
 // Health check
 export async function healthCheck(): Promise<boolean> {

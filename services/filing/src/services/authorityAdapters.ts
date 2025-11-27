@@ -37,14 +37,18 @@ class AuthorityAdapterRegistry {
     this.adapters.push(adapter);
   }
 
-  async submit(context: SubmissionContext): Promise<SubmissionResult> {
-    const adapter =
+  findSupportingAdapter(context: SubmissionContext): AuthorityAdapter | undefined {
+    return (
       this.adapters.find(
         candidate =>
           (context.adapterHint && candidate.id === context.adapterHint && candidate.supports(context)) ||
           (!context.adapterHint && candidate.supports(context))
-      ) ||
-      this.adapters.find(candidate => candidate.supports(context));
+      ) || this.adapters.find(candidate => candidate.supports(context))
+    );
+  }
+
+  async submit(context: SubmissionContext): Promise<SubmissionResult> {
+    const adapter = this.findSupportingAdapter(context);
 
     if (!adapter) {
       throw new Error(`No adapter available for ${context.filingType} (${context.jurisdiction})`);
