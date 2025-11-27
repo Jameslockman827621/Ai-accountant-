@@ -4,6 +4,11 @@ import { syncPlaidTransactions } from '../services/plaid';
 import { fetchTrueLayerTransactions } from '../services/truelayer';
 import { getConnectionSecrets } from '../services/connectionStore';
 import { db } from '@ai-accountant/database';
+import {
+  fetchDeadLetters,
+  markDeadLetterResolved,
+  markDeadLetterRetry,
+} from '../../../resilience/src/services/deadLetterQueue';
 
 const logger = createLogger('bank-feed-retry-worker');
 const RETRY_INTERVAL_MS = 60000; // Check every minute
@@ -18,14 +23,47 @@ export async function startRetryWorker(): Promise<void> {
 
   // Process retries immediately, then on interval
   await processRetries();
+  await processDeadLetters();
 
   setInterval(async () => {
     try {
       await processRetries();
+      await processDeadLetters();
     } catch (error) {
       logger.error('Error in retry worker cycle', error instanceof Error ? error : new Error(String(error)));
     }
   }, RETRY_INTERVAL_MS);
+}
+
+async function processDeadLetters(): Promise<void> {
+  const messages = await fetchDeadLetters('bank-feed-service', MAX_CONCURRENT_RETRIES);
+  if (messages.length === 0) {
+    return;
+  }
+
+  logger.info('Processing bank-feed DLQ messages', { count: messages.length });
+
+  for (const message of messages) {
+    try {
+      const { connectionId, tenantId } = message.payload as { connectionId: string; tenantId: string };
+      if (!connectionId || !tenantId) {
+        await markDeadLetterRetry(message.id, { error: 'Missing connection context' });
+        continue;
+      }
+
+      await syncRetryEngine.scheduleRetry(
+        tenantId as string,
+        connectionId as string,
+        `Auto-retry from DLQ: ${message.reason}`
+      );
+
+      await markDeadLetterResolved(message.id);
+    } catch (error) {
+      await markDeadLetterRetry(message.id, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 }
 
 async function processRetries(): Promise<void> {

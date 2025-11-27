@@ -9,6 +9,7 @@ import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 import { startTokenMaintenance } from './services/tokenMaintenance';
 import { startRetryWorker } from './workers/retryWorker';
+import { startFreshnessMonitor } from './workers/freshnessMonitorWorker';
 
 config();
 
@@ -42,5 +43,6 @@ app.listen(PORT, () => {
 
 startTokenMaintenance();
 startRetryWorker();
+startFreshnessMonitor();
 
 export default app;

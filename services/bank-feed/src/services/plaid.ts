@@ -23,6 +23,7 @@ import {
 import { recordSyncError, recordSyncSuccess } from './connectionHealth';
 import { syncRetryEngine } from './syncRetryEngine';
 import { enrichAndPostTransactions, RawBankTransaction } from './transactionEnrichment';
+import { handleDuplicateTransaction, isDuplicateTransaction } from './duplicateDetection';
 
 const SERVICE_NAME = 'bank-feed-service';
 const logger = createServiceLogger(SERVICE_NAME);
@@ -151,6 +152,30 @@ export async function syncPlaidTransactions(
     const transactions = response.data.transactions;
     const newTransactions: RawBankTransaction[] = [];
     for (const transaction of transactions) {
+      const description = transaction.name || transaction.merchant_name || '';
+      const isDuplicate = await isDuplicateTransaction(
+        tenantId,
+        transaction.account_id,
+        transaction.amount,
+        transaction.date,
+        description
+      );
+
+      if (isDuplicate) {
+        await handleDuplicateTransaction(
+          tenantId,
+          connectionId,
+          {
+            transactionId: transaction.transaction_id,
+            accountId: transaction.account_id,
+            date: transaction.date,
+            amount: transaction.amount,
+            description,
+          }
+        );
+        continue;
+      }
+
       const result = await db.query(
         `INSERT INTO bank_transactions (
           tenant_id, account_id, transaction_id, date, amount, currency, description, metadata
@@ -163,7 +188,7 @@ export async function syncPlaidTransactions(
           transaction.date,
           transaction.amount,
           transaction.iso_currency_code || 'GBP',
-          transaction.name || transaction.merchant_name || '',
+          description,
           JSON.stringify({
             category: transaction.category || [],
             merchantName: transaction.merchant_name || '',
@@ -179,7 +204,7 @@ export async function syncPlaidTransactions(
           accountId: transaction.account_id,
           amount: transaction.amount,
           currency: transaction.iso_currency_code || 'GBP',
-          description: transaction.name || transaction.merchant_name || '',
+          description,
           date: transaction.date,
           merchantName: transaction.merchant_name || undefined,
           plaidCategory: transaction.category || undefined,

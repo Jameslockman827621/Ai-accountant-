@@ -62,6 +62,22 @@ export async function resolveReconciliationException(
   );
 }
 
+export async function claimReconciliationException(
+  tenantId: TenantId,
+  exceptionId: string,
+  userId: string
+): Promise<void> {
+  await db.query(
+    `UPDATE reconciliation_exceptions
+     SET status = 'in_review',
+         updated_at = NOW(),
+         claimed_by = $3,
+         claimed_at = NOW()
+     WHERE id = $1 AND tenant_id = $2`,
+    [exceptionId, tenantId, userId]
+  );
+}
+
 export async function resolveExceptionsForTransaction(
   tenantId: TenantId,
   bankTransactionId: string,

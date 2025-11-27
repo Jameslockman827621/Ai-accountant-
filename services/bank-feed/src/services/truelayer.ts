@@ -14,6 +14,9 @@ import {
 } from './connectionStore';
 import { recordSyncError, recordSyncSuccess } from './connectionHealth';
 import { syncRetryEngine } from './syncRetryEngine';
+import { enrichAndPostTransactions, RawBankTransaction } from './transactionEnrichment';
+import { handleDuplicateTransaction, isDuplicateTransaction } from './duplicateDetection';
+import { handleDuplicateTransaction, isDuplicateTransaction } from './duplicateDetection';
 
 const SERVICE_NAME = 'bank-feed-service';
 const logger = createServiceLogger(SERVICE_NAME);
@@ -230,8 +233,36 @@ export async function fetchTrueLayerTransactions(
     )) as { results: TrueLayerTransaction[] };
 
     const transactions = response.results;
+    const newTransactions: RawBankTransaction[] = [];
     for (const transaction of transactions) {
-      await db.query(
+      const description = transaction.description || transaction.merchant_name || '';
+      const date = transaction.timestamp.split('T')[0];
+      const amount = Math.abs(transaction.amount);
+
+      const duplicate = await isDuplicateTransaction(
+        tenantId,
+        accountId,
+        amount,
+        date,
+        description
+      );
+
+      if (duplicate) {
+        await handleDuplicateTransaction(
+          tenantId,
+          connectionId,
+          {
+            transactionId: transaction.transaction_id,
+            accountId,
+            date,
+            amount,
+            description,
+          }
+        );
+        continue;
+      }
+
+      const result = await db.query(
         `INSERT INTO bank_transactions (
           tenant_id, account_id, transaction_id, date, amount, currency,
           description, category, metadata
@@ -241,10 +272,10 @@ export async function fetchTrueLayerTransactions(
           tenantId,
           accountId,
           transaction.transaction_id,
-          transaction.timestamp.split('T')[0],
-          Math.abs(transaction.amount),
+          date,
+          amount,
           transaction.currency || 'GBP',
-          transaction.description,
+          description,
           transaction.transaction_category,
           JSON.stringify({
             merchantName: transaction.merchant_name || '',
@@ -252,6 +283,22 @@ export async function fetchTrueLayerTransactions(
           }),
         ]
       );
+
+      if (result.rowCount && result.rowCount > 0) {
+        newTransactions.push({
+          transactionId: transaction.transaction_id,
+          accountId,
+          amount,
+          currency: transaction.currency || 'GBP',
+          description,
+          date,
+          merchantName: transaction.merchant_name || undefined,
+        });
+      }
+    }
+
+    if (newTransactions.length > 0) {
+      await enrichAndPostTransactions(tenantId, newTransactions);
     }
 
     await markConnectionRefreshed(connectionId, {

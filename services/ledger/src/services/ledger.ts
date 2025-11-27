@@ -34,6 +34,30 @@ export interface LedgerEntry extends Record<string, unknown> {
 }
 
 export async function createLedgerEntry(input: CreateLedgerEntryInput): Promise<string> {
+  // Prevent duplicate postings for the same transaction and account
+  const transactionId = input.metadata && 'transactionId' in input.metadata
+    ? String((input.metadata as Record<string, unknown>).transactionId)
+    : null;
+
+  if (transactionId) {
+    const existing = await db.query<{ id: string }>(
+      `SELECT id
+         FROM ledger_entries
+        WHERE tenant_id = $1
+          AND entry_type = $2
+          AND account_code = $3
+          AND ABS(amount - $4) < 0.01
+          AND metadata ->> 'transactionId' = $5
+        ORDER BY created_at DESC
+        LIMIT 1`,
+      [input.tenantId, input.entryType, input.accountCode, input.amount, transactionId]
+    );
+
+    if (existing.rows[0]?.id) {
+      return existing.rows[0].id;
+    }
+  }
+
   const entryId = randomUUID();
 
   await db.query(

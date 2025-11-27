@@ -51,7 +51,7 @@ export default function ReconciliationReport() {
       });
       if (accountId) params.append('accountId', accountId);
 
-      const response = await fetch(`/api/bank-feed/reconciliation?${params}`, {
+      const response = await fetch(`/api/reconciliation/report?${params}`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },

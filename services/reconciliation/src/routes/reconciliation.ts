@@ -6,11 +6,13 @@ import { findMatches, reconcileTransaction } from '../services/matcher';
 import {
   listReconciliationExceptions,
   resolveReconciliationException,
+  claimReconciliationException,
 } from '../services/exceptions';
 import {
   getReconciliationSummary,
   getReconciliationTrends,
 } from '../services/summary';
+import { buildReconciliationReport } from '../services/reporting';
 import {
   getTransactionSplits,
   replaceTransactionSplits,
@@ -294,6 +296,30 @@ router.post('/exceptions/:exceptionId/resolve', async (req: AuthRequest, res: Re
   }
 });
 
+router.post('/exceptions/:exceptionId/claim', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { exceptionId } = req.params;
+    if (!exceptionId) {
+      throw new ValidationError('exceptionId is required');
+    }
+
+    await claimReconciliationException(req.user.tenantId, exceptionId, req.user.userId);
+    res.json({ message: 'Exception claimed' });
+  } catch (error) {
+    logger.error('Claim exception failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to claim exception' });
+  }
+});
+
 router.get('/summary', async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
@@ -324,6 +350,36 @@ router.get('/summary/trend', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get reconciliation trends failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to fetch reconciliation trends' });
+  }
+});
+
+router.get('/report', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { periodStart, periodEnd, accountId } = req.query;
+    if (!periodStart || !periodEnd) {
+      throw new ValidationError('periodStart and periodEnd are required');
+    }
+
+    const report = await buildReconciliationReport(
+      req.user.tenantId,
+      new Date(String(periodStart)),
+      new Date(String(periodEnd)),
+      accountId ? String(accountId) : undefined
+    );
+
+    res.json({ report });
+  } catch (error) {
+    logger.error('Get reconciliation report failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to build reconciliation report' });
   }
 });
 
