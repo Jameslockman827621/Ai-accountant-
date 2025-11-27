@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { config } from 'dotenv';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { qualityRouter } from './routes/quality';
+import { reviewQueueRouter } from './routes/reviewQueue';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
@@ -26,6 +27,7 @@ app.get('/health', (_req, res) => {
 });
 
 app.use('/api/quality', authenticate, qualityRouter);
+app.use('/api/quality/review-queue', authenticate, reviewQueueRouter);
 
 app.use(errorHandler);
 
