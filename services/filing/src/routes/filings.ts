@@ -6,10 +6,7 @@ import { db } from '@ai-accountant/database';
 import { FilingType, FilingStatus } from '@ai-accountant/shared-types';
 import { generateVATFiling } from '../services/hmrc';
 import { ValidationError } from '@ai-accountant/shared-utils';
-import {
-  submitTenantVatReturn,
-  SubmissionType,
-} from '../services/hmrcSubmission';
+import { SubmissionType } from '../services/hmrcSubmission';
 import {
   createAmendmentDraft,
   getDraftAmendmentSubmission,
@@ -48,6 +45,7 @@ import { getEvidenceDownloadUrl } from '../storage/evidenceStorage';
 import { generateClientSummary } from '../services/clientSummary';
 import { filingLifecycleService } from '../services/filingLifecycle';
 import { filingWorkflowService } from '../services/filingWorkflows';
+import { runHmrcSubmissionFlow } from '../services/hmrcFlowManager';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -584,7 +582,7 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
       submissionType = 'resubmission';
     }
 
-    const submissionResult = await submitTenantVatReturn({
+    const submissionResult = await runHmrcSubmissionFlow({
       filingId,
       tenantId: req.user.tenantId,
       userId: req.user.userId,
@@ -604,14 +602,14 @@ router.post('/:filingId/submit', async (req: AuthRequest, res: Response) => {
        WHERE id = $1`,
       [
         filingId,
-        JSON.stringify(submissionResult.hmrcSubmissionId),
+        JSON.stringify(submissionResult.submissionId),
         JSON.stringify(submissionResult.processingDate),
       ]
     );
 
     res.json({
       message: 'Filing submitted successfully',
-      submissionId: submissionResult.hmrcSubmissionId,
+      submissionId: submissionResult.submissionId,
       receiptId: submissionResult.receiptId,
       processingDate: submissionResult.processingDate,
     });

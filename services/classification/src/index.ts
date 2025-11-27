@@ -7,8 +7,8 @@ import { db } from '@ai-accountant/database';
 import { DocumentStatus, DocumentType, ProcessingQueues } from '@ai-accountant/shared-types';
 import { validateDocumentForPosting } from '@ai-accountant/validation-service/services/documentPostingValidator';
 import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
-import { routeToReviewQueue } from './services/reviewQueueManager';
 import { recordDocumentStageTransition } from '@ai-accountant/document-ingest-service/services/documentWorkflow';
+import { persistClassificationOutcome } from './services/classificationPipeline';
 
 config();
 
@@ -237,15 +237,18 @@ async function startWorker(): Promise<void> {
       try {
         const result = await processClassificationJob(payload.extractedText);
 
+        let qualityScore: number | null = null;
+
         await db.transaction(async (client) => {
           const existing = await client.query(
-            'SELECT id, tenant_id FROM documents WHERE id = $1 FOR UPDATE',
+            'SELECT id, tenant_id, quality_score FROM documents WHERE id = $1 FOR UPDATE',
             [payload.documentId]
           );
           if (existing.rowCount === 0) {
             throw new Error('Document not found');
           }
           tenantId = existing.rows[0].tenant_id;
+          qualityScore = existing.rows[0].quality_score ?? null;
 
           await client.query(
             `UPDATE documents
@@ -269,6 +272,18 @@ async function startWorker(): Promise<void> {
           );
         });
 
+        const outcome = tenantId
+          ? await persistClassificationOutcome({
+              tenantId,
+              documentId: payload.documentId,
+              documentType: result.documentType,
+              confidenceScore: result.confidenceScore,
+              extractedData: result.extractedData,
+              fieldConfidences: {},
+              qualityScore,
+            })
+          : { requiresReview: false, shouldPostToLedger: true };
+
         if (tenantId) {
           await recordDocumentStageTransition({
             documentId: payload.documentId,
@@ -282,24 +297,9 @@ async function startWorker(): Promise<void> {
           });
         }
 
-        // Route to review queue if confidence or quality is low
-        if (tenantId) {
-          try {
-            const needsReview = await routeToReviewQueue(tenantId, payload.documentId);
-            if (needsReview) {
-              logger.info('Document routed to review queue', { documentId: payload.documentId, tenantId });
-            }
-          } catch (reviewError) {
-            logger.warn('Failed to route to review queue', {
-              documentId: payload.documentId,
-              error: reviewError instanceof Error ? reviewError : new Error(String(reviewError)),
-            });
-            // Don't fail the classification if review routing fails
-          }
-        }
-
         const shouldPostToLedger =
-          result.documentType === DocumentType.INVOICE || result.documentType === DocumentType.RECEIPT;
+          (outcome.shouldPostToLedger ?? false) &&
+          (result.documentType === DocumentType.INVOICE || result.documentType === DocumentType.RECEIPT);
 
         if (shouldPostToLedger) {
           if (!tenantId) {
