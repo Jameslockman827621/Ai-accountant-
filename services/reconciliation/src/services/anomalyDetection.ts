@@ -46,6 +46,10 @@ export class AnomalyDetectionService {
     const patternAnomalies = await this.detectPatternAnomalies(tenantId, options);
     anomalies.push(...patternAnomalies);
 
+    // Detect ledger-bank variances and suspicious velocity changes
+    const ledgerBankFindings = await this.detectLedgerBankMismatches(tenantId, options);
+    anomalies.push(...ledgerBankFindings);
+
     // Filter by minimum score
     const minScore = options?.minScore || 0.5;
     return anomalies.filter((a) => a.score >= minScore);
@@ -307,6 +311,105 @@ export class AnomalyDetectionService {
         ],
       });
     }
+
+    return anomalies;
+  }
+
+  private async detectLedgerBankMismatches(
+    tenantId: TenantId,
+    options?: { startDate?: Date; endDate?: Date }
+  ): Promise<AnomalyResult[]> {
+    const anomalies: AnomalyResult[] = [];
+
+    const periodStart = options?.startDate || new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    const periodEnd = options?.endDate || new Date();
+
+    const ledgerRollup = await db.query<{ period: string; net: number }>(
+      `SELECT DATE_TRUNC('month', transaction_date) as period,
+              SUM(CASE WHEN entry_type = 'credit' THEN amount ELSE -amount END) as net
+         FROM ledger_entries
+        WHERE tenant_id = $1
+          AND transaction_date BETWEEN $2 AND $3
+        GROUP BY DATE_TRUNC('month', transaction_date)
+        ORDER BY period`,
+      [tenantId, periodStart, periodEnd]
+    );
+
+    const bankRollup = await db.query<{ period: string; net: number }>(
+      `SELECT DATE_TRUNC('month', COALESCE(posted_at, date)) as period,
+              SUM(amount) as net
+         FROM bank_transactions
+        WHERE tenant_id = $1
+          AND COALESCE(posted_at, date) BETWEEN $2 AND $3
+        GROUP BY DATE_TRUNC('month', COALESCE(posted_at, date))
+        ORDER BY period`,
+      [tenantId, periodStart, periodEnd]
+    );
+
+    const ledgerMap = new Map(ledgerRollup.rows.map(row => [row.period, row.net]));
+
+    bankRollup.rows.forEach(row => {
+      const ledgerNet = ledgerMap.get(row.period);
+      const bankNet = row.net;
+      if (ledgerNet === undefined) {
+        anomalies.push({
+          type: 'pattern_anomaly',
+          severity: 'high',
+          score: 0.82,
+          description: `Bank movements in ${row.period} missing from ledger`,
+          suggestedActions: [
+            'Re-run bank feed ingestion and auto-categorization',
+            'Post catch-up journal entries for unmatched lines',
+          ],
+        });
+        return;
+      }
+
+      const variance = Math.abs(bankNet - ledgerNet);
+      const tolerance = Math.max(100, Math.abs(ledgerNet) * 0.08);
+      if (variance > tolerance) {
+        anomalies.push({
+          type: 'pattern_anomaly',
+          severity: variance > tolerance * 2 ? 'critical' : 'medium',
+          score: Math.min(1, variance / (tolerance * 2)),
+          description: `Ledger vs bank variance of £${variance.toFixed(2)} in ${row.period}`,
+          suggestedActions: [
+            'Match outliers to vendor bills and receipts',
+            'Escalate suspicious transfers for fraud review',
+          ],
+        });
+      }
+    });
+
+    // Detect velocity changes for high-risk vendors
+    const velocity = await db.query<{ payee: string; tx_count: number; avg_amount: number }>(
+      `SELECT COALESCE(payee, 'unknown') as payee,
+              COUNT(*) as tx_count,
+              AVG(ABS(amount)) as avg_amount
+         FROM bank_transactions
+        WHERE tenant_id = $1
+          AND COALESCE(posted_at, date) BETWEEN $2 AND $3
+        GROUP BY COALESCE(payee, 'unknown')
+        HAVING COUNT(*) >= 3
+        ORDER BY COUNT(*) DESC
+        LIMIT 15`,
+      [tenantId, periodStart, periodEnd]
+    );
+
+    velocity.rows.forEach(row => {
+      if (row.tx_count > 10 && row.avg_amount > 5000) {
+        anomalies.push({
+          type: 'pattern_anomaly',
+          severity: 'high',
+          score: 0.78,
+          description: `High-velocity payments to ${row.payee} averaging £${row.avg_amount.toFixed(2)}`,
+          suggestedActions: [
+            'Validate vendor approvals and contract caps',
+            'Trigger manual fraud review for large payments',
+          ],
+        });
+      }
+    });
 
     return anomalies;
   }

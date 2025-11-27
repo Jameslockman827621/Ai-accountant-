@@ -6,6 +6,7 @@ import { ValidationError } from '@ai-accountant/shared-utils';
 import { getDashboardStats } from '../services/dashboard';
 import { runScenarioAnalysis } from '../services/scenarioPlanner';
 import { getExecutiveInsights } from '../services/insights';
+import { runCashflowPipeline } from '../services/cashflowPipeline';
 
 const router = Router();
 const logger = createLogger('analytics-service');
@@ -101,6 +102,26 @@ router.get('/insights', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get insights failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to load executive insights' });
+  }
+});
+
+router.post('/cashflow/pipeline', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { horizonMonths, sensitivity } = req.body || {};
+    const result = await runCashflowPipeline(req.user.tenantId, {
+      horizonMonths,
+      sensitivity,
+    });
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Run cashflow pipeline failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to run cashflow pipeline' });
   }
 });
 

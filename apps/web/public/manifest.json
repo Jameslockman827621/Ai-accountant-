@@ -1,0 +1,17 @@
+{
+  "name": "AI Accountant Mobile",
+  "short_name": "AIAccountant",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#0ea5e9",
+  "description": "Responsive PWA for AI Accountant with offline-ready cockpit",
+  "icons": [
+    {
+      "src": "/pwa-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
