@@ -448,6 +448,15 @@ export async function createOneTimePaymentIntent(
   return paymentIntent;
 }
 
+export async function listPaymentMethods(tenantId: TenantId): Promise<Stripe.ApiList<Stripe.PaymentMethod>> {
+  const client = getStripeClient();
+  const customerId = await ensureStripeCustomer(tenantId);
+  return client.paymentMethods.list({
+    customer: customerId,
+    type: 'card',
+  });
+}
+
 export function constructStripeEvent(payload: Buffer, signature?: string | string[]): Stripe.Event {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!secret) {

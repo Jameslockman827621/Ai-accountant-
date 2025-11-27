@@ -2,6 +2,8 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { createSubscription, cancelSubscription, ensureStripeCustomer } from './stripe';
+import { calculateProrationAmount, getPlan } from './plans';
+import { getCreditBalance, consumeCredit } from './credits';
 
 const logger = createLogger('billing-service');
 
@@ -135,4 +137,48 @@ export async function cancelTenantSubscription(
   }
 
   logger.info('Subscription cancelled', { tenantId, cancelAtPeriodEnd });
+}
+
+export async function previewProration(
+  tenantId: TenantId,
+  targetTier: 'freelancer' | 'sme' | 'accountant' | 'enterprise'
+): Promise<{
+  amountDue: number;
+  currency: string;
+  creditBalance: number;
+  plan: ReturnType<typeof getPlan>;
+}> {
+  const current = await db.query<{
+    tier: 'freelancer' | 'sme' | 'accountant' | 'enterprise';
+    current_period_end: Date;
+  }>(
+    'SELECT tier, current_period_end FROM subscriptions WHERE tenant_id = $1',
+    [tenantId]
+  );
+
+  const row = current.rows[0];
+  if (!row) {
+    throw new Error('No subscription found');
+  }
+
+  const now = new Date();
+  const periodEnd = row.current_period_end ? new Date(row.current_period_end) : new Date();
+  const diffMs = Math.max(0, periodEnd.getTime() - now.getTime());
+  const daysRemaining = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+
+  const amountDue = calculateProrationAmount(row.tier, targetTier, daysRemaining);
+  const plan = getPlan(targetTier);
+  const credits = await getCreditBalance(tenantId);
+
+  const amountAfterCredits = Math.max(0, amountDue - credits.balance);
+  if (amountDue > 0 && credits.balance > 0) {
+    await consumeCredit(tenantId, Math.min(amountDue, credits.balance), 'Proration credit applied');
+  }
+
+  return {
+    amountDue: amountAfterCredits,
+    currency: plan.currency,
+    creditBalance: credits.balance,
+    plan,
+  };
 }

@@ -3,19 +3,27 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import { db } from '@ai-accountant/database';
 import { ValidationError } from '@ai-accountant/shared-utils';
-import { upgradeSubscription, cancelTenantSubscription } from '../services/subscription';
+import { upgradeSubscription, cancelTenantSubscription, previewProration } from '../services/subscription';
 import { generateInvoice, getInvoices } from '../services/invoiceGenerator';
-import { checkUsageLimit } from '../services/usageEnforcement';
+import { checkUsageLimit, getUsageWithLimits } from '../services/usageEnforcement';
 import { getCancellationHistory } from '../services/subscriptionCancellation';
 import {
   createOneTimePaymentIntent,
   createBillingPortalSession,
-  constructStripeEvent,
-  handleStripeWebhook,
+  listPaymentMethods,
+  updatePaymentMethod,
+  ensureStripeCustomer,
 } from '../services/stripe';
+import { SUBSCRIPTION_PLANS } from '../services/plans';
+import { createCommercePaymentIntent } from '../services/commerce';
+import { getCreditBalance } from '../services/credits';
 
 const router = Router();
 const logger = createLogger('billing-service');
+
+router.get('/plans', (_req: AuthRequest, res: Response) => {
+  res.json({ plans: SUBSCRIPTION_PLANS });
+});
 
 // Get subscription
 router.get('/subscription', async (req: AuthRequest, res: Response) => {
@@ -85,6 +93,21 @@ router.get('/usage', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.get('/usage/meter', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const meter = await getUsageWithLimits(req.user.tenantId);
+    res.json({ meter });
+  } catch (error) {
+    logger.error('Get usage meter failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch usage meter' });
+  }
+});
+
 // Update subscription (upgrade/downgrade)
 router.put('/subscription', async (req: AuthRequest, res: Response) => {
   try {
@@ -109,6 +132,30 @@ router.put('/subscription', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to update subscription' });
+  }
+});
+
+router.post('/subscription/preview', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { tier } = req.body;
+    if (!tier) {
+      throw new ValidationError('tier is required');
+    }
+
+    const preview = await previewProration(req.user.tenantId, tier);
+    res.json({ preview });
+  } catch (error) {
+    logger.error('Preview proration failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to preview proration' });
   }
 });
 
@@ -165,6 +212,36 @@ router.post('/payment-intent', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to create payment intent' });
+  }
+});
+
+router.post('/payment-intent/commerce', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { amount, currency, metadata } = req.body;
+    if (!amount) {
+      throw new ValidationError('amount is required');
+    }
+
+    const intent = await createCommercePaymentIntent(
+      req.user.tenantId,
+      parseFloat(amount),
+      currency || 'GBP',
+      metadata
+    );
+
+    res.json({ intent });
+  } catch (error) {
+    logger.error('Create commerce payment intent failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to create commerce payment intent' });
   }
 });
 
@@ -240,6 +317,25 @@ router.get('/invoices', async (req: AuthRequest, res: Response) => {
   }
 });
 
+router.get('/history', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const [invoices, credits] = await Promise.all([
+      getInvoices(req.user.tenantId, undefined, 100),
+      getCreditBalance(req.user.tenantId),
+    ]);
+
+    res.json({ invoices, credits });
+  } catch (error) {
+    logger.error('Get billing history failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get billing history' });
+  }
+});
+
 // Check usage limit
 router.get('/usage/check', async (req: AuthRequest, res: Response) => {
   try {
@@ -311,44 +407,43 @@ router.post('/billing-portal', async (req: AuthRequest, res: Response) => {
   }
 });
 
-// Stripe webhook endpoint (no auth required - uses signature verification)
-router.post('/webhook/stripe', async (req, res: Response) => {
+router.get('/payment-methods', async (req: AuthRequest, res: Response) => {
   try {
-    const signature = req.headers['stripe-signature'];
-    const event = constructStripeEvent(req.body, signature);
-    
-    // Idempotency check - prevent duplicate processing
-    const eventId = event.id;
-    const tenantId = (event.data.object as any).metadata?.tenantId as string | undefined;
-    
-    const existingResult = await db.query<{
-      id: string;
-    }>(
-      `SELECT id FROM webhook_events
-       WHERE id = $1 AND provider = 'stripe'`,
-      [eventId]
-    );
-
-    if (existingResult.rows.length > 0) {
-      logger.info('Duplicate webhook event ignored', { eventId, type: event.type });
-      res.json({ received: true, duplicate: true });
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
       return;
     }
 
-    // Store event for idempotency
-    await db.query(
-      `INSERT INTO webhook_events (id, tenant_id, provider, event_type, payload, created_at)
-       VALUES ($1, $2, 'stripe', $3, $4::jsonb, NOW())`,
-      [eventId, tenantId || 'unknown', event.type, JSON.stringify(event)]
-    );
-
-    // Process webhook
-    await handleStripeWebhook(event);
-    
-    res.json({ received: true });
+    const methods = await listPaymentMethods(req.user.tenantId);
+    res.json({ paymentMethods: methods.data });
   } catch (error) {
-    logger.error('Stripe webhook failed', error instanceof Error ? error : new Error(String(error)));
-    res.status(400).json({ error: 'Webhook error' });
+    logger.error('List payment methods failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to list payment methods' });
+  }
+});
+
+router.post('/payment-methods/default', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { paymentMethodId } = req.body;
+    if (!paymentMethodId) {
+      throw new ValidationError('paymentMethodId is required');
+    }
+
+    const customerId = await ensureStripeCustomer(req.user.tenantId);
+    await updatePaymentMethod(customerId, paymentMethodId);
+    res.json({ message: 'Payment method updated' });
+  } catch (error) {
+    logger.error('Update default payment method failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to update payment method' });
   }
 });
 

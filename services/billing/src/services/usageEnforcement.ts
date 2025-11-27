@@ -218,3 +218,40 @@ function toNumber(value: unknown): number {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
 }
+
+export async function getUsageWithLimits(
+  tenantId: TenantId
+): Promise<{ usage: Record<string, number>; limits: TierLimits }> {
+  const tenantResult = await db.query<{ subscription_tier: string }>(
+    `SELECT subscription_tier FROM tenants WHERE id = $1`,
+    [tenantId]
+  );
+  const tier = (tenantResult.rows[0]?.subscription_tier as keyof typeof TIER_LIMITS) ?? 'freelancer';
+  const limits = TIER_LIMITS[tier];
+
+  const currentPeriod = new Date().toISOString().slice(0, 7);
+  const usageResult = await db.query<{
+    documents_processed: number;
+    ocr_requests: number;
+    llm_queries: number;
+    filings_submitted: number;
+    storage_used: number;
+  }>(
+    `SELECT documents_processed, ocr_requests, llm_queries, filings_submitted, storage_used
+     FROM usage_metrics WHERE tenant_id = $1 AND period = $2`,
+    [tenantId, currentPeriod]
+  );
+
+  const usage = usageResult.rows[0] || {
+    documents_processed: 0,
+    ocr_requests: 0,
+    llm_queries: 0,
+    filings_submitted: 0,
+    storage_used: 0,
+  };
+
+  return {
+    usage,
+    limits,
+  };
+}
