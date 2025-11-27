@@ -5,7 +5,13 @@ import { createHash } from 'crypto';
 
 const logger = createLogger('model-registry');
 
-export type ModelType = 'ocr' | 'classification' | 'extraction' | 'layout' | 'semantic';
+export type ModelType =
+  | 'ocr'
+  | 'classification'
+  | 'extraction'
+  | 'layout'
+  | 'semantic'
+  | 'forecasting';
 export type RolloutStage = 'development' | 'staging' | 'production' | 'deprecated';
 
 export interface ModelMetadata {

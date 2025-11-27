@@ -7,6 +7,7 @@ import { getDashboardStats } from '../services/dashboard';
 import { runScenarioAnalysis } from '../services/scenarioPlanner';
 import { getExecutiveInsights } from '../services/insights';
 import { runCashflowPipeline } from '../services/cashflowPipeline';
+import { buildForecastingPortfolio } from '../services/forecastingModels';
 
 const router = Router();
 const logger = createLogger('analytics-service');
@@ -122,6 +123,23 @@ router.post('/cashflow/pipeline', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Run cashflow pipeline failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to run cashflow pipeline' });
+  }
+});
+
+router.get('/forecasting/models', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const periods = Number(req.query.periods) || 6;
+    const portfolio = await buildForecastingPortfolio(req.user.tenantId, periods);
+
+    res.json({ portfolio });
+  } catch (error) {
+    logger.error('Load forecasting models failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to load forecasting models' });
   }
 });
 
