@@ -22,6 +22,7 @@ import {
   createMfaChallenge,
   consumeMfaChallenge,
 } from '../services/securityTokens';
+import { evaluateAdaptiveRisk } from '../services/adaptiveAuth';
 
 const router = Router();
 const logger = createLogger('auth-service');
@@ -67,6 +68,7 @@ type UserWithTenant = {
   email_verified: boolean;
   mfa_enabled: boolean;
   mfa_secret: string | null;
+  last_login_at?: Date | null;
 };
 
 async function fetchUserByEmail(email: string, tenantFilter?: string): Promise<UserWithTenant | null> {
@@ -81,7 +83,8 @@ async function fetchUserByEmail(email: string, tenantFilter?: string): Promise<U
            t.name AS tenant_name,
            COALESCE(u.email_verified, false) AS email_verified,
            COALESCE(u.mfa_enabled, false) AS mfa_enabled,
-           u.mfa_secret
+           u.mfa_secret,
+           u.last_login_at
     FROM users u
     JOIN tenants t ON u.tenant_id = t.id
     WHERE u.email = $1`;
@@ -280,17 +283,34 @@ router.post('/login', async (req: Request<unknown, unknown, LoginBody>, res: Res
       return;
     }
 
-    if (user.mfa_enabled) {
+    const adaptiveRisk = evaluateAdaptiveRisk(req, {
+      id: user.id,
+      email: user.email,
+      tenantId: user.tenant_id,
+      mfaEnabled: user.mfa_enabled,
+      lastLoginAt: user.last_login_at,
+    });
+
+    if (adaptiveRisk.level === 'block') {
+      res.status(403).json({
+        error: 'Sign-in blocked due to high risk. Please contact support.',
+        risk: adaptiveRisk,
+      });
+      return;
+    }
+
+    if (user.mfa_enabled || adaptiveRisk.level === 'high') {
       const challengeToken = await createMfaChallenge(user.id);
       res.json({
         requiresMfa: true,
         challengeToken,
+        risk: adaptiveRisk,
       });
       return;
     }
 
     const payload = await buildAuthResponse(user);
-    res.json(payload);
+    res.json({ ...payload, risk: adaptiveRisk });
   } catch (error: unknown) {
     logger.error('Login failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {
@@ -666,18 +686,35 @@ router.post('/sso/google', async (req: Request<unknown, unknown, GoogleSsoBody>,
       throw new ValidationError('Account is inactive');
     }
 
-    if (user.mfa_enabled) {
+    const adaptiveRisk = evaluateAdaptiveRisk(req, {
+      id: user.id,
+      email: user.email,
+      tenantId: user.tenant_id,
+      mfaEnabled: user.mfa_enabled,
+      lastLoginAt: user.last_login_at,
+    });
+
+    if (adaptiveRisk.level === 'block') {
+      res.status(403).json({
+        error: 'Sign-in blocked due to high risk. Please contact support.',
+        risk: adaptiveRisk,
+      });
+      return;
+    }
+
+    if (user.mfa_enabled || adaptiveRisk.level === 'high') {
       const challengeToken = await createMfaChallenge(user.id);
       res.json({
         requiresMfa: true,
         challengeToken,
         via: 'google',
+        risk: adaptiveRisk,
       });
       return;
     }
 
     const payloadResponse = await buildAuthResponse(user);
-    res.json(payloadResponse);
+    res.json({ ...payloadResponse, risk: adaptiveRisk });
   } catch (error: unknown) {
     logger.error('Google SSO failed', error instanceof Error ? error : new Error(String(error)));
     if (error instanceof ValidationError) {

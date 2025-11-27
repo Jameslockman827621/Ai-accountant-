@@ -1,6 +1,16 @@
 import { EncryptedData, decrypt, encrypt } from '@ai-accountant/shared-utils';
 
 export type SecretPayload = EncryptedData;
+export interface RotationPolicy {
+  maxAgeDays: number;
+  createdAt?: string;
+  version?: string;
+}
+
+export interface ManagedSecret {
+  payload: SecretPayload;
+  policy: RotationPolicy;
+}
 
 function resolveKey(provided?: string): string {
   const key =
@@ -87,4 +97,24 @@ export function stringifySecret(payload: SecretPayload): string {
 
 export function parseSecret(payload: string): SecretPayload {
   return assertSecretPayload(payload);
+}
+
+export function buildManagedSecret(value: string, policy: RotationPolicy, key?: string): ManagedSecret {
+  const createdAt = policy.createdAt || new Date().toISOString();
+  return {
+    payload: encryptSecret(value, key),
+    policy: { ...policy, createdAt },
+  };
+}
+
+export function needsRotation(managed: ManagedSecret, now: Date = new Date()): boolean {
+  const created = managed.policy.createdAt ? new Date(managed.policy.createdAt) : now;
+  const ageMs = now.getTime() - created.getTime();
+  const maxMs = managed.policy.maxAgeDays * 24 * 60 * 60 * 1000;
+  return ageMs >= maxMs;
+}
+
+export function decryptManagedSecret(managed: ManagedSecret, key?: string): { value: string; rotationDue: boolean } {
+  const value = decryptSecret(managed.payload, key);
+  return { value, rotationDue: needsRotation(managed) };
 }

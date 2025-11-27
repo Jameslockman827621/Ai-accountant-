@@ -1,6 +1,7 @@
 import { createLogger } from '@ai-accountant/shared-utils';
 import { db } from '@ai-accountant/database';
 import { sendEmail } from '../../notification/src/services/email';
+import crypto from 'crypto';
 
 const logger = createLogger('monitoring-service');
 
@@ -138,4 +139,30 @@ async function createAlert(alert: Omit<Alert, 'id' | 'timestamp' | 'acknowledged
     timestamp,
     acknowledged: false,
   };
+}
+
+export async function createAlertFromFinding(input: {
+  tool: 'sast' | 'dast' | 'dependency';
+  severity: AlertRule['severity'] | 'high' | 'medium' | 'low' | 'critical';
+  summary: string;
+  tenantId?: string;
+}): Promise<Alert | null> {
+  const normalizedSeverity: AlertRule['severity'] =
+    input.severity === 'critical' || input.severity === 'high' ? 'critical' : input.severity === 'medium' ? 'warning' : 'info';
+
+  const alert: Omit<Alert, 'id' | 'timestamp' | 'acknowledged'> = {
+    ruleId: `security-scan-${input.tool}`,
+    tenantId: input.tenantId || 'global',
+    severity: normalizedSeverity,
+    message: `[${input.tool.toUpperCase()}] ${input.summary}`,
+    metricValue: 1,
+    threshold: 0,
+  };
+
+  try {
+    return await createAlert(alert);
+  } catch (error) {
+    logger.error('Failed to create alert from security finding', error);
+    return null;
+  }
 }
