@@ -78,6 +78,96 @@
         ]
       },
       "expectedFiling": null
+    },
+    {
+      "id": "statement-001",
+      "documentType": "bank_statement",
+      "fileName": "bank-statement.csv",
+      "expectedOCR": {
+        "rawText": "Statement for Jan 2024",
+        "tokens": []
+      },
+      "expectedClassification": {
+        "documentType": "statement",
+        "confidence": 0.92,
+        "extractedData": {
+          "openingBalance": 10250.25,
+          "closingBalance": 9850.55,
+          "currency": "GBP"
+        }
+      },
+      "expectedLedger": {
+        "entries": [
+          { "accountCode": "1200", "description": "Bank Opening", "debitAmount": 10250.25, "creditAmount": 0 },
+          { "accountCode": "1200", "description": "Bank Closing", "debitAmount": 0, "creditAmount": 9850.55 }
+        ]
+      },
+      "expectedFiling": null
+    },
+    {
+      "id": "vat-return-2024q2",
+      "documentType": "vat_return",
+      "fileName": "vat-q2-2024.json",
+      "expectedOCR": {
+        "rawText": "VAT Return for 2024 Q2",
+        "tokens": []
+      },
+      "expectedClassification": {
+        "documentType": "tax_form",
+        "confidence": 0.96,
+        "extractedData": {
+          "period": "2024-Q2",
+          "box1": 3200,
+          "box4": 900,
+          "box6": 16000,
+          "currency": "GBP"
+        }
+      },
+      "expectedLedger": {
+        "entries": [
+          { "accountCode": "2200", "description": "VAT Payable", "debitAmount": 900, "creditAmount": 3200 }
+        ]
+      },
+      "expectedFiling": {
+        "vatReturn": {
+          "box1": 3200,
+          "box4": 900,
+          "box6": 16000,
+          "netVat": 2300
+        }
+      }
+    },
+    {
+      "id": "payslip-001",
+      "documentType": "payslip",
+      "fileName": "payslip-jane-doe.pdf",
+      "expectedOCR": {
+        "rawText": "PAYSLIP Jane Doe",
+        "tokens": []
+      },
+      "expectedClassification": {
+        "documentType": "payslip",
+        "confidence": 0.93,
+        "extractedData": {
+          "employee": "Jane Doe",
+          "grossPay": 5000,
+          "netPay": 3800,
+          "tax": 900,
+          "currency": "GBP"
+        }
+      },
+      "expectedLedger": {
+        "entries": [
+          { "accountCode": "7000", "description": "Gross Pay", "debitAmount": 5000, "creditAmount": 0 },
+          { "accountCode": "2210", "description": "PAYE", "debitAmount": 0, "creditAmount": 900 }
+        ]
+      },
+      "expectedFiling": {
+        "rtistub": {
+          "employee": "Jane Doe",
+          "tax": 900
+        }
+      }
     }
   ]
 }
