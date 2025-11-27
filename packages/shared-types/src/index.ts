@@ -67,6 +67,15 @@ export interface DocumentChecklistItem {
   helpText?: string;
 }
 
+export interface QualityReviewJobPayload {
+  documentId: string;
+  tenantId: string;
+  qualityScore: number;
+  issues: DocumentQualityIssue[];
+  storageKey?: string;
+  source?: string;
+}
+
 export type ValidationStatus = 'pass' | 'warning' | 'fail';
 
 export interface ValidationComponentSummary {
@@ -446,6 +455,11 @@ export const ProcessingQueues = {
     primary: 'ocr_processing',
     retry: 'ocr_processing_retry',
     dlq: 'ocr_processing_dlq',
+  },
+  QUALITY_REVIEW: {
+    primary: 'quality_review',
+    retry: 'quality_review_retry',
+    dlq: 'quality_review_dlq',
   },
   CLASSIFICATION: {
     primary: 'document_classification',

@@ -6,6 +6,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { qualityRouter } from './routes/quality';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { startQualityReviewWorker } from './queue/qualityReviewWorker';
 
 config();
 
@@ -28,6 +29,10 @@ app.get('/health', (_req, res) => {
 app.use('/api/quality', authenticate, qualityRouter);
 
 app.use(errorHandler);
+
+startQualityReviewWorker().catch((error) => {
+  logger.error('Failed to start quality review worker', error instanceof Error ? error : new Error(String(error)));
+});
 
 app.listen(PORT, () => {
   logger.info(`Quality service listening on port ${PORT}`);

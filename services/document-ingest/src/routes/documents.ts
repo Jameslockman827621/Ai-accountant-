@@ -4,11 +4,11 @@ import { randomUUID } from 'crypto';
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { uploadFile, initializeBucket } from '../storage/s3';
-import { publishOCRJob, publishClassificationJob, publishLedgerJob } from '../messaging/queue';
-import { DocumentStatus, DocumentType, DocumentUploadSource } from '@ai-accountant/shared-types';
+import { publishOCRJob, publishClassificationJob, publishLedgerJob, publishQualityReviewJob } from '../messaging/queue';
+import { DocumentQualityIssue, DocumentStatus, DocumentType, DocumentUploadSource } from '@ai-accountant/shared-types';
 import { AuthRequest } from '../middleware/auth';
 import { ValidationError } from '@ai-accountant/shared-utils';
-import { assessDocumentQuality } from '../services/qualityAssessment';
+import { assessDocumentQuality, evaluateQualityGate } from '../services/qualityAssessment';
 import { guidanceService } from '../services/guidanceService';
 import {
   DocumentProcessingStage,
@@ -28,6 +28,28 @@ function parseDocumentTypeInput(value?: string): DocumentType | undefined {
   }
   const match = Object.values(DocumentType).find(type => type === value);
   return match;
+}
+
+function normalizeQualityIssues(raw: unknown): DocumentQualityIssue[] {
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw as DocumentQualityIssue[];
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as DocumentQualityIssue[];
+    } catch (error) {
+      logger.warn('Unable to parse quality issues', error instanceof Error ? error.message : String(error));
+    }
+  }
+  return [];
+}
+
+function deriveQualityGateStatus(score?: number | null, issues?: unknown): 'passed' | 'needs_review' {
+  const parsedIssues = normalizeQualityIssues(issues);
+  const hasCritical = parsedIssues.some(issue => issue?.severity === 'critical');
+  if (hasCritical) return 'needs_review';
+  if (typeof score === 'number' && score < 70) return 'needs_review';
+  return 'passed';
 }
 
 function parseUploadSource(value?: string): DocumentUploadSource {
@@ -128,6 +150,7 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
     const uploadSource = parseUploadSource(req.body?.source);
     const notes = sanitizeNotes(req.body?.notes);
     const quality = await assessDocumentQuality(file, declaredType);
+    const qualityGate = evaluateQualityGate(quality);
 
     // Upload to S3
     await uploadFile(storageKey, file.buffer, file.mimetype);
@@ -168,27 +191,52 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
       return;
     }
 
-      await recordDocumentStageTransition({
-        documentId,
-        tenantId: req.user.tenantId,
-        toStatus: DocumentStatus.UPLOADED,
-        trigger: 'upload',
-        metadata: {
-          source: uploadSource,
-          traceId,
-        },
-        updateDocumentStatus: false,
-      });
-
-    // Publish OCR job
-    try {
-      await publishOCRJob(documentId, storageKey, {
-        tenantId: req.user.tenantId,
+    await recordDocumentStageTransition({
+      documentId,
+      tenantId: req.user.tenantId,
+      toStatus: DocumentStatus.UPLOADED,
+      trigger: 'upload',
+      metadata: {
+        source: uploadSource,
         traceId,
-        headers: {
-          'x-trigger': 'upload',
-        },
-      });
+        qualityGate: qualityGate.status,
+      },
+      updateDocumentStatus: false,
+    });
+
+    if (qualityGate.status === 'needs_review') {
+      try {
+        await publishQualityReviewJob(
+          {
+            documentId,
+            tenantId: req.user.tenantId,
+            qualityScore: quality.score,
+            issues: quality.issues,
+            storageKey,
+            source: uploadSource,
+          },
+          {
+            traceId,
+            tenantId: req.user.tenantId,
+            headers: { 'x-trigger': 'upload' },
+          }
+        );
+      } catch (error) {
+        logger.error(
+          'Failed to publish quality review job',
+          error instanceof Error ? error : new Error(String(error))
+        );
+      }
+    } else {
+      // Publish OCR job
+      try {
+        await publishOCRJob(documentId, storageKey, {
+          tenantId: req.user.tenantId,
+          traceId,
+          headers: {
+            'x-trigger': 'upload',
+          },
+        });
         await recordDocumentStageTransition({
           documentId,
           tenantId: req.user.tenantId,
@@ -196,9 +244,10 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
           trigger: 'ocr_enqueued',
           metadata: { traceId, source: uploadSource },
         });
-    } catch (error) {
-      logger.error('Failed to publish OCR job', error instanceof Error ? error : new Error(String(error)));
-      // Continue anyway - job can be retried
+      } catch (error) {
+        logger.error('Failed to publish OCR job', error instanceof Error ? error : new Error(String(error)));
+        // Continue anyway - job can be retried
+      }
     }
 
     logger.info('Document uploaded', { documentId, tenantId: req.user.tenantId });
@@ -224,6 +273,7 @@ router.post('/upload', upload.single('file'), async (req: AuthRequest, res: Resp
         uploadSource: document.upload_source,
         uploadNotes: document.upload_notes,
         suggestedDocumentType: document.suggested_document_type,
+        qualityGateStatus: qualityGate.status,
       },
       guidance: quality,
     });
@@ -290,6 +340,7 @@ router.get('/', async (req: AuthRequest, res: Response) => {
       const documents = result.rows.map(row => ({
         ...row,
         processing_stage: row.processing_stage || getStageForStatus(row.status),
+        quality_gate_status: deriveQualityGateStatus(row.quality_score, row.quality_issues),
       }));
 
       res.json({
@@ -379,6 +430,7 @@ router.get('/:documentId', async (req: AuthRequest, res: Response) => {
         document: {
           ...doc,
           processing_stage: doc.processing_stage || getStageForStatus(doc.status),
+          quality_gate_status: deriveQualityGateStatus(doc.quality_score, doc.quality_issues),
         },
       });
   } catch (error) {
