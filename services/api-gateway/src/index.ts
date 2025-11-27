@@ -13,6 +13,53 @@ const app: Express = express();
 const logger = createServiceLogger(SERVICE_NAME);
 const PORT = process.env.PORT || 3000;
 
+class CircuitBreaker {
+  private failures = 0;
+  private openedAt: number | null = null;
+
+  constructor(
+    private readonly serviceName: string,
+    private readonly failureThreshold: number = 5,
+    private readonly resetTimeoutMs: number = 60000
+  ) {}
+
+  isOpen(): boolean {
+    if (this.openedAt === null) {
+      return false;
+    }
+
+    const elapsed = Date.now() - this.openedAt;
+    if (elapsed > this.resetTimeoutMs) {
+      this.reset();
+      return false;
+    }
+
+    return true;
+  }
+
+  recordFailure(metadata?: Record<string, unknown>): void {
+    this.failures += 1;
+    if (this.failures >= this.failureThreshold) {
+      this.openedAt = Date.now();
+      logger.warn('Circuit opened', { serviceName: this.serviceName, ...metadata });
+    }
+  }
+
+  recordSuccess(): void {
+    if (this.failures > 0) {
+      logger.debug('Circuit reset after success', { serviceName: this.serviceName, failures: this.failures });
+    }
+    this.reset();
+  }
+
+  private reset(): void {
+    this.failures = 0;
+    this.openedAt = null;
+  }
+}
+
+const circuitBreakers = new Map<string, CircuitBreaker>();
+
 // Service URLs
 const AUTH_SERVICE = process.env.AUTH_SERVICE_URL || 'http://localhost:3001';
 const DOCUMENT_SERVICE = process.env.DOCUMENT_SERVICE_URL || 'http://localhost:3002';
@@ -56,6 +103,16 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
+const mutationLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.method === 'GET' || req.method === 'OPTIONS',
+  message: 'Write throughput exceeded, please retry shortly.',
+});
+app.use('/api/', mutationLimiter);
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -69,45 +126,80 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // Proxy middleware factory
-function createServiceProxy(target: string, pathRewrite?: Record<string, string>) {
-  return createProxyMiddleware({
+function createServiceProxy(target: string, serviceName: string, pathRewrite?: Record<string, string>) {
+  const breaker = circuitBreakers.get(serviceName) || new CircuitBreaker(serviceName);
+  circuitBreakers.set(serviceName, breaker);
+
+  const proxy = createProxyMiddleware({
     target,
     changeOrigin: true,
     pathRewrite: pathRewrite || {},
     onProxyReq: (_proxyReq, req) => {
       logger.debug(`Proxying ${req.method} ${req.url} to ${target}`);
     },
+    onProxyRes: () => {
+      breaker.recordSuccess();
+    },
     onError: (err: Error, req) => {
+      breaker.recordFailure({ reason: err.message });
       logger.error(`Proxy error for ${req.url}`, err);
     },
   });
+
+  return (req: Request, res: Response, next: unknown) => {
+    if (breaker.isOpen()) {
+      res.status(503).json({ error: `${serviceName} temporarily unavailable due to recent errors.` });
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      breaker.recordFailure({ reason: 'timeout' });
+      res.status(504).json({ error: `${serviceName} did not respond in time.` });
+    }, 15000);
+
+    res.on('finish', () => clearTimeout(timeout));
+    // @ts-expect-error Express typing of next differs from http-proxy-middleware
+    proxy(req, res, next);
+  };
 }
 
 // Route to services
-app.use('/api/auth', createServiceProxy(AUTH_SERVICE, { '^/api/auth': '/api/auth' }));
-app.use('/api/documents', createServiceProxy(DOCUMENT_SERVICE, { '^/api/documents': '/api/documents' }));
-app.use('/api/ledger', createServiceProxy(LEDGER_SERVICE, { '^/api/ledger': '/api/ledger' }));
-app.use('/api/rules', createServiceProxy(RULES_SERVICE, { '^/api/rules': '/api/rules' }));
-app.use('/api/assistant', createServiceProxy(ASSISTANT_SERVICE, { '^/api/assistant': '/api/assistant' }));
-app.use('/api/billing', createServiceProxy(BILLING_SERVICE, { '^/api/billing': '/api/billing' }));
-app.use('/api/filings', createServiceProxy(FILING_SERVICE, { '^/api/filings': '/api/filings' }));
-app.use('/api/reconciliation', createServiceProxy(RECONCILIATION_SERVICE, { '^/api/reconciliation': '/api/reconciliation' }));
-app.use('/api/notifications', createServiceProxy(NOTIFICATION_SERVICE, { '^/api/notifications': '/api/notifications' }));
-app.use('/api/compliance', createServiceProxy(COMPLIANCE_SERVICE, { '^/api/compliance': '/api/compliance' }));
-app.use('/api/monitoring', createServiceProxy(MONITORING_SERVICE, { '^/api/monitoring': '' }));
-app.use('/api/workflows', createServiceProxy(WORKFLOW_SERVICE, { '^/api/workflows': '/api/workflows' }));
-app.use('/api/accountant', createServiceProxy(ACCOUNTANT_SERVICE, { '^/api/accountant': '/api/accountant' }));
-app.use('/api/analytics', createServiceProxy(ANALYTICS_SERVICE, { '^/api/analytics': '/api/analytics' }));
-app.use('/api/automation', createServiceProxy(AUTOMATION_SERVICE, { '^/api/automation': '/api/automation' }));
-app.use('/api/integrations', createServiceProxy(INTEGRATIONS_SERVICE, { '^/api/integrations': '/api/integrations' }));
-app.use('/api/bank-feed', createServiceProxy(BANK_FEED_SERVICE, { '^/api/bank-feed': '/api/bank-feed' }));
-app.use('/api/classification', createServiceProxy(CLASSIFICATION_SERVICE, { '^/api/classification': '/api/classification' }));
-app.use('/api/ocr', createServiceProxy(OCR_SERVICE, { '^/api/ocr': '/api/ocr' }));
-app.use('/api/validation', createServiceProxy(VALIDATION_SERVICE, { '^/api/validation': '/api/validation' }));
-app.use('/api/support', createServiceProxy(SUPPORT_SERVICE, { '^/api/support': '/api/support' }));
-app.use('/api/onboarding', createServiceProxy(ONBOARDING_SERVICE, { '^/api/onboarding': '/api/onboarding' }));
-app.use('/api/backup', createServiceProxy(BACKUP_SERVICE, { '^/api/backup': '/api/backup' }));
-app.use('/api/errors', createServiceProxy(ERROR_HANDLING_SERVICE, { '^/api/errors': '/api/errors' }));
+app.use('/api/auth', createServiceProxy(AUTH_SERVICE, 'auth-service', { '^/api/auth': '/api/auth' }));
+app.use('/api/documents', createServiceProxy(DOCUMENT_SERVICE, 'document-service', { '^/api/documents': '/api/documents' }));
+app.use('/api/ledger', createServiceProxy(LEDGER_SERVICE, 'ledger-service', { '^/api/ledger': '/api/ledger' }));
+app.use('/api/rules', createServiceProxy(RULES_SERVICE, 'rules-service', { '^/api/rules': '/api/rules' }));
+app.use('/api/assistant', createServiceProxy(ASSISTANT_SERVICE, 'assistant-service', { '^/api/assistant': '/api/assistant' }));
+app.use('/api/billing', createServiceProxy(BILLING_SERVICE, 'billing-service', { '^/api/billing': '/api/billing' }));
+app.use('/api/filings', createServiceProxy(FILING_SERVICE, 'filing-service', { '^/api/filings': '/api/filings' }));
+app.use(
+  '/api/reconciliation',
+  createServiceProxy(RECONCILIATION_SERVICE, 'reconciliation-service', { '^/api/reconciliation': '/api/reconciliation' })
+);
+app.use(
+  '/api/notifications',
+  createServiceProxy(NOTIFICATION_SERVICE, 'notification-service', { '^/api/notifications': '/api/notifications' })
+);
+app.use('/api/compliance', createServiceProxy(COMPLIANCE_SERVICE, 'compliance-service', { '^/api/compliance': '/api/compliance' }));
+app.use('/api/monitoring', createServiceProxy(MONITORING_SERVICE, 'monitoring-service', { '^/api/monitoring': '' }));
+app.use('/api/workflows', createServiceProxy(WORKFLOW_SERVICE, 'workflow-service', { '^/api/workflows': '/api/workflows' }));
+app.use('/api/accountant', createServiceProxy(ACCOUNTANT_SERVICE, 'accountant-service', { '^/api/accountant': '/api/accountant' }));
+app.use('/api/analytics', createServiceProxy(ANALYTICS_SERVICE, 'analytics-service', { '^/api/analytics': '/api/analytics' }));
+app.use('/api/automation', createServiceProxy(AUTOMATION_SERVICE, 'automation-service', { '^/api/automation': '/api/automation' }));
+app.use(
+  '/api/integrations',
+  createServiceProxy(INTEGRATIONS_SERVICE, 'integrations-service', { '^/api/integrations': '/api/integrations' })
+);
+app.use('/api/bank-feed', createServiceProxy(BANK_FEED_SERVICE, 'bank-feed-service', { '^/api/bank-feed': '/api/bank-feed' }));
+app.use(
+  '/api/classification',
+  createServiceProxy(CLASSIFICATION_SERVICE, 'classification-service', { '^/api/classification': '/api/classification' })
+);
+app.use('/api/ocr', createServiceProxy(OCR_SERVICE, 'ocr-service', { '^/api/ocr': '/api/ocr' }));
+app.use('/api/validation', createServiceProxy(VALIDATION_SERVICE, 'validation-service', { '^/api/validation': '/api/validation' }));
+app.use('/api/support', createServiceProxy(SUPPORT_SERVICE, 'support-service', { '^/api/support': '/api/support' }));
+app.use('/api/onboarding', createServiceProxy(ONBOARDING_SERVICE, 'onboarding-service', { '^/api/onboarding': '/api/onboarding' }));
+app.use('/api/backup', createServiceProxy(BACKUP_SERVICE, 'backup-service', { '^/api/backup': '/api/backup' }));
+app.use('/api/errors', createServiceProxy(ERROR_HANDLING_SERVICE, 'error-handling-service', { '^/api/errors': '/api/errors' }));
 
 // 404 handler
 app.use((_req: Request, res: Response) => {

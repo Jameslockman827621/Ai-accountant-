@@ -2,6 +2,7 @@ import { db } from '@ai-accountant/database';
 import { TenantId } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { cacheStrategy } from '../../cache/src/cacheStrategy';
 
 export interface CreateLedgerEntryInput {
   tenantId: TenantId;
@@ -61,6 +62,9 @@ export async function createLedgerEntry(input: CreateLedgerEntryInput): Promise<
     ]
   );
 
+  await cacheStrategy.invalidate(`ledger_entries:${input.tenantId}:*`);
+  await cacheStrategy.invalidate(`ledger_balance:${input.tenantId}:*`);
+
   return entryId;
 }
 
@@ -76,6 +80,11 @@ export async function getLedgerEntries(
     offset?: number;
   }
 ): Promise<{ entries: LedgerEntry[]; total: number }> {
+  const cached = await cacheStrategy.getLedgerEntriesCache(tenantId, filters);
+  if (cached) {
+    return cached as { entries: LedgerEntry[]; total: number };
+  }
+
   let query = 'SELECT * FROM ledger_entries WHERE tenant_id = $1';
   const params: unknown[] = [tenantId];
   let paramCount = 2;
@@ -125,7 +134,9 @@ export async function getLedgerEntries(
   }
 
   const result = await db.query<LedgerEntry>(query, params);
-  return { entries: result.rows, total };
+  const payload = { entries: result.rows, total };
+  await cacheStrategy.setLedgerEntriesCache(tenantId, filters, payload);
+  return payload;
 }
 
 export async function reconcileEntries(
@@ -183,6 +194,9 @@ export async function reconcileEntries(
      WHERE id = $2 AND tenant_id = $3`,
     [entryId1, entryId2, tenantId]
   );
+
+  await cacheStrategy.invalidate(`ledger_entries:${tenantId}:*`);
+  await cacheStrategy.invalidate(`ledger_balance:${tenantId}:*`);
 }
 
 export async function getAccountBalance(
@@ -197,8 +211,24 @@ export async function getAccountBalance(
   creditTotal: number;
   asOfDate: Date;
 }> {
+  const cached = await cacheStrategy.getLedgerBalanceCache(
+    tenantId,
+    accountCode,
+    asOfDate ? asOfDate.toISOString() : undefined
+  );
+  if (cached) {
+    return cached as {
+      accountCode: string;
+      accountName: string;
+      balance: number;
+      debitTotal: number;
+      creditTotal: number;
+      asOfDate: Date;
+    };
+  }
+
   let query = `
-    SELECT 
+    SELECT
       account_code,
       account_name,
       SUM(CASE WHEN entry_type = 'debit' THEN amount ELSE -amount END) as balance,
@@ -232,7 +262,7 @@ export async function getAccountBalance(
   if (!row) {
     throw new ValidationError('Account not found or has no entries');
   }
-  return {
+  const payload = {
     accountCode: row.account_code,
     accountName: row.account_name,
     balance: typeof row.balance === 'number' ? row.balance : parseFloat(String(row.balance || '0')),
@@ -246,4 +276,13 @@ export async function getAccountBalance(
         : parseFloat(String(row.credit_total || '0')),
     asOfDate: asOfDate || new Date(),
   };
+
+  await cacheStrategy.setLedgerBalanceCache(
+    tenantId,
+    accountCode,
+    payload,
+    asOfDate ? asOfDate.toISOString() : undefined
+  );
+
+  return payload;
 }

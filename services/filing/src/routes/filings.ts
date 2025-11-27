@@ -46,9 +46,13 @@ import { generateClientSummary } from '../services/clientSummary';
 import { filingLifecycleService } from '../services/filingLifecycle';
 import { filingWorkflowService } from '../services/filingWorkflows';
 import { runHmrcSubmissionFlow } from '../services/hmrcFlowManager';
+import { enforceIdempotency } from '../middleware/idempotency';
+import { cacheStrategy } from '../../cache/src/cacheStrategy';
 
 const router = Router();
 const logger = createLogger('filing-service');
+
+router.use(enforceIdempotency);
 
 // Create filing
 router.post('/', async (req: AuthRequest, res: Response) => {
@@ -100,6 +104,9 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     );
 
     logger.info('Filing created', { filingId, tenantId: req.user.tenantId });
+
+    await cacheStrategy.invalidate(`filings:${req.user.tenantId}:*`);
+    await cacheStrategy.setFilingStatusCache(filingId, result.rows[0]);
 
     res.status(201).json({ filing: result.rows[0] });
   } catch (error) {
@@ -153,6 +160,9 @@ router.post('/:filingId/attest', async (req: AuthRequest, res: Response) => {
       ]
     );
 
+    await cacheStrategy.invalidate(`filings:${req.user.tenantId}:*`);
+    await cacheStrategy.invalidate(`filing_status:${filingId}`);
+
     res.status(201).json({ attestation: result.rows[0] });
   } catch (error) {
     logger.error('Attest filing failed', error instanceof Error ? error : new Error(String(error)));
@@ -174,6 +184,12 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 
     const { status, filingType } = req.query;
 
+    const cached = await cacheStrategy.getFilingListCache(req.user.tenantId, { status, filingType });
+    if (cached) {
+      res.json(cached);
+      return;
+    }
+
     let query = 'SELECT * FROM filings WHERE tenant_id = $1';
     const params: unknown[] = [req.user.tenantId];
     let paramCount = 2;
@@ -192,7 +208,10 @@ router.get('/', async (req: AuthRequest, res: Response) => {
 
     const result = await db.query(query, params);
 
-    res.json({ filings: result.rows });
+    const payload = { filings: result.rows };
+    await cacheStrategy.setFilingListCache(req.user.tenantId, { status, filingType }, payload);
+
+    res.json(payload);
   } catch (error) {
     logger.error('Get filings failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get filings' });

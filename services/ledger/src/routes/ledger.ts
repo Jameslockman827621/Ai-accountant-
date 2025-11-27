@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
+import { enforceIdempotency } from '../middleware/idempotency';
 import {
   createLedgerEntry,
   getLedgerEntries,
@@ -19,6 +20,8 @@ import { ValidationError } from '@ai-accountant/shared-utils';
 
 const router = Router();
 const logger = createLogger('ledger-service');
+
+router.use(enforceIdempotency);
 
 // Create ledger entry
 router.post('/entries', async (req: AuthRequest, res: Response) => {

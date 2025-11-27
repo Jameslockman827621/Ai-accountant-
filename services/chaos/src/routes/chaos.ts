@@ -4,6 +4,7 @@ import { AuthRequest } from '../middleware/auth';
 import { chaosTestService } from '../services/chaosTests';
 import { UserRole } from '@ai-accountant/shared-types';
 import { AuthorizationError } from '@ai-accountant/shared-utils';
+import { executeGatewayLoad } from '../services/loadHarness';
 
 const router = Router();
 const logger = createLogger('chaos-service');
@@ -89,6 +90,21 @@ router.get('/tests/:id', async (req: AuthRequest, res: Response) => {
     res.json(test);
   } catch (error) {
     logger.error('Error getting chaos test result', error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
+});
+
+router.post('/load-tests/gateway', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user || req.user.role !== UserRole.SUPER_ADMIN) {
+      throw new AuthorizationError('Only super admins can run gateway load tests');
+    }
+
+    const targetUrl = req.body?.targetUrl || 'http://localhost:3000/health';
+    const result = await executeGatewayLoad(targetUrl);
+    res.json(result);
+  } catch (error) {
+    logger.error('Error running gateway load test', error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
 });

@@ -94,6 +94,8 @@
       "@ai-accountant/support-service/*": ["services/support/src/*"],
       "@ai-accountant/validation-service": ["services/validation/src"],
       "@ai-accountant/validation-service/*": ["services/validation/src/*"],
+      "@ai-accountant/performance": ["services/performance/src"],
+      "@ai-accountant/performance/*": ["services/performance/src/*"],
         "@ai-accountant/workflow-service": ["services/workflow/src"],
         "@ai-accountant/workflow-service/*": ["services/workflow/src/*"],
         "@ai-accountant/observability": ["packages/observability/src"],

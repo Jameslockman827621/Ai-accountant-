@@ -57,7 +57,8 @@ async function startWorker(): Promise<void> {
         'x-dead-letter-routing-key': LEDGER_QUEUE,
       },
     });
-    channel.prefetch(1);
+    const prefetch = parseInt(process.env.LEDGER_QUEUE_PREFETCH || process.env.QUEUE_PREFETCH || '5', 10);
+    channel.prefetch(prefetch);
 
     logger.info('Ledger posting worker started, waiting for jobs...');
 
