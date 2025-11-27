@@ -4,6 +4,8 @@ import { AuthRequest } from '../middleware/auth';
 import { sendEmail, generateVATEstimationEmail } from '../services/email';
 import { enhancedNotificationService } from '../services/enhancedNotification';
 import { db } from '@ai-accountant/database';
+import { sendReconciliationSummaryEmail } from '../services/reconciliationSummaryEmail';
+import { authenticateServiceOrUser } from '../middleware/serviceAuth';
 
 const router = Router();
 const logger = createLogger('notification-service');
@@ -188,6 +190,36 @@ router.get('/digest', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Generate digest failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to generate digest' });
+  }
+});
+
+router.post('/reconciliation-summary', authenticateServiceOrUser, async (req: AuthRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId || (req.body?.tenantId as string | undefined);
+    if (!tenantId) {
+      res.status(400).json({ error: 'tenantId is required' });
+      return;
+    }
+
+    const { tenantName, recipients, report } = req.body ?? {};
+    if (!Array.isArray(recipients) || recipients.length === 0) {
+      res.status(400).json({ error: 'At least one recipient is required' });
+      return;
+    }
+
+    await sendReconciliationSummaryEmail({
+      tenantName: tenantName || 'Your organisation',
+      recipients,
+      report,
+    });
+
+    res.json({ message: 'Reconciliation summary dispatched' });
+  } catch (error) {
+    logger.error(
+      'Send reconciliation summary failed',
+      error instanceof Error ? error : new Error(String(error))
+    );
+    res.status(500).json({ error: 'Failed to send reconciliation summary' });
   }
 });
 

@@ -7,6 +7,7 @@ import { workflowRouter } from './routes/workflow';
 import { approvalWorkflowService } from './services/approvalWorkflow';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { reconciliationReportScheduler } from './services/reconciliationReportScheduler';
 
 config();
 
@@ -39,6 +40,8 @@ setInterval(() => {
     logger.error('Expired workflow check failed', error instanceof Error ? error : new Error(String(error)));
   });
 }, 60 * 60 * 1000); // Check every hour
+
+reconciliationReportScheduler.start();
 
 app.listen(PORT, () => {
   logger.info(`Workflow service listening on port ${PORT}`);
