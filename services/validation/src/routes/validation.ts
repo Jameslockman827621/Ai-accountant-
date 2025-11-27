@@ -11,6 +11,7 @@ import { getLatestValidationRun } from '../services/validationRunStore';
 import { crossValidateData } from '../services/crossValidationEngine';
 import { verifyTaxCalculation } from '../services/taxCalculationVerifier';
 import { validatePreSubmission } from '../services/preSubmissionValidator';
+import { runDeterministicValidation } from '../services/deterministicPipeline';
 
 const router = Router();
 const logger = createLogger('validation-service');
@@ -357,6 +358,38 @@ router.post('/pre-submission', async (req: AuthRequest, res: Response) => {
       return;
     }
     res.status(500).json({ error: 'Failed to validate pre-submission' });
+  }
+});
+
+router.post('/pipelines/deterministic', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { entityType, entityId, payload } = req.body;
+
+    if (!entityType || !entityId || !payload) {
+      throw new ValidationError('entityType, entityId, and payload are required');
+    }
+
+    const runResult = await runDeterministicValidation({
+      tenantId: req.user.tenantId,
+      entityType,
+      entityId,
+      payload,
+      triggeredBy: req.user.userId,
+    });
+
+    res.json(runResult);
+  } catch (error) {
+    logger.error('Deterministic validation failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to run deterministic validation' });
   }
 });
 

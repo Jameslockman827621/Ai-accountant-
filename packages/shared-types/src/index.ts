@@ -101,6 +101,73 @@ export interface ValidationRunSummary {
   components: ValidationComponentSummary[];
 }
 
+export type ValidationDomain = 'banking' | 'payroll' | 'ap_ar' | 'tax';
+
+export interface ValidationRule {
+  id: string;
+  domain: ValidationDomain;
+  name: string;
+  description: string;
+  condition: string;
+  severity: 'info' | 'warning' | 'critical';
+  deterministic: boolean;
+  tags?: string[];
+}
+
+export interface ValidationRulePack {
+  id: string;
+  domain: ValidationDomain;
+  version: string;
+  description: string;
+  rules: ValidationRule[];
+  checksum?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ValidationDecision {
+  id: string;
+  runId: string;
+  ruleId: string;
+  ruleName: string;
+  domain: ValidationDomain;
+  status: ValidationStatus;
+  message: string;
+  dataPath?: string;
+  metadata?: Record<string, unknown>;
+  decidedAt: Date;
+}
+
+export interface ValidationOverride {
+  id: string;
+  decisionId: string;
+  overriddenBy: UserId;
+  reason: string;
+  previousStatus: ValidationStatus;
+  newStatus: ValidationStatus;
+  createdAt: Date;
+  runId?: string;
+}
+
+export interface ValidationRejection {
+  id: string;
+  runId: string;
+  domain: ValidationDomain;
+  reason: string;
+  severity: 'warning' | 'critical';
+  queuedAt: Date;
+  resolvedAt?: Date;
+}
+
+export interface ValidationAuditEvent {
+  id: string;
+  runId: string;
+  actor?: UserId;
+  action: string;
+  context: Record<string, unknown>;
+  createdAt: Date;
+}
+
 export enum LedgerEntryType {
   DEBIT = 'debit',
   CREDIT = 'credit',
