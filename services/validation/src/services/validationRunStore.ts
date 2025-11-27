@@ -6,6 +6,11 @@ import {
   ValidationStatus,
   ValidationComponentSummary,
   UserId,
+  ValidationDecision,
+  ValidationDomain,
+  ValidationRejection,
+  ValidationOverride,
+  ValidationAuditEvent,
 } from '@ai-accountant/shared-types';
 
 const logger = createLogger('validation-service');
@@ -32,6 +37,38 @@ interface ComponentRecordInput {
   errors?: string[];
   warnings?: string[];
   metrics?: Record<string, unknown>;
+}
+
+interface DecisionRecordInput {
+  runId: string;
+  ruleId: string;
+  ruleName: string;
+  domain: ValidationDomain;
+  status: ValidationStatus;
+  message: string;
+  dataPath?: string;
+  metadata?: Record<string, unknown>;
+}
+
+interface RejectionRecordInput {
+  runId: string;
+  domain: ValidationDomain;
+  reason: string;
+  severity: 'warning' | 'critical';
+}
+
+interface OverrideRecordInput {
+  decisionId: string;
+  overriddenBy: UserId;
+  reason: string;
+  newStatus: ValidationStatus;
+}
+
+interface AuditEventInput {
+  runId: string;
+  action: string;
+  actor?: UserId;
+  context?: Record<string, unknown>;
 }
 
 const INSERT_RUN = `
@@ -68,6 +105,54 @@ const COMPLETE_RUN = `
       summary = $5::jsonb,
       completed_at = NOW()
   WHERE id = $1
+`;
+
+const INSERT_DECISION = `
+  INSERT INTO validation_decisions (
+    run_id,
+    rule_id,
+    rule_name,
+    domain,
+    status,
+    message,
+    data_path,
+    metadata
+  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
+  RETURNING *
+`;
+
+const INSERT_REJECTION = `
+  INSERT INTO validation_rejection_queue (
+    run_id,
+    domain,
+    reason,
+    severity
+  ) VALUES ($1, $2, $3, $4)
+  RETURNING *
+`;
+
+const INSERT_OVERRIDE = `
+  INSERT INTO validation_overrides (
+    decision_id,
+    overridden_by,
+    reason,
+    previous_status,
+    new_status
+  )
+  SELECT id, $2, $3, status, $4
+  FROM validation_decisions
+  WHERE id = $1
+  RETURNING *, (SELECT run_id FROM validation_decisions WHERE id = $1) AS run_id
+`;
+
+const INSERT_AUDIT_EVENT = `
+  INSERT INTO validation_audit_events (
+    run_id,
+    actor,
+    action,
+    context
+  ) VALUES ($1, $2, $3, $4::jsonb)
+  RETURNING *
 `;
 
 const FETCH_LATEST_RUN = `
@@ -193,5 +278,90 @@ export async function getLatestValidationRun(
     components: Array.isArray(row.components)
       ? row.components.filter(Boolean).map(mapComponent)
       : [],
+  };
+}
+
+export async function recordValidationDecision(
+  input: DecisionRecordInput
+): Promise<ValidationDecision> {
+  const result = await db.query(INSERT_DECISION, [
+    input.runId,
+    input.ruleId,
+    input.ruleName,
+    input.domain,
+    input.status,
+    input.message,
+    input.dataPath || null,
+    JSON.stringify(input.metadata ?? {}),
+  ]);
+  const row = result.rows[0] as any;
+  return {
+    id: row.id,
+    runId: row.run_id,
+    ruleId: row.rule_id,
+    ruleName: row.rule_name,
+    domain: row.domain,
+    status: row.status,
+    message: row.message,
+    dataPath: row.data_path ?? undefined,
+    metadata: (row.metadata as Record<string, unknown>) ?? {},
+    decidedAt: row.decided_at ?? new Date(),
+  };
+}
+
+export async function recordRejection(input: RejectionRecordInput): Promise<ValidationRejection> {
+  const result = await db.query(INSERT_REJECTION, [
+    input.runId,
+    input.domain,
+    input.reason,
+    input.severity,
+  ]);
+  const row = result.rows[0] as any;
+  return {
+    id: row.id,
+    runId: row.run_id,
+    domain: row.domain,
+    reason: row.reason,
+    severity: row.severity,
+    queuedAt: row.queued_at,
+    resolvedAt: row.resolved_at ?? undefined,
+  };
+}
+
+export async function recordValidationOverride(input: OverrideRecordInput): Promise<ValidationOverride> {
+  const result = await db.query(INSERT_OVERRIDE, [
+    input.decisionId,
+    input.overriddenBy,
+    input.reason,
+    input.newStatus,
+  ]);
+  const row = result.rows[0] as any;
+  return {
+    id: row.id,
+    decisionId: row.decision_id,
+    overriddenBy: row.overridden_by,
+    reason: row.reason,
+    previousStatus: row.previous_status,
+    newStatus: row.new_status,
+    createdAt: row.created_at,
+    runId: row.run_id ?? undefined,
+  };
+}
+
+export async function recordAuditEvent(input: AuditEventInput): Promise<ValidationAuditEvent> {
+  const result = await db.query(INSERT_AUDIT_EVENT, [
+    input.runId,
+    input.actor || null,
+    input.action,
+    JSON.stringify(input.context ?? {}),
+  ]);
+  const row = result.rows[0] as any;
+  return {
+    id: row.id,
+    runId: row.run_id,
+    actor: row.actor ?? undefined,
+    action: row.action,
+    context: (row.context as Record<string, unknown>) ?? {},
+    createdAt: row.created_at,
   };
 }

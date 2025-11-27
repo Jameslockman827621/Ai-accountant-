@@ -1,0 +1,65 @@
+{
+  "runs": [
+    {
+      "id": "banking-apar",
+      "entityType": "tenant",
+      "entityId": "golden-suite",
+      "payload": {
+        "banking": {
+          "transactions": [
+            { "id": "tx-1", "reconciled": false, "ageInDays": 20, "duplicateGroupSize": 2 },
+            { "id": "tx-2", "reconciled": true, "ageInDays": 3, "duplicateGroupSize": 1 }
+          ]
+        },
+        "ap_ar": {
+          "invoices": [
+            { "id": "ap-1", "approvers": [], "daysOverdue": 5, "disputed": false },
+            { "id": "ar-1", "approvers": ["ops"], "daysOverdue": 0, "disputed": true, "disputeReason": "" }
+          ]
+        }
+      },
+      "expectedStatus": "fail",
+      "expectedFailures": ["banking-reconciled-balance", "banking-duplicates", "ap-ar-overdue"],
+      "expectedWarnings": ["banking-stale-transactions", "ar-disputes-documented", "ap-receipts-approved"]
+    },
+    {
+      "id": "payroll-tax",
+      "entityType": "tenant",
+      "entityId": "golden-suite",
+      "payload": {
+        "payroll": {
+          "runs": [
+            {
+              "id": "payroll-jan",
+              "gross": 10000,
+              "taxWithheld": 2000,
+              "contributions": 500,
+              "net": 7500,
+              "approved": true
+            },
+            {
+              "id": "payroll-feb",
+              "gross": 12000,
+              "taxWithheld": 2500,
+              "contributions": 500,
+              "net": 9200,
+              "approved": false
+            }
+          ]
+        },
+        "tax": {
+          "filings": [
+            { "id": "vat-q1", "signedOffBy": "controller" },
+            { "id": "corp-tax", "signedOffBy": null }
+          ],
+          "regressionCases": [
+            { "id": "vat-net", "input": { "box1": 3000, "box4": 1000 }, "expected": { "net": 2000 } }
+          ]
+        }
+      },
+      "expectedStatus": "fail",
+      "expectedFailures": ["tax-filing-signed"],
+      "expectedWarnings": ["payroll-period-approved", "tax-regression-cases"]
+    }
+  ]
+}
