@@ -11,6 +11,7 @@ import {
   resolveClientTask,
 } from '../services/multiClient';
 import { firmPortalService } from '../services/firmPortal';
+import { listInvoices, resolveInvoice } from '../../automation/src/services/invoiceIngestion';
 
 const router = Router();
 const logger = createLogger('accountant-service');
@@ -222,6 +223,52 @@ router.get('/firm/clients/:clientTenantId/summary', async (req: AuthRequest, res
   } catch (error) {
     logger.error('Get client summary failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get client summary' });
+  }
+});
+
+// Invoice approval workflow
+router.get('/clients/:tenantId/invoices', (req: AuthRequest, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
+
+  res.json({ invoices: listInvoices(req.params.tenantId as TenantId) });
+});
+
+router.post('/clients/:tenantId/invoices/:invoiceId/resolve', (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { status, notes } = req.body as { status: 'approved' | 'rejected'; notes?: string };
+    if (!status) {
+      throw new ValidationError('status is required');
+    }
+
+    const invoice = resolveInvoice(
+      req.params.tenantId as TenantId,
+      req.params.invoiceId,
+      status,
+      req.user.userId,
+      notes
+    );
+
+    if (!invoice) {
+      res.status(404).json({ error: 'Invoice not found' });
+      return;
+    }
+
+    res.json({ invoice });
+  } catch (error) {
+    logger.error('Invoice resolution failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Unable to resolve invoice' });
   }
 });
 

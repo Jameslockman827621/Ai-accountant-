@@ -5,6 +5,10 @@ import { config } from 'dotenv';
 import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import { ledgerRouter } from './routes/ledger';
 import { periodCloseRouter } from './routes/periodClose';
+import { fixedAssetsRouter } from './routes/fixedAssets';
+import { consolidationRouter } from './routes/consolidation';
+import { projectCostingRouter } from './routes/projects';
+import { inventoryRouter } from './routes/inventory';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
@@ -32,6 +36,10 @@ app.get('/health', (_req, res) => {
 
 app.use('/api/ledger', authenticate, ledgerRouter);
 app.use('/api/ledger/period-close', authenticate, periodCloseRouter);
+app.use('/api/ledger/fixed-assets', authenticate, fixedAssetsRouter);
+app.use('/api/ledger/consolidation', authenticate, consolidationRouter);
+app.use('/api/ledger/projects', authenticate, projectCostingRouter);
+app.use('/api/ledger/inventory', authenticate, inventoryRouter);
 
 app.use(errorHandler);
 

@@ -18,6 +18,7 @@ import { taskAssignmentService } from '../services/taskAssignment';
 import { taskExecutionService } from '../services/taskExecution';
 import { policyEngine } from '../services/policyEngine';
 import { slaTrackingService } from '../services/slaTracking';
+import { ingestInvoice, listInvoices } from '../services/invoiceIngestion';
 
 const router = Router();
 const logger = createLogger('automation-service');
@@ -677,6 +678,46 @@ router.get('/sla/at-risk', async (req: AuthRequest, res: Response) => {
     logger.error('Get at-risk tasks failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get at-risk tasks' });
   }
+});
+
+// Invoice ingestion for AP/AR pipelines
+router.post('/invoices/ingest', (req: AuthRequest, res: Response) => {
+  try {
+    if (!ensureAuthenticated(req, res)) {
+      return;
+    }
+
+    const { vendor, amount, currency, dueDate } = req.body;
+    if (!vendor || !amount || !currency) {
+      throw new ValidationError('vendor, amount, and currency are required');
+    }
+
+    const invoice = ingestInvoice({
+      tenantId: req.user.tenantId,
+      createdBy: req.user.userId,
+      vendor,
+      amount: Number(amount),
+      currency,
+      dueDate,
+    });
+
+    res.status(201).json({ invoice });
+  } catch (error) {
+    logger.error('Invoice ingestion failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to ingest invoice' });
+  }
+});
+
+router.get('/invoices', (req: AuthRequest, res: Response) => {
+  if (!ensureAuthenticated(req, res)) {
+    return;
+  }
+
+  res.json({ invoices: listInvoices(req.user.tenantId) });
 });
 
 export { router as automationRouter };
