@@ -3,6 +3,9 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { createHash } from 'crypto';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
 import { rulepackGitRepository } from './rulepackGitRepository';
+import { getBuiltInUSRulepacks } from '../../../multi-jurisdiction/src/services/usTaxSystem';
+import { getBuiltInEUTaxRulepacks } from '../../../multi-jurisdiction/src/services/euTaxSystem';
+import { getBuiltInCanadaRulepacks } from '../../../multi-jurisdiction/src/services/canadaTaxSystem';
 
 const logger = createLogger('rulepack-registry');
 
@@ -504,6 +507,96 @@ export class RulepackRegistryService {
     }>(query, params);
 
     return result.rows.map(row => this.mapRowToRulepack(row));
+  }
+
+  /**
+   * Ensure core jurisdiction coverage (EU/US/CA) by installing built-in packs when missing
+   */
+  async ensureBuiltInJurisdictions(createdBy: UserId): Promise<void> {
+    const builtIns = [
+      ...getBuiltInUSRulepacks(),
+      ...getBuiltInEUTaxRulepacks(),
+      ...getBuiltInCanadaRulepacks(),
+    ];
+
+    for (const pack of builtIns) {
+      const exists = await db.query<{ id: string }>(
+        `SELECT id FROM rulepack_registry WHERE jurisdiction = $1 AND version = $2 LIMIT 1`,
+        [pack.jurisdictionCode, pack.version]
+      );
+
+      if (exists.rows.length === 0) {
+        await this.installRulepack(
+          pack.jurisdictionCode,
+          pack.version,
+          pack.rules,
+          {
+            description: `Built-in ${pack.jurisdictionCode} rulepack ${pack.version}`,
+            jurisdictionCode: pack.jurisdictionCode,
+          },
+          pack.regressionTests,
+          createdBy,
+          { autoVersion: false, changeType: 'minor' }
+        );
+      }
+    }
+  }
+
+  /**
+   * Store tenant jurisdiction preferences so downstream calculations pick correct pack
+   */
+  async setTenantJurisdictions(
+    tenantId: TenantId,
+    primaryJurisdiction: string,
+    secondaryJurisdictions: string[] = []
+  ): Promise<void> {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS tenant_jurisdiction_preferences (
+        tenant_id uuid PRIMARY KEY,
+        primary_jurisdiction text NOT NULL,
+        secondary_jurisdictions text[] DEFAULT '{}',
+        updated_at timestamptz DEFAULT NOW()
+      )`);
+
+    await db.query(
+      `INSERT INTO tenant_jurisdiction_preferences (
+        tenant_id, primary_jurisdiction, secondary_jurisdictions, updated_at
+      ) VALUES ($1, $2, $3, NOW())
+      ON CONFLICT (tenant_id) DO UPDATE SET
+        primary_jurisdiction = EXCLUDED.primary_jurisdiction,
+        secondary_jurisdictions = EXCLUDED.secondary_jurisdictions,
+        updated_at = NOW()`,
+      [tenantId, primaryJurisdiction.toUpperCase(), secondaryJurisdictions.map(j => j.toUpperCase())]
+    );
+  }
+
+  async getTenantJurisdictions(tenantId: TenantId): Promise<{
+    primaryJurisdiction: string;
+    secondaryJurisdictions: string[];
+  } | null> {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS tenant_jurisdiction_preferences (
+        tenant_id uuid PRIMARY KEY,
+        primary_jurisdiction text NOT NULL,
+        secondary_jurisdictions text[] DEFAULT '{}',
+        updated_at timestamptz DEFAULT NOW()
+      )`);
+
+    const result = await db.query<{ primary_jurisdiction: string; secondary_jurisdictions: string[] }>(
+      `SELECT primary_jurisdiction, secondary_jurisdictions
+       FROM tenant_jurisdiction_preferences
+       WHERE tenant_id = $1`,
+      [tenantId]
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+
+    return {
+      primaryJurisdiction: result.rows[0].primary_jurisdiction,
+      secondaryJurisdictions: result.rows[0].secondary_jurisdictions || [],
+    };
   }
 
   /**

@@ -22,6 +22,7 @@ import {
 } from './connectionStore';
 import { recordSyncError, recordSyncSuccess } from './connectionHealth';
 import { syncRetryEngine } from './syncRetryEngine';
+import { enrichAndPostTransactions, RawBankTransaction } from './transactionEnrichment';
 
 const SERVICE_NAME = 'bank-feed-service';
 const logger = createServiceLogger(SERVICE_NAME);
@@ -148,8 +149,9 @@ export async function syncPlaidTransactions(
       );
 
     const transactions = response.data.transactions;
+    const newTransactions: RawBankTransaction[] = [];
     for (const transaction of transactions) {
-      await db.query(
+      const result = await db.query(
         `INSERT INTO bank_transactions (
           tenant_id, account_id, transaction_id, date, amount, currency, description, metadata
         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -170,7 +172,22 @@ export async function syncPlaidTransactions(
           }),
         ]
       );
+
+      if (result.rowCount && result.rowCount > 0) {
+        newTransactions.push({
+          transactionId: transaction.transaction_id,
+          accountId: transaction.account_id,
+          amount: transaction.amount,
+          currency: transaction.iso_currency_code || 'GBP',
+          description: transaction.name || transaction.merchant_name || '',
+          date: transaction.date,
+          merchantName: transaction.merchant_name || undefined,
+          plaidCategory: transaction.category || undefined,
+        });
+      }
     }
+
+    await enrichAndPostTransactions(tenantId, newTransactions);
 
       await markConnectionRefreshed(connectionId, {
         accessToken: secrets.accessToken,
