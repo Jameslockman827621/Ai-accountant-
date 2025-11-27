@@ -1,0 +1,34 @@
+{
+  "scenarios": [
+    {
+      "name": "EU OSS VAT",
+      "rulePackId": "rulepack-eu",
+      "currency": "EUR",
+      "filingType": "VAT"
+    },
+    {
+      "name": "US Sales Tax Nexus",
+      "rulePackId": "rulepack-us",
+      "currency": "USD",
+      "filingType": "SALES_TAX"
+    },
+    {
+      "name": "HMRC VAT",
+      "rulePackId": "rulepack-uk",
+      "currency": "GBP",
+      "filingType": "VAT"
+    },
+    {
+      "name": "Australia BAS",
+      "rulePackId": "rulepack-au",
+      "currency": "AUD",
+      "filingType": "GST"
+    },
+    {
+      "name": "Canada GST/HST",
+      "rulePackId": "rulepack-ca",
+      "currency": "CAD",
+      "filingType": "GST_HST"
+    }
+  ]
+}

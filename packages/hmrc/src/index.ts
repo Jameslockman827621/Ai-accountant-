@@ -68,6 +68,42 @@ export interface HMRCAuthTokens {
   tokenType: string;
 }
 
+export interface HMRCRulePack {
+  id: string;
+  name: string;
+  jurisdiction: 'UK';
+  description: string;
+  workflows: Array<{
+    filingType: 'VAT' | 'PAYE';
+    submissionPath: string;
+    evidenceRequired: string[];
+    defaultCurrency: 'GBP';
+  }>;
+  regulators: string[];
+}
+
+export const HMRC_VAT_RULE_PACK: HMRCRulePack = {
+  id: 'rulepack-uk',
+  name: 'HMRC VAT & PAYE',
+  jurisdiction: 'UK',
+  description: 'Ready-to-use MTD compliant VAT and PAYE flows with audit artifacts.',
+  regulators: ['HMRC'],
+  workflows: [
+    {
+      filingType: 'VAT',
+      submissionPath: '/organisations/vat/{vrn}/returns',
+      evidenceRequired: ['Digital links audit file', 'VAT calculation workpapers'],
+      defaultCurrency: 'GBP',
+    },
+    {
+      filingType: 'PAYE',
+      submissionPath: '/paye/submissions',
+      evidenceRequired: ['RTI submissions log', 'FPS/EPS confirmations'],
+      defaultCurrency: 'GBP',
+    },
+  ],
+};
+
 function resolveBaseUrl(env?: HMRCEnvironment, baseUrl?: string): string {
   if (baseUrl) {
     return baseUrl;

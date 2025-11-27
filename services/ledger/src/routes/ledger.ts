@@ -16,6 +16,12 @@ import {
   updateChartOfAccounts,
 } from '../services/chartOfAccounts';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import {
+  getCurrencySettings,
+  listFxProviders,
+  updateCurrencySettings,
+  valuateExposure,
+} from '../services/currencySettings';
 
 const router = Router();
 const logger = createLogger('ledger-service');
@@ -203,6 +209,68 @@ router.get('/accounts/:accountCode/balance', async (req: AuthRequest, res: Respo
   } catch (error) {
     logger.error('Get balance failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get balance' });
+  }
+});
+
+// Currency settings endpoints
+router.get('/currency/settings', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const settings = await getCurrencySettings(req.user.tenantId);
+    res.json({ settings, providers: listFxProviders() });
+  } catch (error) {
+    logger.error('Get currency settings failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to load currency settings' });
+  }
+});
+
+router.put('/currency/settings', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { baseCurrency, fxProvider, valuationMethod, exposureCurrencies } = req.body;
+    const settings = await updateCurrencySettings(req.user.tenantId, {
+      baseCurrency,
+      fxProvider,
+      valuationMethod,
+      exposureCurrencies,
+    });
+
+    res.json({ settings });
+  } catch (error) {
+    logger.error('Update currency settings failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to update currency settings' });
+  }
+});
+
+router.get('/currency/valuation', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { currencies, asOfDate, baseCurrency, provider } = req.query;
+    const currencyList = typeof currencies === 'string' ? currencies.split(',') : [];
+    const valuations = await valuateExposure(
+      req.user.tenantId,
+      asOfDate ? new Date(asOfDate as string) : new Date(),
+      currencyList,
+      baseCurrency as string | undefined,
+      provider as string | undefined
+    );
+
+    res.json({ valuations });
+  } catch (error) {
+    logger.error('Valuation fetch failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch valuations' });
   }
 });
 

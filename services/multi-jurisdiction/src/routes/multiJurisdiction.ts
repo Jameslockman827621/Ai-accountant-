@@ -23,6 +23,7 @@ import {
   revalueAccountBalances,
   getCurrencyExposureReport,
 } from '../services/multiCurrencyLedger';
+import { getRulePackById, listRulePacks } from '../services/rulePacks';
 
 const logger = createLogger('multi-jurisdiction-routes');
 const router = Router();
@@ -268,6 +269,20 @@ router.get('/ledger/exposure', async (req, res) => {
     logger.error('Failed to get currency exposure', error instanceof Error ? error : new Error(String(error)));
     return res.status(500).json({ error: 'Failed to get currency exposure' });
   }
+});
+
+// Rule pack discovery
+router.get('/rulepacks', (_req, res) => {
+  const packs = listRulePacks();
+  return res.json({ rulePacks: packs });
+});
+
+router.get('/rulepacks/:id', (req, res) => {
+  const pack = getRulePackById(req.params.id);
+  if (!pack) {
+    return res.status(404).json({ error: 'Rule pack not found' });
+  }
+  return res.json({ rulePack: pack });
 });
 
 export default router;

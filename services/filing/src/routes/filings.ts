@@ -46,6 +46,7 @@ import { generateClientSummary } from '../services/clientSummary';
 import { filingLifecycleService } from '../services/filingLifecycle';
 import { filingWorkflowService } from '../services/filingWorkflows';
 import { runHmrcSubmissionFlow } from '../services/hmrcFlowManager';
+import { getFilingFlowParameters } from '../services/filingFlowParameters';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -58,7 +59,7 @@ router.post('/', async (req: AuthRequest, res: Response) => {
       return;
     }
 
-    const { filingType, periodStart, periodEnd } = req.body;
+    const { filingType, periodStart, periodEnd, rulePackId } = req.body;
 
     if (!filingType || !periodStart || !periodEnd) {
       throw new ValidationError('Filing type, period start, and period end are required');
@@ -66,6 +67,10 @@ router.post('/', async (req: AuthRequest, res: Response) => {
 
     // Generate filing data based on type
     let filingData: Record<string, unknown>;
+    const flowParameters = rulePackId
+      ? getFilingFlowParameters(filingType, rulePackId)
+      : undefined;
+
     if (filingType === FilingType.VAT) {
       filingData = await generateVATFiling(req.user.tenantId, new Date(periodStart), new Date(periodEnd));
     } else if (filingType === FilingType.PAYE) {
@@ -93,7 +98,11 @@ router.post('/', async (req: AuthRequest, res: Response) => {
         FilingStatus.DRAFT,
         new Date(periodStart),
         new Date(periodEnd),
-        JSON.stringify(filingData),
+        JSON.stringify({
+          ...filingData,
+          filingFlow: flowParameters || null,
+          rulePackId: rulePackId || null,
+        }),
         req.user.userId,
         '1.0.0',
       ]
