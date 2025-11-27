@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { config } from 'dotenv';
 import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
 import { billingRouter } from './routes/billing';
+import { stripeWebhookHandler, braintreeWebhookHandler } from './routes/webhooks';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
 
@@ -21,6 +22,10 @@ app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'],
   credentials: true,
 }));
+
+// Webhooks must receive the raw body for signature verification
+app.post('/api/billing/webhook/stripe', express.raw({ type: 'application/json' }), stripeWebhookHandler);
+app.post('/api/billing/webhook/braintree', express.text({ type: '*/*' }), braintreeWebhookHandler);
 
 app.use(express.json());
 

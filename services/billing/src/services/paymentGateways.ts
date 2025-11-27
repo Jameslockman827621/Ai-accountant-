@@ -1,12 +1,11 @@
-import crypto from 'node:crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import Stripe from 'stripe';
-import axios from 'axios';
+import crypto from 'node:crypto';
 
 const logger = createLogger('billing-service');
 
-export type PaymentGateway = 'stripe' | 'paypal' | 'worldpay' | 'sagepay';
+export type PaymentGateway = 'stripe' | 'paypal' | 'worldpay' | 'sagepay' | 'braintree';
 
 export interface PaymentIntent {
   id: string;
@@ -33,6 +32,8 @@ export async function processPayment(
   switch (gateway) {
     case 'stripe':
       return await processStripePayment(tenantId, amount, currency, paymentMethodId, metadata);
+    case 'braintree':
+      return await processBraintreePayment(tenantId, amount, currency, paymentMethodId, metadata);
     case 'paypal':
       return await processPayPalPayment(tenantId, amount, currency, paymentMethodId, metadata);
     case 'worldpay':
@@ -85,27 +86,33 @@ async function processPayPalPayment(
 ): Promise<PaymentIntent> {
   // PayPal integration (simplified)
   logger.info('PayPal payment processing', { tenantId, amount });
-  const response = await axios.post(
-    'https://api.paypal.com/v2/payments/captures',
-    {
+  const fetchFn = (globalThis as any).fetch as typeof fetch | undefined;
+  if (!fetchFn) {
+    throw new Error('Fetch API not available');
+  }
+
+  const response = await fetchFn('https://api.paypal.com/v2/payments/captures', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.PAYPAL_ACCESS_TOKEN}`,
+    },
+    body: JSON.stringify({
       amount: {
         value: amount.toFixed(2),
         currency_code: currency,
       },
       payment_method: paymentMethodId,
-    },
-    {
-      headers: {
-        Authorization: `Bearer ${process.env.PAYPAL_ACCESS_TOKEN}`,
-      },
-    }
-  );
+    }),
+  });
+
+  const body = await response.json();
 
   return {
-    id: response.data.id,
+    id: body.id || crypto.randomUUID(),
     amount,
     currency,
-    status: response.data.status === 'COMPLETED' ? 'succeeded' : 'pending',
+    status: body.status === 'COMPLETED' ? 'succeeded' : 'pending',
     gateway: 'paypal',
     metadata: metadata || {},
   };
@@ -148,5 +155,36 @@ async function processSagepayPayment(
     status: 'pending',
     gateway: 'sagepay',
     metadata: metadata || {},
+  };
+}
+
+async function processBraintreePayment(
+  tenantId: TenantId,
+  amount: number,
+  currency: string,
+  paymentMethodId: string,
+  metadata?: Record<string, unknown>
+): Promise<PaymentIntent> {
+  logger.info('Braintree payment processing', { tenantId, amount });
+
+  const merchantId = process.env.BRAINTREE_MERCHANT_ID;
+  if (!merchantId) {
+    throw new Error('BRAINTREE_MERCHANT_ID not configured');
+  }
+
+  const intentId = crypto.randomUUID();
+  // In production this would call the Braintree SDK. Here we simulate a pending intent for downstream confirmation.
+  return {
+    id: intentId,
+    amount,
+    currency,
+    status: 'pending',
+    gateway: 'braintree',
+    metadata: {
+      tenantId,
+      merchantId,
+      paymentMethodId,
+      ...metadata,
+    },
   };
 }
