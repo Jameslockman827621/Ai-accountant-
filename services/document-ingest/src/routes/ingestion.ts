@@ -11,6 +11,8 @@ import { db } from '@ai-accountant/database';
 import { publishOCRJob } from '../messaging/queue';
 import { DocumentStatus } from '@ai-accountant/shared-types';
 import { recordDocumentStageTransition } from '../services/documentWorkflow';
+import { webhookSecurityService } from '../../ingestion/src/services/webhookSecurity';
+import { unifiedIngestionService } from '../../ingestion/src/services/unifiedIngestion';
 
 const router = Router();
 const logger = createLogger('ingestion-routes');
@@ -20,6 +22,18 @@ router.post('/email/inbound', async (req: any, res: Response) => {
   try {
     // This endpoint is public (no auth) - validated via DKIM and secret token
     const { to, from, subject, body, html, attachments, headers } = req.body;
+
+    const apiKey = (req.headers['x-api-key'] as string) || (req.headers['x-ingestion-key'] as string);
+    if (!apiKey) {
+      res.status(401).json({ error: 'Missing ingestion API key' });
+      return;
+    }
+
+    const apiKeyResult = await webhookSecurityService.verifyApiKey(apiKey);
+    if (!apiKeyResult.isValid || !apiKeyResult.tenantId) {
+      res.status(401).json({ error: 'Invalid ingestion API key' });
+      return;
+    }
 
     if (!to || !from || !subject) {
       throw new ValidationError('Missing required email fields');
@@ -37,10 +51,10 @@ router.post('/email/inbound', async (req: any, res: Response) => {
       // For now, we'll log and continue
     }
 
-    // Find tenant by email alias
+    // Find tenant by email alias and ensure it belongs to the API key tenant
     const alias = await emailAliasesService.getAliasByEmail(to);
-    if (!alias) {
-      logger.warn('Email alias not found', { to });
+    if (!alias || alias.tenantId !== apiKeyResult.tenantId) {
+      logger.warn('Email alias not found or unauthorized', { to });
       res.status(404).json({ error: 'Email alias not found' });
       return;
     }
@@ -66,6 +80,11 @@ router.post('/email/inbound', async (req: any, res: Response) => {
     // Process email
     const ingestionLogId = await emailIngestionService.processEmail(alias.tenantId, emailMessage);
 
+    // Persist minimal ingestion marker for auditing
+    await unifiedIngestionService.updateIngestionStatus(ingestionLogId, 'processing', {
+      processingLatency: 0,
+    });
+
     res.json({ message: 'Email processed', ingestionLogId });
   } catch (error) {
     logger.error('Email inbound processing failed', error instanceof Error ? error : new Error(String(error)));
@@ -82,17 +101,23 @@ router.post('/webhooks/:source', async (req: any, res: Response) => {
   try {
     const { source } = req.params;
     const webhookData = req.body;
-    const signature = req.headers['x-webhook-signature'] as string || 
-                     req.headers['x-signature'] as string;
+    const signature = (req.headers['x-webhook-signature'] as string) ||
+                     (req.headers['x-signature'] as string);
+    const apiKeyHeader = (req.headers['x-api-key'] as string) || (req.headers['x-ingestion-key'] as string);
 
     // Get tenant ID from auth or webhook secret
     let tenantId: string;
     if (req.user) {
       tenantId = req.user.tenantId;
     } else {
-      // Try to find tenant by webhook secret
-      // In production, would look up webhook configuration
-      throw new ValidationError('Authentication required or valid webhook secret');
+      if (!apiKeyHeader) {
+        throw new ValidationError('Authentication required or valid webhook secret');
+      }
+      const apiKeyResult = await webhookSecurityService.verifyApiKey(apiKeyHeader);
+      if (!apiKeyResult.isValid || !apiKeyResult.tenantId) {
+        throw new ValidationError(apiKeyResult.error || 'Invalid webhook credentials');
+      }
+      tenantId = apiKeyResult.tenantId;
     }
 
     // Build webhook payload
@@ -105,16 +130,22 @@ router.post('/webhooks/:source', async (req: any, res: Response) => {
       webhookId: webhookData.webhookId || webhookData.id,
     };
 
+    // Validate signature when present
+    if (signature && !webhookSecurityService.verifyHMAC(source, signature, JSON.stringify(payload.data), process.env.WEBHOOK_SIGNING_SECRET || '')) {
+      res.status(401).json({ error: 'Invalid webhook signature' });
+      return;
+    }
+
     // Process webhook
     const ingestionLogId = await webhookIngestionService.processWebhook(tenantId, payload);
 
-    // Log to ingestion_log
+    // Log to ingestion_log for dedupe/traceability
     await db.query(
       `INSERT INTO ingestion_log (
         id, tenant_id, source_type, connector_provider, payload, metadata, created_at
       ) VALUES (
         gen_random_uuid(), $1, 'webhook', $2, $3::jsonb, $4::jsonb, NOW()
-      )`,
+      ) ON CONFLICT DO NOTHING`,
       [
         tenantId,
         source,
@@ -123,6 +154,7 @@ router.post('/webhooks/:source', async (req: any, res: Response) => {
           eventType: payload.eventType,
           webhookId: payload.webhookId,
           timestamp: payload.timestamp,
+          signatureValid: Boolean(signature),
         }),
       ]
     );

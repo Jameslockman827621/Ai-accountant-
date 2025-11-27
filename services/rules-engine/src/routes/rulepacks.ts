@@ -75,6 +75,72 @@ router.get('/', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Ensure built-in jurisdiction coverage
+router.post('/jurisdictions/bootstrap', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    if (!isComplianceAdmin(req)) {
+      res.status(403).json({ error: 'Only compliance admins can bootstrap rulepacks' });
+      return;
+    }
+
+    await rulepackRegistryService.ensureBuiltInJurisdictions(req.user.userId);
+    res.json({ message: 'Built-in jurisdiction rulepacks ensured' });
+  } catch (error) {
+    logger.error('Bootstrap jurisdictions failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to bootstrap jurisdictions' });
+  }
+});
+
+// Persist tenant jurisdiction selection
+router.post('/jurisdictions/select', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { primaryJurisdiction, secondaryJurisdictions } = req.body;
+    if (!primaryJurisdiction) {
+      throw new ValidationError('primaryJurisdiction is required');
+    }
+
+    await rulepackRegistryService.setTenantJurisdictions(
+      req.user.tenantId,
+      primaryJurisdiction,
+      secondaryJurisdictions || []
+    );
+
+    res.json({ message: 'Jurisdictions saved' });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    logger.error('Select jurisdictions failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to save jurisdictions' });
+  }
+});
+
+router.get('/jurisdictions/select', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const prefs = await rulepackRegistryService.getTenantJurisdictions(req.user.tenantId);
+    res.json({ preferences: prefs });
+  } catch (error) {
+    logger.error('Get jurisdictions failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to fetch jurisdiction preferences' });
+  }
+});
+
 // Get rulepack by ID
 router.get('/:rulepackId', async (req: AuthRequest, res: Response) => {
   try {

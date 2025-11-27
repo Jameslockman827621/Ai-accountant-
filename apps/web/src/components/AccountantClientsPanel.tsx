@@ -22,6 +22,8 @@ interface ClientSummary {
   profit: number;
   upcomingDeadlines: number;
   pendingTasks: number;
+  permissions?: string[];
+  canImpersonate?: boolean;
 }
 
 interface BulkOperationResult {
@@ -65,6 +67,7 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [updatingTaskId, setUpdatingTaskId] = useState<string | null>(null);
+  const [activeTenantId, setActiveTenantId] = useState<string | null>(null);
 
   const headers = useMemo<HeadersInit>(
     () => ({
@@ -89,6 +92,9 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
       }
       const data = (await response.json()) as { clients: ClientSummary[] };
       setClients(data.clients || []);
+      if (!activeTenantId && data.clients && data.clients.length > 0) {
+        setActiveTenantId(data.clients[0].tenantId);
+      }
       setSelected(new Set());
     } catch (err) {
       console.error(err);
@@ -136,6 +142,7 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
         throw new Error(body || 'Failed to switch tenant context');
       }
       setActionMessage('Context switched – your next actions will target that client.');
+      setActiveTenantId(tenantId);
     } catch (err) {
       console.error(err);
       setActionError(err instanceof Error ? err.message : 'Unable to switch context');
@@ -315,6 +322,16 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
         </div>
       )}
 
+      {activeTenantId && (
+        <div className="flex flex-wrap items-center gap-3 rounded-lg border border-indigo-100 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+          <span className="font-semibold">Active client context:</span>
+          <span className="rounded-full bg-white px-3 py-1 font-mono text-xs text-indigo-700 shadow-sm">
+            {activeTenantId}
+          </span>
+          <span className="text-indigo-700">Bulk actions and filings will run as this client.</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <SummaryCard label="Managed revenue (12m)" value={`£${totalAUM.revenue.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`} />
         <SummaryCard label="Aggregate profit" value={`£${totalAUM.profit.toLocaleString('en-GB', { minimumFractionDigits: 2 })}`} trend={totalAUM.profit >= 0 ? 'up' : 'down'} />
@@ -380,6 +397,21 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
                   <td className="px-3 py-2">
                     <div className="font-medium text-gray-900">{client.name}</div>
                     <div className="text-xs text-gray-500">{client.tenantId}</div>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {(client.permissions || ['impersonate', 'post_ledger']).map(permission => (
+                        <span
+                          key={`${client.tenantId}-${permission}`}
+                          className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] uppercase tracking-wide text-gray-700"
+                        >
+                          {permission.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                      {activeTenantId === client.tenantId && (
+                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase text-indigo-700">
+                          Active
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <StatusBadge status={client.status} />
@@ -400,7 +432,7 @@ export default function AccountantClientsPanel({ token }: AccountantClientsPanel
                   <td className="px-3 py-2 text-right">
                     <button
                       onClick={() => handleSwitchContext(client.tenantId)}
-                      disabled={switchingTenantId === client.tenantId}
+                      disabled={switchingTenantId === client.tenantId || client.canImpersonate === false}
                       className="mr-2 rounded border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
                     >
                       {switchingTenantId === client.tenantId ? 'Switching…' : 'Switch context'}
