@@ -235,9 +235,11 @@ export async function runCashflowPipeline(
     ...detectBankLedgerGaps(ledgerSeries, bankSeries),
   ];
 
-  const burnRate = blended.length > 1 ? blended[blended.length - 1].net : 0;
-  const runwayMonths = burnRate < 0 && forecast.periods.length > 0
-    ? Math.max(1, Math.round(Math.abs(forecast.periods[0].forecast / burnRate)))
+  const lastNet = blended.length > 1 ? blended[blended.length - 1]?.net : 0;
+  const burnRate = typeof lastNet === 'number' ? lastNet : 0;
+  const firstForecast = forecast.periods[0];
+  const runwayMonths = burnRate < 0 && firstForecast
+    ? Math.max(1, Math.round(Math.abs(firstForecast.forecast / burnRate)))
     : forecast.periods.length;
 
   const signals: CashflowForecastResult['signals'] = [];
