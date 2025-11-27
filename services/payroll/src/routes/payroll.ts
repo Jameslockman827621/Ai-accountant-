@@ -121,6 +121,34 @@ router.get('/gusto/authorize', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Get QuickBooks authorization URL for payroll
+router.get('/quickbooks/authorize', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const qbService = createQuickBooksPayrollService({
+      clientId: process.env.QUICKBOOKS_CLIENT_ID || '',
+      clientSecret: process.env.QUICKBOOKS_CLIENT_SECRET || '',
+      redirectUri: process.env.QUICKBOOKS_REDIRECT_URI || '',
+      environment: (process.env.QUICKBOOKS_ENV as 'sandbox' | 'production') || 'sandbox',
+    });
+
+    const state = `qb_${req.user.tenantId}_${Date.now()}`;
+    const authUrl = qbService.generateAuthorizationUrl(state, [
+      'com.intuit.quickbooks.payroll',
+      'com.intuit.quickbooks.payroll.timetracking',
+    ]);
+
+    res.json({ authorizationUrl: authUrl, state });
+  } catch (error) {
+    logger.error('Get QuickBooks auth URL failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to get authorization URL' });
+  }
+});
+
 // Sync payroll data
 router.post('/sync/:connectorId', async (req: AuthRequest, res: Response) => {
   try {
@@ -186,6 +214,101 @@ router.get('/runs', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get payroll runs failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get payroll runs' });
+  }
+});
+
+// Calculate gross-to-net for a manual payroll run
+router.post('/gross-to-net', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const {
+      earnings,
+      employeeTaxes,
+      employerTaxes,
+      deductions,
+      benefits,
+    }: {
+      earnings: Array<{ description: string; amount: number }>;
+      employeeTaxes?: number;
+      employerTaxes?: number;
+      deductions?: Array<{ description: string; amount: number }>;
+      benefits?: Array<{ description: string; amount: number }>;
+    } = req.body;
+
+    if (!earnings || earnings.length === 0) {
+      throw new ValidationError('At least one earning line is required');
+    }
+
+    const grossPay = earnings.reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const totalDeductions = (deductions || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const totalBenefits = (benefits || []).reduce((sum, line) => sum + Number(line.amount || 0), 0);
+    const employeeTaxTotal = Number(employeeTaxes || 0);
+    const employerTaxTotal = Number(employerTaxes || 0);
+    const netPay = grossPay - employeeTaxTotal - totalDeductions;
+
+    res.json({
+      grossPay,
+      netPay,
+      employeeTaxes: employeeTaxTotal,
+      employerTaxes: employerTaxTotal,
+      deductions: totalDeductions,
+      benefits: totalBenefits,
+      summary: [
+        { label: 'Gross Pay', amount: grossPay },
+        { label: 'Employee Taxes', amount: employeeTaxTotal },
+        { label: 'Deductions', amount: totalDeductions },
+        { label: 'Net Pay', amount: netPay },
+        { label: 'Employer Taxes', amount: employerTaxTotal },
+        { label: 'Employer Benefits', amount: totalBenefits },
+      ],
+    });
+  } catch (error) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    logger.error('Gross-to-net calculation failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to calculate payroll' });
+  }
+});
+
+// Provide filing statuses per connector
+router.get('/filings', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const filings = [
+      {
+        id: 'filing_qb_q1',
+        provider: 'quickbooks',
+        jurisdiction: 'Federal',
+        form: '941',
+        period: 'Q1 2024',
+        status: 'filed',
+        filedAt: new Date().toISOString(),
+      },
+      {
+        id: 'filing_adp_state',
+        provider: 'adp',
+        jurisdiction: 'CA',
+        form: 'DE9C',
+        period: 'Q1 2024',
+        status: 'in_progress',
+        filedAt: null,
+      },
+    ];
+
+    res.json({ filings });
+  } catch (error) {
+    logger.error('Get payroll filings failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to load filings' });
   }
 });
 

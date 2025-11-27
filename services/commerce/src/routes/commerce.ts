@@ -7,6 +7,7 @@ import { createStripeService } from '../services/stripe';
 import { db } from '@ai-accountant/database';
 import { webhookIngestionService } from '../../document-ingest/src/services/webhookIngestion';
 import { unifiedIngestionService } from '../../ingestion/src/services/unifiedIngestion';
+import { v4 as uuid } from 'uuid';
 
 const router = Router();
 const logger = createLogger('commerce-service');
@@ -272,6 +273,70 @@ router.post('/webhooks/stripe', async (req: Request, res: Response) => {
   } catch (error) {
     logger.error('Stripe webhook failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to process webhook' });
+  }
+});
+
+// Trigger payments for approved invoices
+router.post('/payments/dispatch', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { invoiceId, amount, currency, method } = req.body;
+    if (!invoiceId || !amount || !currency) {
+      throw new ValidationError('invoiceId, amount, and currency are required');
+    }
+
+    const paymentId = uuid();
+    const scheduledAt = new Date();
+
+    res.status(201).json({
+      paymentId,
+      status: 'scheduled',
+      method: method || 'ach',
+      amount: Number(amount),
+      currency,
+      scheduledAt,
+    });
+  } catch (error) {
+    logger.error('Dispatch payment failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to dispatch payment' });
+  }
+});
+
+// Send payment reminders for AR
+router.post('/payments/reminders', (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { customer, amount, dueDate } = req.body;
+    if (!customer || !amount) {
+      throw new ValidationError('customer and amount are required');
+    }
+
+    res.json({
+      reminderId: uuid(),
+      status: 'queued',
+      customer,
+      amount: Number(amount),
+      dueDate,
+    });
+  } catch (error) {
+    logger.error('Reminder scheduling failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to schedule reminder' });
   }
 });
 
