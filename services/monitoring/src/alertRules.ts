@@ -5,6 +5,7 @@
 
 import { alertingService } from './alerts';
 import { db } from '@ai-accountant/database';
+import { SLOMonitor } from './sloMonitoring';
 
 // SLO thresholds
 const SLO_THRESHOLDS = {
@@ -16,6 +17,8 @@ const SLO_THRESHOLDS = {
   errorRate: 0.01, // 1%
   dbQueryP95: 100, // ms
 };
+
+const sloMonitor = new SLOMonitor();
 
 /**
  * Register all alert rules
@@ -195,5 +198,41 @@ export function registerAlertRules() {
     severity: 'critical',
     runbook: 'https://docs.example.com/runbooks/security-anomaly',
     cooldown: 60, // 1 minute
+  });
+
+  // Trace export pipeline SLO
+  alertingService.registerRule({
+    name: 'trace_export_slo_breach',
+    condition: async () => {
+      const result = await sloMonitor.evaluateSLO('slo-trace-export');
+      return (result?.status || 'meeting') === 'breached';
+    },
+    severity: 'warning',
+    runbook: 'services/support/runbooks/observability.md#trace-export-pipeline',
+    cooldown: 600,
+  });
+
+  // Core availability SLO
+  alertingService.registerRule({
+    name: 'availability_slo_breach',
+    condition: async () => {
+      const result = await sloMonitor.evaluateSLO('slo-availability');
+      return (result?.status || 'meeting') === 'breached';
+    },
+    severity: 'critical',
+    runbook: 'services/support/runbooks/observability.md#availability-and-latency',
+    cooldown: 900,
+  });
+
+  // API latency SLO
+  alertingService.registerRule({
+    name: 'latency_slo_at_risk',
+    condition: async () => {
+      const result = await sloMonitor.evaluateSLO('slo-latency-p95');
+      return (result?.status || 'meeting') !== 'meeting';
+    },
+    severity: 'warning',
+    runbook: 'services/support/runbooks/observability.md#availability-and-latency',
+    cooldown: 600,
   });
 }

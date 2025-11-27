@@ -93,6 +93,15 @@ const DEFAULT_SLOS: SLO[] = [
     metric: 'filing_success',
     service: 'filing',
   },
+  {
+    id: 'slo-trace-export',
+    name: 'Trace Export Success',
+    description: '95% of traces successfully exported to the collector',
+    target: 0.95,
+    window: 3600, // 1 hour
+    metric: 'trace_export_success',
+    service: 'all',
+  },
 ];
 
 export class SLOMonitor {
@@ -102,6 +111,10 @@ export class SLOMonitor {
     for (const slo of slos) {
       this.slos.set(slo.id, slo);
     }
+  }
+
+  getSLODefinition(sloId: string): SLO | undefined {
+    return this.slos.get(sloId);
   }
 
   async evaluateSLO(sloId: string): Promise<SLOResult | null> {
@@ -160,6 +173,8 @@ export class SLOMonitor {
         return await this.getOcrThroughputCompliance(start, end);
       case 'filing_success':
         return await this.getFilingSuccessRate(start, end);
+      case 'trace_export_success':
+        return await this.getTraceExportSuccess(start, end);
       default:
         logger.warn('Unknown metric', { metric: slo.metric });
         return 0;
@@ -251,6 +266,18 @@ export class SLOMonitor {
        FROM metrics
        WHERE name = 'filing_result'
          AND timestamp BETWEEN $1 AND $2`,
+      [start, end]
+    );
+
+    return result.rows[0]?.success_rate || 1.0;
+  }
+
+  private async getTraceExportSuccess(start: Date, end: Date): Promise<number> {
+    const result = await db.query<{ success_rate: number }>(
+      `SELECT
+        COUNT(*) FILTER (WHERE status = 'success')::float / NULLIF(COUNT(*), 0) as success_rate
+       FROM telemetry_exports
+       WHERE pipeline = 'traces' AND exported_at BETWEEN $1 AND $2`,
       [start, end]
     );
 

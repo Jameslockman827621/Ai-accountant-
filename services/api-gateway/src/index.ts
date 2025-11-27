@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { config } from 'dotenv';
 import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
+import { context, propagation, trace } from '@opentelemetry/api';
 
 config();
 
@@ -74,7 +75,19 @@ function createServiceProxy(target: string, pathRewrite?: Record<string, string>
     target,
     changeOrigin: true,
     pathRewrite: pathRewrite || {},
-    onProxyReq: (_proxyReq, req) => {
+    onProxyReq: (proxyReq, req) => {
+      const activeContext = (req as any).otelContext || context.active();
+      const carrier: Record<string, string> = {};
+      propagation.inject(activeContext, carrier);
+
+      Object.entries(carrier).forEach(([key, value]) => proxyReq.setHeader(key, value));
+
+      const activeSpan = (req as any).activeSpan || trace.getSpan(activeContext);
+      const traceId = activeSpan?.spanContext().traceId;
+      if (traceId) {
+        proxyReq.setHeader('x-trace-id', traceId);
+      }
+
       logger.debug(`Proxying ${req.method} ${req.url} to ${target}`);
     },
     onError: (err: Error, req) => {
