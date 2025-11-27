@@ -30,7 +30,7 @@ export async function detectDuplicates(
   }
 
   const doc = docResult.rows[0];
-  const extractedData = doc.extractedData as Record<string, unknown> | null;
+  const extractedData = (doc as unknown as { extracted_data?: Record<string, unknown> | null }).extracted_data || null;
 
   if (!extractedData) {
     return [];
@@ -120,6 +120,29 @@ export async function detectDuplicates(
           reason: 'Matching invoice number',
         });
       }
+    }
+  }
+
+  if (extractedData.invoiceNumber) {
+    const ledgerMatches = await db.query<{
+      id: string;
+      transaction_date: Date;
+      amount: string | number;
+    }>(
+      `SELECT id, transaction_date, amount
+       FROM ledger_entries
+       WHERE tenant_id = $1
+         AND metadata->>'invoiceNumber' = $2`,
+      [tenantId, String(extractedData.invoiceNumber)]
+    );
+
+    for (const match of ledgerMatches.rows) {
+      candidates.push({
+        documentId: match.id,
+        fileName: 'ledger-entry',
+        similarity: 0.65,
+        reason: 'Existing ledger entry with same invoice number',
+      });
     }
   }
 

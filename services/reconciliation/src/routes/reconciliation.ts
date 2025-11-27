@@ -11,6 +11,7 @@ import {
   getReconciliationSummary,
   getReconciliationTrends,
 } from '../services/summary';
+import { generateReconciliationReport } from '../services/reports';
 import {
   getTransactionSplits,
   replaceTransactionSplits,
@@ -19,6 +20,7 @@ import {
   approveTransactionSplits,
   rejectTransactionSplits,
 } from '../services/transactionSplits';
+import { authenticateServiceOrUser } from '../middleware/serviceAuth';
 
 const router = Router();
 const logger = createLogger('reconciliation-service');
@@ -324,6 +326,26 @@ router.get('/summary/trend', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get reconciliation trends failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to fetch reconciliation trends' });
+  }
+});
+
+router.get('/reports/reconciliation', authenticateServiceOrUser, async (req: AuthRequest, res: Response) => {
+  try {
+    const tenantId = req.user?.tenantId || (req.query.tenantId as string | undefined);
+
+    if (!tenantId) {
+      res.status(400).json({ error: 'tenantId is required for reconciliation reporting' });
+      return;
+    }
+
+    const daysParam = parseInt(String(req.query.days ?? '30'), 10);
+    const days = Number.isNaN(daysParam) ? 30 : Math.max(7, Math.min(daysParam, 180));
+
+    const report = await generateReconciliationReport(tenantId, days);
+    res.json({ report });
+  } catch (error) {
+    logger.error('Generate reconciliation report failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to generate reconciliation report' });
   }
 });
 

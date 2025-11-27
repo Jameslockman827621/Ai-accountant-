@@ -16,6 +16,7 @@ import {
   updateChartOfAccounts,
 } from '../services/chartOfAccounts';
 import { ValidationError } from '@ai-accountant/shared-utils';
+import { detectDuplicateLedgerEntries } from '../services/duplicateDetection';
 
 const router = Router();
 const logger = createLogger('ledger-service');
@@ -203,6 +204,27 @@ router.get('/accounts/:accountCode/balance', async (req: AuthRequest, res: Respo
   } catch (error) {
     logger.error('Get balance failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get balance' });
+  }
+});
+
+router.get('/entries/:entryId/duplicates', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { entryId } = req.params;
+    if (!entryId) {
+      res.status(400).json({ error: 'Entry ID is required' });
+      return;
+    }
+
+    const duplicates = await detectDuplicateLedgerEntries(req.user.tenantId, entryId);
+    res.json({ duplicates });
+  } catch (error) {
+    logger.error('Duplicate detection failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to detect duplicate entries' });
   }
 });
 
