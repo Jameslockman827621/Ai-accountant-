@@ -120,34 +120,40 @@ app.use((err: Error, _req: Request, res: Response, _next: unknown) => {
   res.status(500).json({ error: 'Internal server error' });
 });
 
-app.listen(PORT, () => {
-  logger.info(`API Gateway listening on port ${PORT}`);
-  logger.info('Service routes:', {
-    auth: AUTH_SERVICE,
-    documents: DOCUMENT_SERVICE,
-    ledger: LEDGER_SERVICE,
-    rules: RULES_SERVICE,
-    assistant: ASSISTANT_SERVICE,
-    billing: BILLING_SERVICE,
-    filing: FILING_SERVICE,
-    reconciliation: RECONCILIATION_SERVICE,
-    notification: NOTIFICATION_SERVICE,
-    compliance: COMPLIANCE_SERVICE,
-    monitoring: MONITORING_SERVICE,
-    workflow: WORKFLOW_SERVICE,
-    accountant: ACCOUNTANT_SERVICE,
-    analytics: ANALYTICS_SERVICE,
-    automation: AUTOMATION_SERVICE,
-    integrations: INTEGRATIONS_SERVICE,
-    bankFeed: BANK_FEED_SERVICE,
-    classification: CLASSIFICATION_SERVICE,
-    ocr: OCR_SERVICE,
-    validation: VALIDATION_SERVICE,
-    support: SUPPORT_SERVICE,
-    onboarding: ONBOARDING_SERVICE,
-    backup: BACKUP_SERVICE,
-    errorHandling: ERROR_HANDLING_SERVICE,
+export function startApiGateway(port: number | string = PORT) {
+  return app.listen(port, () => {
+    logger.info(`API Gateway listening on port ${port}`);
+    logger.info('Service routes:', {
+      auth: AUTH_SERVICE,
+      documents: DOCUMENT_SERVICE,
+      ledger: LEDGER_SERVICE,
+      rules: RULES_SERVICE,
+      assistant: ASSISTANT_SERVICE,
+      billing: BILLING_SERVICE,
+      filing: FILING_SERVICE,
+      reconciliation: RECONCILIATION_SERVICE,
+      notification: NOTIFICATION_SERVICE,
+      compliance: COMPLIANCE_SERVICE,
+      monitoring: MONITORING_SERVICE,
+      workflow: WORKFLOW_SERVICE,
+      accountant: ACCOUNTANT_SERVICE,
+      analytics: ANALYTICS_SERVICE,
+      automation: AUTOMATION_SERVICE,
+      integrations: INTEGRATIONS_SERVICE,
+      bankFeed: BANK_FEED_SERVICE,
+      classification: CLASSIFICATION_SERVICE,
+      ocr: OCR_SERVICE,
+      validation: VALIDATION_SERVICE,
+      support: SUPPORT_SERVICE,
+      onboarding: ONBOARDING_SERVICE,
+      backup: BACKUP_SERVICE,
+      errorHandling: ERROR_HANDLING_SERVICE,
+    });
   });
-});
+}
+
+if (process.env.NODE_ENV !== 'test') {
+  startApiGateway(PORT);
+}
 
 export default app;

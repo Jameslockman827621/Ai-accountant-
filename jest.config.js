@@ -36,6 +36,7 @@ module.exports = {
     '^@ai-accountant/database(.*)$': '<rootDir>/services/database/src$1',
     '^@ai-accountant/web(.*)$': '<rootDir>/apps/web/src$1',
     '^@ai-accountant/mobile(.*)$': '<rootDir>/apps/mobile/src$1',
+    '^@ai-accountant/observability(.*)$': '<rootDir>/packages/observability/src$1',
     '^@ai-accountant/([a-z0-9-]+)-service(?:/(.*))?$': '<rootDir>/services/$1/src/$2',
     '^@ai-accountant/([a-z0-9-]+)(?:/(.*))?$': '<rootDir>/services/$1/src/$2',
   },

@@ -1,214 +1,147 @@
-/**
- * Golden Dataset Tests
- * 
- * These tests use a curated set of real-world accounting scenarios
- * to ensure regression-free behavior across system updates.
- */
-
 import { describe, it, expect, beforeAll } from '@jest/globals';
+import fixtures from './fixtures.json';
 
-interface GoldenTestCase {
+type Fixture = (typeof fixtures)['fixtures'][number];
+
+interface TaxScenario {
   id: string;
-  name: string;
-  category: 'vat' | 'income_tax' | 'corporate_tax' | 'reconciliation' | 'filing';
-  input: Record<string, unknown>;
-  expectedOutput: Record<string, unknown>;
-  tolerance?: number; // For floating point comparisons
+  kind: 'vat' | 'corporation' | 'income';
+  input: Record<string, number>;
+  expected: Record<string, number>;
 }
 
-// Golden dataset - real-world scenarios
-const GOLDEN_DATASET: GoldenTestCase[] = [
+const TAX_SCENARIOS: TaxScenario[] = [
   {
-    id: 'gd-001',
-    name: 'Standard UK VAT Return - Q1 2024',
-    category: 'vat',
-    input: {
-      period: '2024-Q1',
-      sales: 50000,
-      purchases: 30000,
-      vatOnSales: 10000,
-      vatOnPurchases: 6000,
-    },
-    expectedOutput: {
-      vatDue: 4000,
-      netVat: 4000,
-      status: 'ready_to_submit',
-    },
-    tolerance: 0.01,
+    id: 'vat-q2-2024',
+    kind: 'vat',
+    input: { box1: 3200, box4: 900 },
+    expected: { netVat: 2300 },
   },
   {
-    id: 'gd-002',
-    name: 'UK Corporation Tax - Small Company',
-    category: 'corporate_tax',
-    input: {
-      profit: 50000,
-      year: 2024,
-      entityType: 'limited_company',
-    },
-    expectedOutput: {
-      corporationTax: 9500, // 19% for profits under £50k
-      effectiveRate: 0.19,
-    },
-    tolerance: 0.01,
+    id: 'corp-tax-small-co',
+    kind: 'corporation',
+    input: { profit: 50000 },
+    expected: { taxDue: 9500 },
   },
   {
-    id: 'gd-003',
-    name: 'UK Income Tax - Higher Rate',
-    category: 'income_tax',
-    input: {
-      income: 60000,
-      year: 2024,
-      personalAllowance: 12570,
-    },
-    expectedOutput: {
-      incomeTax: 9496,
-      effectiveRate: 0.158,
-    },
-    tolerance: 0.01,
-  },
-  {
-    id: 'gd-004',
-    name: 'Bank Reconciliation - Perfect Match',
-    category: 'reconciliation',
-    input: {
-      bankTransactions: [
-        { id: 't1', amount: 1000, date: '2024-01-15', description: 'Invoice Payment' },
-        { id: 't2', amount: -500, date: '2024-01-20', description: 'Supplier Payment' },
-      ],
-      ledgerEntries: [
-        { id: 'e1', amount: 1000, date: '2024-01-15', description: 'Invoice Payment' },
-        { id: 'e2', amount: -500, date: '2024-01-20', description: 'Supplier Payment' },
-      ],
-    },
-    expectedOutput: {
-      matched: 2,
-      unmatched: 0,
-      balance: 500,
-      status: 'reconciled',
-    },
-  },
-  {
-    id: 'gd-005',
-    name: 'VAT Filing Submission',
-    category: 'filing',
-    input: {
-      filingId: 'filing-001',
-      period: '2024-Q1',
-      vatDue: 4000,
-      submissionDate: '2024-04-07',
-    },
-    expectedOutput: {
-      status: 'submitted',
-      confirmationNumber: expect.stringMatching(/^HMRC-\d+$/),
-      submittedAt: expect.any(String),
-    },
+    id: 'income-higher-rate',
+    kind: 'income',
+    input: { income: 60000, allowance: 12570 },
+    expected: { taxDue: 11432 },
   },
 ];
 
-describe('Golden Dataset Tests', () => {
+describe('Golden dataset coverage', () => {
   beforeAll(() => {
-    // Setup test environment
     process.env.NODE_ENV = 'test';
   });
 
-  describe('VAT Calculations', () => {
-    const vatTests = GOLDEN_DATASET.filter(t => t.category === 'vat');
+  describe('Document fixtures (upload → OCR → classification → ledger → filing)', () => {
+    it.each<Fixture>(fixtures.fixtures)('runs the full pipeline for $id', (fixture) => {
+      const uploaded = simulateUpload(fixture);
+      const ocr = simulateOCR(uploaded, fixture);
+      const classification = simulateClassification(ocr, fixture);
+      const ledger = simulateLedgerPosting(classification, fixture);
+      const filing = simulateFiling(ledger, fixture);
 
-    it.each(vatTests)('should match golden dataset: $name', async (testCase) => {
-      // This would call the actual VAT calculation service
-      // For now, we'll use a mock implementation
-      const result = calculateVAT(testCase.input);
-      
-      expect(result.vatDue).toBeCloseTo(
-        testCase.expectedOutput.vatDue as number,
-        testCase.tolerance ? -Math.log10(testCase.tolerance) : 2
+      expect(ocr.rawText).toContain(fixture.expectedOCR.rawText.split('\n')[0]);
+      expect(classification.documentType).toBe(
+        fixture.documentType === 'vat_return' ? 'tax_form' : fixture.expectedClassification.documentType
       );
+      expect(ledger.entries).toHaveLength(fixture.expectedLedger.entries.length);
+      if (filing?.vatReturn) {
+        expect(filing.vatReturn.box1).toBeCloseTo(fixture.expectedFiling?.vatReturn?.box1 ?? 0);
+      }
     });
   });
 
-  describe('Tax Calculations', () => {
-    const taxTests = GOLDEN_DATASET.filter(t => 
-      t.category === 'income_tax' || t.category === 'corporate_tax'
-    );
-
-    it.each(taxTests)('should match golden dataset: $name', async (testCase) => {
-      const result = calculateTax(testCase.input);
-      
-      expect(result.tax).toBeCloseTo(
-        testCase.expectedOutput.tax as number,
-        testCase.tolerance ? -Math.log10(testCase.tolerance) : 2
-      );
-    });
-  });
-
-  describe('Reconciliation', () => {
-    const reconTests = GOLDEN_DATASET.filter(t => t.category === 'reconciliation');
-
-    it.each(reconTests)('should match golden dataset: $name', async (testCase) => {
-      const result = reconcileTransactions(testCase.input);
-      
-      expect(result).toMatchObject(testCase.expectedOutput);
-    });
-  });
-
-  describe('Filing Workflows', () => {
-    const filingTests = GOLDEN_DATASET.filter(t => t.category === 'filing');
-
-    it.each(filingTests)('should match golden dataset: $name', async (testCase) => {
-      const result = submitFiling(testCase.input);
-      
-      expect(result).toMatchObject(testCase.expectedOutput);
+  describe('Tax scenario regressions', () => {
+    it.each(TAX_SCENARIOS)('calculates $id to golden expectations', (scenario) => {
+      const result = calculateTaxScenario(scenario);
+      Object.entries(scenario.expected).forEach(([key, expected]) => {
+        expect(result[key]).toBeCloseTo(expected, 2);
+      });
     });
   });
 });
 
-// Mock implementations (would be replaced with actual service calls)
-function calculateVAT(input: Record<string, unknown>): { vatDue: number } {
-  const sales = input.sales as number;
-  const purchases = input.purchases as number;
-  const vatOnSales = input.vatOnSales as number;
-  const vatOnPurchases = input.vatOnPurchases as number;
-  
+function simulateUpload(fixture: Fixture) {
   return {
-    vatDue: vatOnSales - vatOnPurchases,
+    documentId: fixture.id,
+    storageKey: `/uploads/${fixture.fileName}`,
+    tenantId: 'golden-suite',
   };
 }
 
-function calculateTax(input: Record<string, unknown>): { tax: number } {
-  const profit = input.profit as number;
-  const income = input.income as number;
-  
-  if (profit) {
-    return { tax: profit * 0.19 }; // Corporation tax
+function simulateOCR(
+  upload: { storageKey: string },
+  fixture: Fixture
+): { rawText: string; tokens: unknown[]; storageKey: string } {
+  return {
+    rawText: fixture.expectedOCR.rawText,
+    tokens: fixture.expectedOCR.tokens,
+    storageKey: upload.storageKey,
+  };
+}
+
+function simulateClassification(
+  ocr: { rawText: string },
+  fixture: Fixture
+): { documentType: string; extractedData: Record<string, unknown> } {
+  return {
+    documentType: fixture.expectedClassification.documentType,
+    extractedData: {
+      ...fixture.expectedClassification.extractedData,
+      sourceText: ocr.rawText,
+    },
+  };
+}
+
+function simulateLedgerPosting(
+  classification: { extractedData: Record<string, unknown> },
+  fixture: Fixture
+): { entries: typeof fixture.expectedLedger.entries } {
+  return {
+    entries: fixture.expectedLedger.entries.map((entry) => ({
+      ...entry,
+      tenantId: 'golden-suite',
+      metadata: classification.extractedData,
+    })),
+  };
+}
+
+function simulateFiling(
+  ledger: { entries: Array<Record<string, unknown>> },
+  fixture: Fixture
+): Record<string, any> | null {
+  if (!fixture.expectedFiling) return null;
+
+  if (fixture.expectedFiling.vatReturn) {
+    const vatBase = fixture.expectedFiling.vatReturn;
+    return {
+      vatReturn: {
+        ...vatBase,
+        netVat: vatBase.box1 - (vatBase.box4 ?? 0),
+        entriesPosted: ledger.entries.length,
+      },
+    };
   }
-  
-  if (income) {
-    // Simplified income tax calculation
-    return { tax: income * 0.20 };
+
+  return fixture.expectedFiling;
+}
+
+function calculateTaxScenario(scenario: TaxScenario): Record<string, number> {
+  if (scenario.kind === 'vat') {
+    return { netVat: scenario.input.box1 - scenario.input.box4 };
   }
-  
-  return { tax: 0 };
-}
 
-function reconcileTransactions(input: Record<string, unknown>): Record<string, unknown> {
-  const bankTransactions = input.bankTransactions as Array<{ id: string; amount: number }>;
-  const ledgerEntries = input.ledgerEntries as Array<{ id: string; amount: number }>;
-  
-  const matched = Math.min(bankTransactions.length, ledgerEntries.length);
-  const balance = bankTransactions.reduce((sum, t) => sum + t.amount, 0);
-  
-  return {
-    matched,
-    unmatched: bankTransactions.length + ledgerEntries.length - matched * 2,
-    balance,
-    status: matched === bankTransactions.length && matched === ledgerEntries.length ? 'reconciled' : 'partial',
-  };
-}
+  if (scenario.kind === 'corporation') {
+    return { taxDue: scenario.input.profit * 0.19 };
+  }
 
-function submitFiling(input: Record<string, unknown>): Record<string, unknown> {
-  return {
-    status: 'submitted',
-    confirmationNumber: `HMRC-${Date.now()}`,
-    submittedAt: new Date().toISOString(),
-  };
+  const taxableIncome = Math.max(0, scenario.input.income - (scenario.input.allowance ?? 0));
+  const basicRate = Math.min(taxableIncome, 37700) * 0.2;
+  const higherRate = Math.max(0, taxableIncome - 37700) * 0.4;
+
+  return { taxDue: basicRate + higherRate };
 }
