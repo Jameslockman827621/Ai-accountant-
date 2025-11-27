@@ -6,6 +6,10 @@ const logger = createLogger('cache-service');
 class RedisCache {
   private cache: Map<string, { value: unknown; expiry: number }> = new Map();
 
+  getKeys(): string[] {
+    return Array.from(this.cache.keys());
+  }
+
   async get<T>(key: string): Promise<T | null> {
     const item = this.cache.get(key);
     

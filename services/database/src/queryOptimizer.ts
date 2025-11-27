@@ -201,6 +201,25 @@ export async function getTableStats(tableName: string): Promise<{
   };
 }
 
+export async function ensureCoreIndexes(): Promise<void> {
+  const recommendations: IndexRecommendation[] = [
+    {
+      table: 'ledger_entries',
+      columns: ['tenant_id', 'transaction_date'],
+      type: 'btree',
+      reason: 'Accelerate ledger pagination and period filters',
+    },
+    {
+      table: 'filings',
+      columns: ['tenant_id', 'status', 'period_end'],
+      type: 'btree',
+      reason: 'Speed up filing dashboards and status lookups',
+    },
+  ];
+
+  await createRecommendedIndexes(recommendations);
+}
+
 function parsePlanForRecommendations(planText: string): string[] {
   const recommendations: string[] = [];
 

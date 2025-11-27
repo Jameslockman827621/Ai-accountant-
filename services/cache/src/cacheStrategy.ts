@@ -1,5 +1,6 @@
 import { redisCache } from './redis';
 import { createLogger } from '@ai-accountant/shared-utils';
+import { createHash } from 'crypto';
 
 const logger = createLogger('cache-service');
 
@@ -49,6 +50,55 @@ export class CacheStrategy {
     await redisCache.set(cacheKey, report, 900);
   }
 
+  // Cache ledger reads (TTL: 5 minutes)
+  async getLedgerEntriesCache(tenantId: string, filters: Record<string, unknown>): Promise<unknown> {
+    const cacheKey = this.buildFilterCacheKey('ledger_entries', tenantId, filters);
+    return await redisCache.get(cacheKey);
+  }
+
+  async setLedgerEntriesCache(
+    tenantId: string,
+    filters: Record<string, unknown>,
+    payload: unknown
+  ): Promise<void> {
+    const cacheKey = this.buildFilterCacheKey('ledger_entries', tenantId, filters);
+    await redisCache.set(cacheKey, payload, 300);
+  }
+
+  async getLedgerBalanceCache(tenantId: string, accountCode: string, asOfDate?: string): Promise<unknown> {
+    const cacheKey = `ledger_balance:${tenantId}:${accountCode}:${asOfDate || 'latest'}`;
+    return await redisCache.get(cacheKey);
+  }
+
+  async setLedgerBalanceCache(
+    tenantId: string,
+    accountCode: string,
+    payload: unknown,
+    asOfDate?: string
+  ): Promise<void> {
+    const cacheKey = `ledger_balance:${tenantId}:${accountCode}:${asOfDate || 'latest'}`;
+    await redisCache.set(cacheKey, payload, 300);
+  }
+
+  // Cache filings (TTL: 10 minutes)
+  async getFilingListCache(tenantId: string, filters: Record<string, unknown>): Promise<unknown> {
+    const cacheKey = this.buildFilterCacheKey('filings', tenantId, filters);
+    return await redisCache.get(cacheKey);
+  }
+
+  async setFilingListCache(tenantId: string, filters: Record<string, unknown>, payload: unknown): Promise<void> {
+    const cacheKey = this.buildFilterCacheKey('filings', tenantId, filters);
+    await redisCache.set(cacheKey, payload, 600);
+  }
+
+  async getFilingStatusCache(filingId: string): Promise<unknown> {
+    return await redisCache.get(`filing_status:${filingId}`);
+  }
+
+  async setFilingStatusCache(filingId: string, payload: unknown): Promise<void> {
+    await redisCache.set(`filing_status:${filingId}`, payload, 600);
+  }
+
   // Cache user sessions (TTL: 8 hours)
   async getUserSession(sessionId: string): Promise<unknown> {
     const cacheKey = `user_session:${sessionId}`;
@@ -62,8 +112,21 @@ export class CacheStrategy {
 
   // Invalidate cache
   async invalidate(pattern: string): Promise<void> {
-    // In production, use Redis SCAN to find and delete matching keys
-    logger.info('Cache invalidated', { pattern });
+    const regex = new RegExp(`^${pattern.replace(/\*/g, '.*')}$`);
+    const keys = redisCache.getKeys();
+    await Promise.all(
+      keys
+        .filter((key) => regex.test(key))
+        .map(async (key) => {
+          await redisCache.del(key);
+        })
+    );
+    logger.info('Cache invalidated', { pattern, deleted: keys.filter((key) => regex.test(key)).length });
+  }
+
+  private buildFilterCacheKey(namespace: string, tenantId: string, filters: Record<string, unknown>): string {
+    const hash = createHash('sha256').update(JSON.stringify(filters)).digest('hex');
+    return `${namespace}:${tenantId}:${hash}`;
   }
 }
 

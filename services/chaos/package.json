@@ -14,6 +14,7 @@
     "@ai-accountant/shared-types": "*",
     "@ai-accountant/shared-utils": "*",
     "@ai-accountant/database": "*",
+    "@ai-accountant/performance": "*",
     "express": "^4.18.2",
     "dotenv": "^16.3.1",
     "cors": "^2.8.5",
