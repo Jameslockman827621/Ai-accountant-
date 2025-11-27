@@ -4,12 +4,15 @@ import { UserRole } from '@ai-accountant/shared-types';
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { NotFoundError, AuthorizationError } from '@ai-accountant/shared-utils';
+import { authorizeAction } from '../middleware/authorization';
+import { AccessAction } from '@ai-accountant/shared-types';
+import { completeDataMutationTrace, createDataMutationTrace } from '@ai-accountant/observability';
 
 const router = Router();
 const logger = createLogger('auth-service');
 
 // Get all users in tenant
-router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
+router.get('/', authenticate, authorizeAction(AccessAction.MANAGE_USERS), async (req: AuthRequest, res: Response) => {
   try {
     if (!req.user) {
       res.status(401).json({ error: 'Unauthorized' });
@@ -32,105 +35,136 @@ router.get('/', authenticate, async (req: AuthRequest, res: Response) => {
 });
 
 // Get user by ID
-router.get('/:userId', authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
+router.get(
+  '/:userId',
+  authenticate,
+  authorizeAction(AccessAction.MANAGE_USERS, { traceEntity: 'user', resourceResolver: (req) => req.params.userId }),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { userId } = req.params;
+
+      const result = await db.query(
+        `SELECT id, email, name, role, is_active, last_login_at, created_at
+         FROM users
+         WHERE id = $1 AND tenant_id = $2`,
+        [userId, req.user.tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        throw new NotFoundError('User', userId);
+      }
+
+      res.json({ user: result.rows[0] });
+    } catch (error: unknown) {
+      if (error instanceof NotFoundError) {
+        res.status(404).json({ error: error.message });
+        return;
+      }
+      logger.error('Get user failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to get user' });
     }
-
-    const { userId } = req.params;
-
-    const result = await db.query(
-      `SELECT id, email, name, role, is_active, last_login_at, created_at
-       FROM users
-       WHERE id = $1 AND tenant_id = $2`,
-      [userId, req.user.tenantId]
-    );
-
-    if (result.rows.length === 0) {
-      throw new NotFoundError('User', userId);
-    }
-
-    res.json({ user: result.rows[0] });
-  } catch (error: unknown) {
-    if (error instanceof NotFoundError) {
-      res.status(404).json({ error: error.message });
-      return;
-    }
-    logger.error('Get user failed', error instanceof Error ? error : new Error(String(error)));
-    res.status(500).json({ error: 'Failed to get user' });
   }
-});
+);
 
 // Update user (only own profile or admin)
-router.patch('/:userId', authenticate, async (req: AuthRequest, res: Response) => {
-  try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
+router.patch(
+  '/:userId',
+  authenticate,
+  authorizeAction(AccessAction.UPDATE_USER_ROLE, {
+    traceEntity: 'user',
+    resourceResolver: (req) => req.params.userId,
+  }),
+  async (req: AuthRequest, res: Response) => {
+    let mutationTraceId: string | null = null;
+    try {
+      if (!req.user) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const { userId } = req.params;
+      const { name, role, isActive } = req.body;
+
+      // Check if user can update this profile
+      if (userId !== req.user.userId && req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.ACCOUNTANT) {
+        throw new AuthorizationError('Insufficient permissions to update this user');
+      }
+
+      // Verify user exists in same tenant
+      const userCheck = await db.query(
+        'SELECT id FROM users WHERE id = $1 AND tenant_id = $2',
+        [userId, req.user.tenantId]
+      );
+
+      if (userCheck.rows.length === 0) {
+        throw new NotFoundError('User', userId);
+      }
+
+      const mutationTrace = createDataMutationTrace({
+        entity: 'user',
+        entityId: userId,
+        tenantId: req.user.tenantId,
+        actorId: req.user.userId,
+        operation: 'update',
+        metadata: { name, role, isActive },
+        parentTraceId: (req.headers['x-trace-id'] as string) || undefined,
+      });
+      mutationTraceId = mutationTrace.traceId;
+
+      // Build update query
+      const updates: string[] = [];
+      const params: unknown[] = [];
+      let paramCount = 1;
+
+      if (name !== undefined) {
+        updates.push(`name = $${paramCount++}`);
+        params.push(name);
+      }
+
+      if (role !== undefined && (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.ACCOUNTANT)) {
+        updates.push(`role = $${paramCount++}`);
+        params.push(role);
+      }
+
+      if (isActive !== undefined && (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.ACCOUNTANT)) {
+        updates.push(`is_active = $${paramCount++}`);
+        params.push(isActive);
+      }
+
+      if (updates.length === 0) {
+        res.json({ message: 'No changes' });
+        return;
+      }
+
+      params.push(userId);
+      await db.query(
+        `UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramCount}`,
+        params
+      );
+
+      logger.info('User updated', { userId, updatedBy: req.user.userId, traceId: mutationTraceId });
+      completeDataMutationTrace(mutationTraceId, 'success');
+
+      res.json({ message: 'User updated successfully', traceId: mutationTraceId });
+    } catch (error: unknown) {
+      if (mutationTraceId) {
+        completeDataMutationTrace(mutationTraceId, 'error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      if (error instanceof NotFoundError || error instanceof AuthorizationError) {
+        res.status(error.statusCode).json({ error: error.message });
+        return;
+      }
+      logger.error('Update user failed', error instanceof Error ? error : new Error(String(error)));
+      res.status(500).json({ error: 'Failed to update user' });
     }
-
-    const { userId } = req.params;
-    const { name, role, isActive } = req.body;
-
-    // Check if user can update this profile
-    if (userId !== req.user.userId && req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.ACCOUNTANT) {
-      throw new AuthorizationError('Insufficient permissions to update this user');
-    }
-
-    // Verify user exists in same tenant
-    const userCheck = await db.query(
-      'SELECT id FROM users WHERE id = $1 AND tenant_id = $2',
-      [userId, req.user.tenantId]
-    );
-
-    if (userCheck.rows.length === 0) {
-      throw new NotFoundError('User', userId);
-    }
-
-    // Build update query
-    const updates: string[] = [];
-    const params: unknown[] = [];
-    let paramCount = 1;
-
-    if (name !== undefined) {
-      updates.push(`name = $${paramCount++}`);
-      params.push(name);
-    }
-
-    if (role !== undefined && (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.ACCOUNTANT)) {
-      updates.push(`role = $${paramCount++}`);
-      params.push(role);
-    }
-
-    if (isActive !== undefined && (req.user.role === UserRole.SUPER_ADMIN || req.user.role === UserRole.ACCOUNTANT)) {
-      updates.push(`is_active = $${paramCount++}`);
-      params.push(isActive);
-    }
-
-    if (updates.length === 0) {
-      res.json({ message: 'No changes' });
-      return;
-    }
-
-    params.push(userId);
-    await db.query(
-      `UPDATE users SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramCount}`,
-      params
-    );
-
-    logger.info('User updated', { userId, updatedBy: req.user.userId });
-
-    res.json({ message: 'User updated successfully' });
-  } catch (error: unknown) {
-    if (error instanceof NotFoundError || error instanceof AuthorizationError) {
-      res.status(error.statusCode).json({ error: error.message });
-      return;
-    }
-    logger.error('Update user failed', error instanceof Error ? error : new Error(String(error)));
-    res.status(500).json({ error: 'Failed to update user' });
   }
-});
+);
 
 export { router as userRouter };
