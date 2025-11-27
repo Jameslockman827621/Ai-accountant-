@@ -9,9 +9,19 @@ import { accessReviewService } from '../services/accessReview';
 import { complianceEvidenceService } from '../services/complianceEvidence';
 import { UserRole } from '@ai-accountant/shared-types';
 import { AuthorizationError } from '@ai-accountant/shared-utils';
+import { getPolicyStatuses, recordPolicyAcceptance, PolicyType } from '../services/legal';
+import {
+  getPrivacySettings,
+  processErasureRequests,
+  runRetentionEnforcement,
+  submitErasureRequest,
+  upsertPrivacySettings,
+} from '../services/privacy';
 
 const router = Router();
 const logger = createLogger('compliance-service');
+
+const LEGAL_POLICY_TYPES: PolicyType[] = ['terms_of_service', 'privacy_policy'];
 
 function requireTenant(res: Response, user?: AuthRequest['user']): string | undefined {
   if (typeof user?.tenantId !== 'string') {
@@ -31,6 +41,224 @@ function requireUserId(res: Response, user?: AuthRequest['user']): string | unde
 
 const toOptionalString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.length > 0 ? value : undefined;
+
+// Legal policy versioning and consent capture
+router.get('/legal/policies', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const tenantId = requireTenant(res, req.user);
+    const userId = requireUserId(res, req.user);
+    if (tenantId === undefined || userId === undefined) {
+      return;
+    }
+
+    const statuses = await getPolicyStatuses(tenantId as string, userId as string);
+    res.json({ policies: statuses });
+  } catch (error) {
+    logger.error('Failed to fetch policy statuses', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Unable to load legal policies' });
+  }
+});
+
+router.post('/legal/accept', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const tenantId = requireTenant(res, req.user);
+    const userId = requireUserId(res, req.user);
+    if (tenantId === undefined || userId === undefined) {
+      return;
+    }
+
+    const { policyType, signature } = req.body as { policyType?: PolicyType; signature?: string };
+
+    if (!policyType || !LEGAL_POLICY_TYPES.includes(policyType)) {
+      res.status(400).json({ error: 'Invalid policy type' });
+      return;
+    }
+    if (!signature || typeof signature !== 'string' || signature.trim().length === 0) {
+      res.status(400).json({ error: 'Signature is required' });
+      return;
+    }
+
+    const metadata: { userAgent?: string; ipAddress?: string } = {};
+    if (typeof req.headers['user-agent'] === 'string') {
+      metadata.userAgent = req.headers['user-agent'];
+    }
+    if (typeof req.ip === 'string' && req.ip.length > 0) {
+      metadata.ipAddress = req.ip;
+    }
+
+    const acceptance = await recordPolicyAcceptance(
+      tenantId as string,
+      userId as string,
+      policyType,
+      signature.trim(),
+      metadata
+    );
+
+    res.status(201).json({ acceptance });
+  } catch (error) {
+    logger.error('Failed to record policy acceptance', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Unable to record acceptance' });
+  }
+});
+
+// Privacy controls (GDPR/CCPA)
+router.get('/privacy/settings', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const tenantId = requireTenant(res, req.user);
+    if (tenantId === undefined) {
+      return;
+    }
+
+    const settings = await getPrivacySettings(tenantId as string);
+    res.json({ settings });
+  } catch (error) {
+    logger.error('Failed to fetch privacy settings', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Unable to load privacy settings' });
+  }
+});
+
+router.put('/privacy/settings', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.ACCOUNTANT) {
+      throw new AuthorizationError('Insufficient permissions');
+    }
+
+    const tenantId = requireTenant(res, req.user);
+    if (tenantId === undefined) {
+      return;
+    }
+
+    const { defaultRetentionDays, erasureGracePeriodDays, ccpaOptOut, autoDeleteEnabled } = req.body as {
+      defaultRetentionDays?: number;
+      erasureGracePeriodDays?: number;
+      ccpaOptOut?: boolean;
+      autoDeleteEnabled?: boolean;
+    };
+
+    const updates: Partial<Parameters<typeof upsertPrivacySettings>[1]> = {};
+    if (defaultRetentionDays !== undefined) {
+      updates.defaultRetentionDays = defaultRetentionDays;
+    }
+    if (erasureGracePeriodDays !== undefined) {
+      updates.erasureGracePeriodDays = erasureGracePeriodDays;
+    }
+    if (ccpaOptOut !== undefined) {
+      updates.ccpaOptOut = ccpaOptOut;
+    }
+    if (autoDeleteEnabled !== undefined) {
+      updates.autoDeleteEnabled = autoDeleteEnabled;
+    }
+
+    const settings = await upsertPrivacySettings(tenantId as string, updates);
+
+    res.json({ settings });
+  } catch (error) {
+    logger.error('Failed to update privacy settings', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof AuthorizationError) {
+      res.status(403).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Unable to update privacy settings' });
+  }
+});
+
+router.post('/privacy/erasure', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const tenantId = requireTenant(res, req.user);
+    const userId = requireUserId(res, req.user);
+    if (tenantId === undefined || userId === undefined) {
+      return;
+    }
+
+    const { reason } = req.body as { reason?: string };
+    const requestId = await submitErasureRequest(tenantId as string, userId as string, reason);
+    res.status(202).json({ requestId });
+  } catch (error) {
+    logger.error('Failed to submit erasure request', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Unable to submit erasure request' });
+  }
+});
+
+router.post('/privacy/process-erasure', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.ACCOUNTANT) {
+      throw new AuthorizationError('Insufficient permissions');
+    }
+
+    const tenantId = requireTenant(res, req.user);
+    if (tenantId === undefined) {
+      return;
+    }
+
+    const result = await processErasureRequests(tenantId as string, req.user.userId as string);
+    res.json({ result });
+  } catch (error) {
+    logger.error('Failed to process erasure queue', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof AuthorizationError) {
+      res.status(403).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Unable to process erasure queue' });
+  }
+});
+
+router.post('/privacy/run-retention', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    if (req.user.role !== UserRole.SUPER_ADMIN && req.user.role !== UserRole.ACCOUNTANT) {
+      throw new AuthorizationError('Insufficient permissions');
+    }
+
+    const tenantId = requireTenant(res, req.user);
+    if (tenantId === undefined) {
+      return;
+    }
+
+    const actions = await runRetentionEnforcement(tenantId as string, req.user.userId as string);
+    res.json({ actions });
+  } catch (error) {
+    logger.error('Failed to run retention enforcement', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof AuthorizationError) {
+      res.status(403).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Unable to run retention enforcement' });
+  }
+});
 
 // Get audit logs
 router.get('/audit-logs', async (req: AuthRequest, res: Response) => {

@@ -29,6 +29,8 @@ import RulepackConsole from './RulepackConsole';
 import FilingReadinessPanel from './FilingReadinessPanel';
 import SubmissionWorkflowPanel from './SubmissionWorkflowPanel';
 import ClientCommunicationPanel from './ClientCommunicationPanel';
+import { TermsAcceptanceModal } from './TermsAcceptanceModal';
+import { useLegalAgreements } from '@/hooks/useLegalAgreements';
 
 interface DashboardStats {
   period: {
@@ -83,6 +85,14 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
     recordEvent,
     getStepData,
   } = useOnboarding(token);
+  const {
+    policies: policyStatuses,
+    outstandingPolicies,
+    loading: legalLoading,
+    error: legalError,
+    acceptOutstanding,
+    isCompliant: isLegalCompliant,
+  } = useLegalAgreements(token);
 
   useEffect(() => {
     if (!onboardingProgress) {
@@ -170,7 +180,10 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
     fetchSecurity();
   }, [fetchSecurity]);
 
-  if (loading) {
+  const legalBlocking = Boolean(token && !isLegalCompliant);
+  const showLegalModal = Boolean(token && !isLegalCompliant && !legalLoading);
+
+  if (loading || (legalBlocking && legalLoading)) {
     return <div className="flex items-center justify-center h-screen">Loading dashboard…</div>;
   }
 
@@ -194,25 +207,35 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
 
   const shouldShowOnboardingCard = Boolean(onboardingProgress && onboardingProgress.progress < 100);
 
-    return (
-      <div className="min-h-screen bg-gray-50 p-8">
-          <div className="max-w-7xl mx-auto space-y-8">
-          {onboardingProgress && isOnboardingOpen && (
-            <OnboardingWizard
-              token={token}
-              progress={onboardingProgress}
-              onStepComplete={completeStep}
-              onClose={() => {
-                setIsOnboardingOpen(false);
-                recordEvent('wizard_closed', onboardingProgress.currentStep, {
-                  progress: onboardingProgress.progress,
-                });
-              }}
-              trackEvent={recordEvent}
-              isSubmitting={onboardingSubmitting}
-              getStepData={getStepData}
-            />
-          )}
+  return (
+    <div className="relative min-h-screen bg-gray-50 p-8">
+      {showLegalModal && (
+        <TermsAcceptanceModal
+          policies={policyStatuses}
+          outstandingPolicies={outstandingPolicies}
+          onAccept={acceptOutstanding}
+          loading={legalLoading}
+          error={legalError}
+          userName={user.name}
+        />
+      )}
+      <div className={`max-w-7xl mx-auto space-y-8 ${legalBlocking ? 'pointer-events-none blur-[1px]' : ''}`}>
+        {onboardingProgress && isOnboardingOpen && (
+          <OnboardingWizard
+            token={token}
+            progress={onboardingProgress}
+            onStepComplete={completeStep}
+            onClose={() => {
+              setIsOnboardingOpen(false);
+              recordEvent('wizard_closed', onboardingProgress.currentStep, {
+                progress: onboardingProgress.progress,
+              });
+            }}
+            trackEvent={recordEvent}
+            isSubmitting={onboardingSubmitting}
+            getStepData={getStepData}
+          />
+        )}
           <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
             <div>
               <p className="text-sm text-gray-500">Welcome back</p>
@@ -323,12 +346,12 @@ export default function Dashboard({ user, token, onLogout }: DashboardProps) {
             <ValidationDashboard />
             <ReviewQueue />
             <ErrorRecoveryCenter />
-              <BankConnectionHealth />
-              <ReconciliationReport />
-              <RulepackConsole token={token} />
-              <FilingReadinessPanel token={token} />
-              <SubmissionWorkflowPanel token={token} />
-              <ClientCommunicationPanel token={token} />
+            <BankConnectionHealth />
+            <ReconciliationReport />
+            <RulepackConsole token={token} />
+            <FilingReadinessPanel token={token} />
+            <SubmissionWorkflowPanel token={token} />
+            <ClientCommunicationPanel token={token} />
           </div>
         </div>
       );

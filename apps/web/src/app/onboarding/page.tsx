@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import OnboardingWizardEnhanced from '@/components/OnboardingWizardEnhanced';
 import { useOnboarding, type OnboardingStep, type OnboardingEventType } from '@/hooks/useOnboarding';
+import { useLegalAgreements } from '@/hooks/useLegalAgreements';
+import { TermsAcceptanceModal } from '@/components/TermsAcceptanceModal';
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -12,7 +14,7 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     // Get auth token from localStorage (matching the rest of the app)
-    const authToken = localStorage.getItem('authToken');
+    const authToken = localStorage.getItem('auth_token') || localStorage.getItem('authToken');
     if (!authToken) {
       // Redirect to login if not authenticated
       router.push('/');
@@ -23,6 +25,7 @@ export default function OnboardingPage() {
   }, [router]);
 
   const { progress, isLoading, isSubmitting, completeStep, recordEvent, getStepData } = useOnboarding(token);
+  const legalAgreements = useLegalAgreements(token);
 
   const handleStepComplete = async (step: OnboardingStep, stepData?: Record<string, unknown>) => {
     try {
@@ -65,7 +68,7 @@ export default function OnboardingPage() {
   };
 
   // Show loading state while initializing
-  if (!isInitialized || isLoading || !progress) {
+  if (!isInitialized || isLoading || !progress || (token && legalAgreements.loading && !legalAgreements.isCompliant)) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gray-50">
         <div className="text-center">
@@ -87,18 +90,29 @@ export default function OnboardingPage() {
   }, [token, progress, recordEvent]);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {token && progress && (
-        <OnboardingWizardEnhanced
-          token={token}
-          progress={progress}
-          onStepComplete={handleStepComplete}
-          onClose={handleClose}
-          trackEvent={handleTrackEvent}
-          isSubmitting={isSubmitting}
-          getStepData={getStepData}
+    <div className="relative min-h-screen bg-gray-50">
+      {token && progress && !legalAgreements.isCompliant && !legalAgreements.loading && (
+        <TermsAcceptanceModal
+          policies={legalAgreements.policies}
+          outstandingPolicies={legalAgreements.outstandingPolicies}
+          onAccept={legalAgreements.acceptOutstanding}
+          loading={legalAgreements.loading}
+          error={legalAgreements.error}
         />
       )}
+      <div className={legalAgreements.isCompliant ? '' : 'pointer-events-none blur-[1px]'}>
+        {token && progress && (
+          <OnboardingWizardEnhanced
+            token={token}
+            progress={progress}
+            onStepComplete={handleStepComplete}
+            onClose={handleClose}
+            trackEvent={handleTrackEvent}
+            isSubmitting={isSubmitting}
+            getStepData={getStepData}
+          />
+        )}
+      </div>
     </div>
   );
 }
