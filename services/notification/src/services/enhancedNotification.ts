@@ -6,7 +6,7 @@ import { sendEmail } from './email';
 
 const logger = createLogger('enhanced-notification');
 
-export type NotificationChannel = 'email' | 'sms' | 'in_app' | 'push';
+export type NotificationChannel = 'email' | 'sms' | 'in_app' | 'push' | 'webhook';
 export type NotificationCategory = 'digest' | 'alert' | 'reminder' | 'system';
 
 export interface NotificationTemplate {
@@ -196,6 +196,11 @@ export class EnhancedNotificationService {
           providerMessageId = `sms_${deliveryId}`;
           break;
 
+        case 'webhook':
+          await this.dispatchWebhook(rendered, variables);
+          providerMessageId = `webhook_${deliveryId}`;
+          break;
+
         case 'in_app':
           // Create in-app notification
           await this.createInAppNotification(tenantId, userId, rendered.subject, rendered.text);
@@ -239,6 +244,26 @@ export class EnhancedNotificationService {
     );
 
     return deliveryId;
+  }
+
+  private async dispatchWebhook(
+    rendered: { subject: string; html: string; text: string },
+    variables: Record<string, unknown>
+  ): Promise<void> {
+    const webhookUrl = variables.webhookUrl as string | undefined;
+    if (!webhookUrl) {
+      throw new Error('Webhook URL missing from template variables');
+    }
+
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subject: rendered.subject,
+        body: rendered.text,
+        metadata: variables,
+      }),
+    });
   }
 
   /**
