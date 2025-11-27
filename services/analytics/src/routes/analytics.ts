@@ -7,6 +7,7 @@ import { getDashboardStats } from '../services/dashboard';
 import { runScenarioAnalysis } from '../services/scenarioPlanner';
 import { getExecutiveInsights } from '../services/insights';
 import { runCashflowPipeline } from '../services/cashflowPipeline';
+import { runAnomalyDetectionJob } from '../services/anomaly/anomalyDetection';
 
 const router = Router();
 const logger = createLogger('analytics-service');
@@ -122,6 +123,22 @@ router.post('/cashflow/pipeline', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Run cashflow pipeline failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to run cashflow pipeline' });
+  }
+});
+
+router.post('/anomalies/run', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const result = await runAnomalyDetectionJob(req.user.tenantId);
+
+    res.json(result);
+  } catch (error) {
+    logger.error('Run anomaly detection failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to run anomaly detection' });
   }
 });
 
