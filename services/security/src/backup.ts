@@ -7,6 +7,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { db } from '@ai-accountant/database';
+import { AtRestEncryptionManager } from './encryptionAtRest';
 
 const execAsync = promisify(exec);
 const logger = createLogger('backup');
@@ -16,6 +17,7 @@ export interface BackupConfig {
   retentionDays: number; // How long to keep backups (default: 30)
   s3Bucket?: string; // S3 bucket for backup storage
   crossRegionReplication: boolean; // Enable cross-region replication
+  encryptionEnabled?: boolean;
 }
 
 const DEFAULT_CONFIG: BackupConfig = {
@@ -26,9 +28,16 @@ const DEFAULT_CONFIG: BackupConfig = {
 
 class BackupService {
   private config: BackupConfig;
+  private encryption: AtRestEncryptionManager;
 
   constructor(config?: Partial<BackupConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.encryption = new AtRestEncryptionManager({
+      s3Bucket: this.config.s3Bucket,
+      kmsKeyId: process.env.S3_KMS_KEY_ID,
+      enforceBucketKey: true,
+    });
+    this.encryption.audit();
   }
 
   /**
@@ -64,9 +73,10 @@ class BackupService {
       // Upload to S3 if configured
       let location = backupFile + '.gz';
       if (this.config.s3Bucket) {
+        const sseFlags = this.encryption.s3PutObjectFlags();
         const s3Key = `backups/${backupId}.sql.gz`;
         await execAsync(
-          `aws s3 cp ${backupFile}.gz s3://${this.config.s3Bucket}/${s3Key} --storage-class GLACIER`
+          `aws s3 cp ${backupFile}.gz s3://${this.config.s3Bucket}/${s3Key} --storage-class GLACIER ${sseFlags}`
         );
         location = `s3://${this.config.s3Bucket}/${s3Key}`;
 

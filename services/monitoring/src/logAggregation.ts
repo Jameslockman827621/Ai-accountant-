@@ -1,16 +1,24 @@
+import { context, trace } from '@opentelemetry/api';
 import { createLogger } from '@ai-accountant/shared-utils';
 
 const logger = createLogger('monitoring-service');
 
-// Log Aggregation (ELK/OpenSearch integration)
+interface StructuredLog {
+  timestamp: Date;
+  level: string;
+  service: string;
+  message: string;
+  environment: string;
+  traceId?: string;
+  spanId?: string;
+  metadata?: Record<string, unknown>;
+}
+
+// Log Aggregation (Grafana Loki / ELK integration)
 export class LogAggregation {
-  private logs: Array<{
-    timestamp: Date;
-    level: string;
-    service: string;
-    message: string;
-    metadata?: Record<string, unknown>;
-  }> = [];
+  private logs: StructuredLog[] = [];
+  private lokiEndpoint = process.env.GRAFANA_LOKI_ENDPOINT;
+  private elkEndpoint = process.env.ELASTICSEARCH_ENDPOINT;
 
   async sendLog(
     level: string,
@@ -18,32 +26,22 @@ export class LogAggregation {
     message: string,
     metadata?: Record<string, unknown>
   ): Promise<void> {
-    const logEntry: {
-      timestamp: Date;
-      level: string;
-      service: string;
-      message: string;
-      metadata?: Record<string, unknown>;
-    } = {
+    const activeSpan = trace.getSpan(context.active());
+    const spanContext = activeSpan?.spanContext();
+
+    const logEntry: StructuredLog = {
       timestamp: new Date(),
       level,
       service,
       message,
+      environment: process.env.NODE_ENV || 'development',
+      ...(spanContext?.traceId ? { traceId: spanContext.traceId } : {}),
+      ...(spanContext?.spanId ? { spanId: spanContext.spanId } : {}),
+      ...(metadata ? { metadata } : {}),
     };
 
-    if (metadata) {
-      logEntry.metadata = metadata;
-    }
-
     this.logs.push(logEntry);
-
-    // In production, send to ELK/OpenSearch
-    // await fetch('http://elasticsearch:9200/logs/_doc', {
-    //   method: 'POST',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify(logEntry),
-    // });
-
+    await Promise.all([this.shipToGrafana(logEntry), this.shipToElasticsearch(logEntry)]);
     logger.debug('Log sent to aggregation', { service, level });
   }
 
@@ -53,12 +51,7 @@ export class LogAggregation {
     startDate?: Date;
     endDate?: Date;
     searchText?: string;
-  }): Promise<Array<{
-    timestamp: Date;
-    level: string;
-    service: string;
-    message: string;
-  }>> {
+  }): Promise<StructuredLog[]> {
     // In production, query ELK/OpenSearch
     let results = this.logs;
 
@@ -85,6 +78,28 @@ export class LogAggregation {
     }
 
     return results;
+  }
+
+  private async shipToGrafana(logEntry: StructuredLog): Promise<void> {
+    if (!this.lokiEndpoint) return;
+
+    // In production, POST to Grafana Loki push API
+    logger.debug('Would ship log to Grafana Loki', {
+      endpoint: this.lokiEndpoint,
+      level: logEntry.level,
+      service: logEntry.service,
+    });
+  }
+
+  private async shipToElasticsearch(logEntry: StructuredLog): Promise<void> {
+    if (!this.elkEndpoint) return;
+
+    // In production, POST to Elasticsearch/Opensearch
+    logger.debug('Would ship log to Elasticsearch', {
+      endpoint: this.elkEndpoint,
+      level: logEntry.level,
+      service: logEntry.service,
+    });
   }
 }
 

@@ -12,6 +12,11 @@ interface RateLimitConfig {
 }
 
 const rateLimitStore: Map<string, { count: number; resetAt: Date }> = new Map();
+const burstTokens: Map<string, { tokens: number; lastRefill: number }> = new Map();
+const penaltyBox: Map<string, { blockedUntil: number; reason: string }> = new Map();
+const violationCounts: Map<string, number> = new Map();
+const MAX_BURST_MULTIPLIER = 3;
+const PENALTY_WINDOW_MS = 5 * 60 * 1000;
 
 type RequestWithUser = Request & {
   user?: {
@@ -27,6 +32,16 @@ export function createRateLimiter(config: RateLimitConfig) {
     const identifier = getRateLimitIdentifier(req);
     const now = new Date();
 
+    const penalty = penaltyBox.get(identifier);
+    if (penalty && penalty.blockedUntil > now.getTime()) {
+      res.status(429).json({
+        error: 'Rate limit temporarily escalated',
+        retryAfter: Math.ceil((penalty.blockedUntil - now.getTime()) / 1000),
+        reason: penalty.reason,
+      });
+      return;
+    }
+
     // Get or create rate limit entry
     let entry = rateLimitStore.get(identifier);
     if (!entry || entry.resetAt < now) {
@@ -34,8 +49,20 @@ export function createRateLimiter(config: RateLimitConfig) {
       rateLimitStore.set(identifier, entry);
     }
 
+    // Token bucket to absorb short bursts without blowing window budgets
+    const bucket = refillTokens(identifier, config.windowMs, config.maxRequests);
+    if (bucket.tokens < 1) {
+      escalatePenalty(identifier, 'Burst exhausted');
+      res.status(429).json({
+        error: 'Rate limit exceeded',
+        retryAfter: Math.ceil((entry.resetAt.getTime() - now.getTime()) / 1000),
+      });
+      return;
+    }
+
     // Check limit
     if (entry.count >= config.maxRequests) {
+      escalatePenalty(identifier, 'Window exhausted');
       res.status(429).json({
         error: 'Rate limit exceeded',
         retryAfter: Math.ceil((entry.resetAt.getTime() - now.getTime()) / 1000),
@@ -45,12 +72,14 @@ export function createRateLimiter(config: RateLimitConfig) {
 
     // Increment counter
     entry.count++;
+    bucket.tokens -= 1;
 
     // Set rate limit headers
     res.set({
       'X-RateLimit-Limit': String(config.maxRequests),
       'X-RateLimit-Remaining': String(config.maxRequests - entry.count),
       'X-RateLimit-Reset': String(Math.ceil(entry.resetAt.getTime() / 1000)),
+      'X-RateLimit-Policy': `${config.windowMs / 1000}s/${config.maxRequests}`,
     });
 
     // Track in database for analytics
@@ -78,6 +107,26 @@ function getRateLimitIdentifier(req: Request): string {
 
 function getTenantId(req: Request): string | undefined {
   return (req as RequestWithUser).user?.tenantId;
+}
+
+function refillTokens(identifier: string, windowMs: number, maxRequests: number) {
+  const capacity = maxRequests * MAX_BURST_MULTIPLIER;
+  const refillRate = capacity / windowMs;
+  const bucket = burstTokens.get(identifier) || { tokens: capacity, lastRefill: Date.now() };
+  const now = Date.now();
+  const elapsed = now - bucket.lastRefill;
+  bucket.tokens = Math.min(capacity, bucket.tokens + elapsed * refillRate);
+  bucket.lastRefill = now;
+  burstTokens.set(identifier, bucket);
+  return bucket;
+}
+
+function escalatePenalty(identifier: string, reason: string) {
+  const currentViolations = (violationCounts.get(identifier) || 0) + 1;
+  violationCounts.set(identifier, currentViolations);
+  const blockedUntil = Date.now() + PENALTY_WINDOW_MS * currentViolations;
+  penaltyBox.set(identifier, { blockedUntil, reason });
+  logger.warn('Rate limit escalation', { identifier, reason, blockedUntil, currentViolations });
 }
 
 /**

@@ -148,3 +148,41 @@ export function recordExternalAPICall(serviceName: string, apiName: string, dura
     timestamp: new Date(),
   });
 }
+
+export function recordQueueLagMetric(serviceName: string, queue: string, lagSeconds: number): void {
+  metricsCollector.recordMetric({
+    name: 'queue_lag_seconds',
+    value: lagSeconds,
+    tags: { service: serviceName, queue },
+    timestamp: new Date(),
+  });
+}
+
+export function recordOcrThroughputMetric(
+  serviceName: string,
+  documentsProcessed: number,
+  durationMs: number
+): void {
+  const minutes = Math.max(durationMs / 60000, 0.001);
+  const throughputPerMinute = documentsProcessed / minutes;
+
+  metricsCollector.recordMetric({
+    name: 'ocr_throughput_per_minute',
+    value: throughputPerMinute,
+    tags: { service: serviceName },
+    timestamp: new Date(),
+  });
+}
+
+export function recordFilingResult(
+  serviceName: string,
+  success: boolean,
+  filingType?: string
+): void {
+  metricsCollector.recordMetric({
+    name: 'filing_result',
+    value: success ? 1 : 0,
+    tags: { service: serviceName, filingType: filingType || 'generic' },
+    timestamp: new Date(),
+  });
+}

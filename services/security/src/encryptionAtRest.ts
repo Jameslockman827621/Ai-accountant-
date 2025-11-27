@@ -10,6 +10,13 @@ const logger = createLogger('encryption-at-rest');
 const ENCRYPTION_KEY = process.env.ENCRYPTION_KEY || crypto.randomBytes(32).toString('hex');
 const ALGORITHM = 'aes-256-gcm';
 
+export interface AtRestEncryptionConfig {
+  databaseProvider?: 'postgres' | 'mysql';
+  s3Bucket?: string;
+  kmsKeyId?: string;
+  enforceBucketKey?: boolean;
+}
+
 export class EncryptionService {
   private key: Buffer;
 
@@ -78,6 +85,45 @@ export class EncryptionService {
 }
 
 export const encryptionService = new EncryptionService();
+
+export class AtRestEncryptionManager {
+  private config: AtRestEncryptionConfig;
+  private logger = logger;
+
+  constructor(config: AtRestEncryptionConfig = {}) {
+    this.config = config;
+  }
+
+  databaseSettings() {
+    return {
+      provider: this.config.databaseProvider || 'postgres',
+      kmsKeyId: this.config.kmsKeyId || process.env.DATABASE_KMS_KEY_ID,
+      nativeEncryption: true,
+      notes:
+        'Apply Transparent Data Encryption / pgcrypto for columns; ensure storage volume encryption enabled.',
+    };
+  }
+
+  s3PutObjectFlags() {
+    if (!this.config.s3Bucket) {
+      return '';
+    }
+
+    const key = this.config.kmsKeyId || process.env.S3_KMS_KEY_ID;
+    const base = key
+      ? `--sse aws:kms --sse-kms-key-id ${key}`
+      : '--sse AES256';
+    return this.config.enforceBucketKey ? `${base} --bucket-key-enabled` : base;
+  }
+
+  audit(): void {
+    this.logger.info('At-rest encryption policies loaded', {
+      s3Bucket: this.config.s3Bucket,
+      kmsKeyId: this.config.kmsKeyId || process.env.S3_KMS_KEY_ID,
+      bucketKey: this.config.enforceBucketKey,
+    });
+  }
+}
 
 // Database column encryption helpers
 export async function encryptSensitiveFields<T extends Record<string, unknown>>(

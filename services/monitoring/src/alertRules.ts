@@ -124,6 +124,61 @@ export function registerAlertRules() {
     cooldown: 300,
   });
 
+  // Queue lag SLO breach
+  alertingService.registerRule({
+    name: 'queue_lag_slo_breach',
+    condition: async () => {
+      const result = await db.query<{ compliance: number }>(
+        `SELECT
+          COUNT(*) FILTER (WHERE value <= 120)::float / NULLIF(COUNT(*), 0) as compliance
+         FROM metrics
+         WHERE name = 'queue_lag_seconds'
+           AND timestamp > NOW() - INTERVAL '15 minutes'`
+      );
+      const compliance = parseFloat(result.rows[0]?.compliance || '1');
+      return compliance < 0.95;
+    },
+    severity: 'warning',
+    runbook: 'https://docs.example.com/runbooks/queue-lag',
+    cooldown: 600,
+  });
+
+  // OCR throughput drop
+  alertingService.registerRule({
+    name: 'ocr_throughput_drop',
+    condition: async () => {
+      const result = await db.query<{ avg_throughput: number }>(
+        `SELECT AVG(value) as avg_throughput
+         FROM metrics
+         WHERE name = 'ocr_throughput_per_minute'
+           AND timestamp > NOW() - INTERVAL '30 minutes'`
+      );
+      const avg = parseFloat(result.rows[0]?.avg_throughput || '100');
+      return avg < 30; // target floor
+    },
+    severity: 'critical',
+    runbook: 'https://docs.example.com/runbooks/ocr-throughput',
+    cooldown: 900,
+  });
+
+  // Filing success regression
+  alertingService.registerRule({
+    name: 'filing_success_drop',
+    condition: async () => {
+      const result = await db.query<{ success_rate: number }>(
+        `SELECT AVG(value)::float as success_rate
+         FROM metrics
+         WHERE name = 'filing_result'
+           AND timestamp > NOW() - INTERVAL '1 hour'`
+      );
+      const rate = parseFloat(result.rows[0]?.success_rate || '1');
+      return rate < 0.98;
+    },
+    severity: 'critical',
+    runbook: 'https://docs.example.com/runbooks/filing-success',
+    cooldown: 900,
+  });
+
   // Security anomaly detection
   alertingService.registerRule({
     name: 'security_anomaly',
