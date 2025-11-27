@@ -1,0 +1,12 @@
+{
+  "bank_accounts": [
+    {
+      "id": "ACC123",
+      "account_holder_name": "Test User",
+      "account_number_ending": "1234",
+      "bank_name": "Test Bank",
+      "account_type": "checking",
+      "currency": "GBP"
+    }
+  ]
+}

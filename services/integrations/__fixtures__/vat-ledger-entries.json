@@ -1,0 +1,26 @@
+{
+  "entries": [
+    {
+      "id": "sale-1",
+      "entry_type": "credit",
+      "amount": 120,
+      "tax_amount": 20,
+      "tax_rate": 20,
+      "description": "Consulting sale",
+      "transaction_date": "2024-02-01T00:00:00.000Z",
+      "account_code": "4000",
+      "account_name": "Revenue"
+    },
+    {
+      "id": "purchase-1",
+      "entry_type": "debit",
+      "amount": 60,
+      "tax_amount": 10,
+      "tax_rate": 20,
+      "description": "Supplies",
+      "transaction_date": "2024-02-02T00:00:00.000Z",
+      "account_code": "2000",
+      "account_name": "Purchases"
+    }
+  ]
+}

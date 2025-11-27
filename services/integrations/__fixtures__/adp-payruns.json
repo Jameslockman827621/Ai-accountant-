@@ -1,0 +1,14 @@
+{
+  "payStatements": [
+    {
+      "payPeriodStartDate": "2024-01-01",
+      "payPeriodEndDate": "2024-01-15",
+      "checkDate": "2024-01-20",
+      "totalGrossPay": { "amountValue": 15000 },
+      "totalNetPay": { "amountValue": 12000 },
+      "totalEmployeeTaxes": { "amountValue": 2000 },
+      "totalEmployerTaxes": { "amountValue": 1000 },
+      "employeeCount": 5
+    }
+  ]
+}
