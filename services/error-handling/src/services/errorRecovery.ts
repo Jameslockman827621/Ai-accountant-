@@ -3,6 +3,7 @@ import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
 import { applyStandardCode, resolveStandardPolicy } from '@ai-accountant/resilience/errorStandards';
 import { enqueueDeadLetter } from '@ai-accountant/resilience/deadLetterQueue';
+import { randomUUID } from 'crypto';
 
 const logger = createLogger('error-handling-service');
 
@@ -21,6 +22,21 @@ export interface ErrorRecord {
   createdAt: Date;
 }
 
+function mapErrorTypeToCategory(errorType: ErrorRecord['errorType']) {
+  return errorType === 'validation'
+    ? 'validation'
+    : errorType === 'network'
+      ? 'integration'
+      : errorType === 'system'
+        ? 'infrastructure'
+        : 'processing';
+}
+
+function extractPolicy(errorType: ErrorRecord['errorType'], message?: string) {
+  const codeFromMessage = message?.match(/\[(E_[A-Z0-9_]+)\]/)?.[1];
+  return resolveStandardPolicy(mapErrorTypeToCategory(errorType), codeFromMessage);
+}
+
 export async function recordError(
   tenantId: TenantId,
   errorType: ErrorRecord['errorType'],
@@ -30,17 +46,8 @@ export async function recordError(
   retryable: boolean = true,
   errorCodeHint?: string
 ): Promise<string> {
-  const errorId = crypto.randomUUID();
-  const policy = resolveStandardPolicy(
-    errorType === 'validation'
-      ? 'validation'
-      : errorType === 'network'
-        ? 'integration'
-        : errorType === 'system'
-          ? 'infrastructure'
-          : 'processing',
-    errorCodeHint
-  );
+  const errorId = randomUUID();
+  const policy = resolveStandardPolicy(mapErrorTypeToCategory(errorType), errorCodeHint);
   const codedMessage = applyStandardCode(errorMessage, policy);
 
   await db.query(
@@ -115,8 +122,11 @@ export async function retryError(errorId: string, tenantId: TenantId): Promise<b
     entity_id: string;
     retryable: boolean;
     retry_count: number;
+    error_message: string;
   }>(
-    'SELECT error_type, entity_type, entity_id, retryable, retry_count FROM error_records WHERE id = $1 AND tenant_id = $2',
+    `SELECT error_type, entity_type, entity_id, retryable, retry_count, error_message
+     FROM error_records
+     WHERE id = $1 AND tenant_id = $2`,
     [errorId, tenantId]
   );
 
@@ -130,14 +140,26 @@ export async function retryError(errorId: string, tenantId: TenantId): Promise<b
     throw new Error('Error is not retryable');
   }
 
-  if (errorData.retry_count >= 3) {
-    // Mark as failed after 3 retries
+  const policy = extractPolicy(errorData.error_type as ErrorRecord['errorType'], errorData.error_message);
+  const maxAttempts = policy.retryPolicy.maxAttempts ?? 0;
+
+  if (errorData.retry_count >= maxAttempts) {
+    // Mark as failed after exhausting policy attempts
     await db.query(
       `UPDATE error_records
        SET status = 'failed', updated_at = NOW()
        WHERE id = $1`,
       [errorId]
     );
+
+    await enqueueDeadLetter({
+      source: 'error-handling.retry',
+      tenantId,
+      operationId: errorData.entity_id,
+      operationType: errorData.entity_type,
+      error: errorData.error_message,
+      policy,
+    });
     return false;
   }
 

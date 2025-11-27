@@ -15,7 +15,9 @@ export interface DeadLetterPayload {
 }
 
 export async function enqueueDeadLetter(payload: DeadLetterPayload): Promise<void> {
-  const policy = payload.policy ? normalizeRetryPolicy(payload.policy.retryPolicy) : undefined;
+  const policy = payload.policy
+    ? { ...payload.policy, retryPolicy: normalizeRetryPolicy(payload.policy.retryPolicy) }
+    : undefined;
   await db.query(
     `INSERT INTO dead_letter_queue (
       id, source, tenant_id, operation_id, operation_type, error, metadata, policy, created_at
