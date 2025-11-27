@@ -1,0 +1,93 @@
+{
+  "title": "SLO & Alerting",
+  "uid": "slo-observability",
+  "timezone": "browser",
+  "schemaVersion": 27,
+  "version": 1,
+  "panels": [
+    {
+      "type": "stat",
+      "title": "API Gateway P95 Latency",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_ms_bucket{service=\"api-gateway\"}[5m])) by (le))",
+          "legendFormat": "p95 latency"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto"
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 }
+    },
+    {
+      "type": "gauge",
+      "title": "Availability (1 - 5xx/error rate)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "1 - (sum(rate(http_request_errors_total{status=~\"5..\"}[5m])) / sum(rate(http_request_total[5m])))",
+          "legendFormat": "availability"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": 0 },
+              { "color": "yellow", "value": 0.98 },
+              { "color": "green", "value": 0.999 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 }
+    },
+    {
+      "type": "stat",
+      "title": "Trace Export Success",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(telemetry_exports_total{pipeline=\"traces\",status=\"success\"}[5m])) / sum(rate(telemetry_exports_total{pipeline=\"traces\"}[5m]))",
+          "legendFormat": "trace success"
+        }
+      ],
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "orientation": "auto"
+      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Error Budget Burn (API Gateway)",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(http_request_errors_total{service=\"api-gateway\"}[5m]))",
+          "legendFormat": "errors"
+        },
+        {
+          "expr": "sum(rate(http_request_total{service=\"api-gateway\"}[5m])) * 0.001",
+          "legendFormat": "error budget (99.9%)"
+        }
+      ],
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 8 },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "single" }
+      }
+    }
+  ]
+}
