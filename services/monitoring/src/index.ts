@@ -8,6 +8,9 @@ import { initializeTracing } from './tracing';
 import { registerAlertRules } from './alertRules';
 import { alertingService } from './alerts';
 import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
+import { monitoringRouter } from './routes/monitoring';
+import { authenticate } from './middleware/auth';
+import { errorHandler } from './middleware/errorHandler';
 
 const SERVICE_NAME = 'monitoring-service';
 const logger = createServiceLogger(SERVICE_NAME);
@@ -46,6 +49,11 @@ app.post('/alerts/:alertId/resolve', (req, res) => {
   alertingService.resolveAlert(alertId);
   res.json({ message: 'Alert resolved', alertId });
 });
+
+// Authenticated monitoring APIs
+app.use('/api/monitoring', authenticate, monitoringRouter);
+
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   logger.info(`Monitoring service listening on port ${PORT}`);
