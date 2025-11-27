@@ -14,6 +14,11 @@ export interface QualityAssessmentResult {
   suggestedType: DocumentType;
 }
 
+export interface QualityGateDecision {
+  status: 'passed' | 'needs_review';
+  reasons: DocumentQualityIssue[];
+}
+
 const DEFAULT_CHECKLISTS: Record<DocumentType, DocumentChecklistItem[]> = {
   [DocumentType.INVOICE]: [
     { id: 'vendor', label: 'Supplier name & address visible', completed: true },
@@ -51,6 +56,8 @@ const FILE_SIZE_WARN_LOW = 30 * 1024; // 30 KB
 const FILE_SIZE_WARN_HIGH = 20 * 1024 * 1024; // 20 MB
 const MIN_IMAGE_DIMENSION = 900;
 const MAX_RECOMMENDED_PAGES = 25;
+const MIN_TEXT_LENGTH_PER_PAGE = 20;
+const MIN_BYTES_PER_MEGAPIXEL = 45_000; // heuristic for blur/over-compression
 
 const KNOWN_KEYWORDS: Array<{ pattern: RegExp; type: DocumentType }> = [
   { pattern: /invoice/i, type: DocumentType.INVOICE },
@@ -131,6 +138,7 @@ export async function assessDocumentQuality(
     try {
       const pdfData = await pdfParse(file.buffer);
       pageCount = pdfData.numpages || 1;
+      const textLength = pdfData.text?.trim().length || 0;
       if (pageCount > MAX_RECOMMENDED_PAGES) {
         issues.push({
           id: 'too_many_pages',
@@ -139,6 +147,17 @@ export async function assessDocumentQuality(
           recommendation: 'Split long statements into monthly extracts for best accuracy.',
         });
         score -= 10;
+      }
+
+      if (textLength < MIN_TEXT_LENGTH_PER_PAGE * Math.max(1, pageCount)) {
+        issues.push({
+          id: 'missing_content',
+          severity: 'critical',
+          message: 'The PDF looks mostly empty or unparseable.',
+          recommendation: 'Verify the export settings or re-download from the source system.',
+        });
+        score -= 35;
+        flagChecklist(checklist, ['readable', 'totals', 'amount']);
       }
     } catch (error) {
       issues.push({
@@ -175,6 +194,19 @@ export async function assessDocumentQuality(
         });
         score -= 5;
       }
+
+      const megapixels = width && height ? (width * height) / 1_000_000 : 0;
+      const bytesPerMegapixel = megapixels > 0 ? file.size / megapixels : 0;
+      if (megapixels > 0 && bytesPerMegapixel < MIN_BYTES_PER_MEGAPIXEL) {
+        issues.push({
+          id: 'blur_detected',
+          severity: 'warning',
+          message: 'Image appears heavily compressed or blurred.',
+          recommendation: 'Retake the photo in better lighting or export a higher-resolution image.',
+        });
+        score -= 20;
+        flagChecklist(checklist, ['readable', 'totals', 'amount']);
+      }
     } catch (error) {
       issues.push({
         id: 'image_unreadable',
@@ -202,5 +234,15 @@ export async function assessDocumentQuality(
     checklist,
     pageCount,
     suggestedType,
+  };
+}
+
+export function evaluateQualityGate(result: QualityAssessmentResult): QualityGateDecision {
+  const criticalIssues = result.issues.filter(issue => issue.severity === 'critical');
+  const gateFailed = criticalIssues.length > 0 || result.score < 70;
+
+  return {
+    status: gateFailed ? 'needs_review' : 'passed',
+    reasons: gateFailed ? criticalIssues : [],
   };
 }

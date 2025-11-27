@@ -7,6 +7,7 @@ import { qualityRouter } from './routes/quality';
 import { reviewQueueRouter } from './routes/reviewQueue';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { startQualityReviewWorker } from './queue/qualityReviewWorker';
 
 config();
 
@@ -30,6 +31,10 @@ app.use('/api/quality', authenticate, qualityRouter);
 app.use('/api/quality/review-queue', authenticate, reviewQueueRouter);
 
 app.use(errorHandler);
+
+startQualityReviewWorker().catch((error) => {
+  logger.error('Failed to start quality review worker', error instanceof Error ? error : new Error(String(error)));
+});
 
 app.listen(PORT, () => {
   logger.info(`Quality service listening on port ${PORT}`);

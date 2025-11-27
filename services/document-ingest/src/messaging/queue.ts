@@ -1,7 +1,7 @@
 import amqp from 'amqplib';
 import { randomUUID } from 'crypto';
 import { createLogger } from '@ai-accountant/shared-utils';
-import { ProcessingQueues, ProcessingQueueConfig } from '@ai-accountant/shared-types';
+import { ProcessingQueues, ProcessingQueueConfig, QualityReviewJobPayload } from '@ai-accountant/shared-types';
 import { recordQueueEvent } from '@ai-accountant/monitoring-service/services/queueMetrics';
 
 const logger = createLogger('document-ingest-service');
@@ -10,6 +10,7 @@ const RABBITMQ_URL = process.env.RABBITMQ_URL || 'amqp://admin:admin@localhost:5
 const DEFAULT_RETRY_DELAY_MS = parseInt(process.env.QUEUE_RETRY_DELAY_MS || '15000', 10);
 
 const OCR_QUEUE = ProcessingQueues.OCR.primary;
+const QUALITY_REVIEW_QUEUE = ProcessingQueues.QUALITY_REVIEW.primary;
 const CLASSIFICATION_QUEUE = ProcessingQueues.CLASSIFICATION.primary;
 const LEDGER_QUEUE = ProcessingQueues.LEDGER.primary;
 
@@ -165,6 +166,22 @@ export async function publishOCRJob(
     );
   } catch (error) {
     logger.error('Failed to publish OCR job', error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
+}
+
+export async function publishQualityReviewJob(
+  payload: QualityReviewJobPayload,
+  metadata?: PublishMetadata
+): Promise<void> {
+  try {
+    await publishJob(
+      QUALITY_REVIEW_QUEUE,
+      payload,
+      { source: 'document-ingest.quality', ...metadata }
+    );
+  } catch (error) {
+    logger.error('Failed to publish quality review job', error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
 }
