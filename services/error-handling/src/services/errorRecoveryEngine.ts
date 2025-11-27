@@ -2,6 +2,12 @@ import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId, UserId } from '@ai-accountant/shared-types';
 import { randomUUID } from 'crypto';
+import {
+  normalizeRetryPolicy,
+  resolveStandardPolicy,
+  RetryPolicy,
+} from '@ai-accountant/resilience/errorStandards';
+import { enqueueDeadLetter } from '@ai-accountant/resilience/deadLetterQueue';
 
 const logger = createLogger('error-handling-service');
 
@@ -17,6 +23,7 @@ export interface RetryableOperation {
   nextRetryAt: Date;
   status: 'pending' | 'retrying' | 'succeeded' | 'failed' | 'cancelled';
   metadata?: Record<string, unknown>;
+  errorCode?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -35,12 +42,15 @@ export class ErrorRecoveryEngine {
     operationType: RetryableOperation['operationType'],
     operationId: string,
     error: string,
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown>,
+    errorCodeHint?: string
   ): Promise<string> {
     const retryId = randomUUID();
     const retryCount = 0;
-    const maxRetries = this.getMaxRetries(operationType);
-    const nextRetryAt = this.calculateNextRetry(retryCount);
+    const policy = resolveStandardPolicy('processing', errorCodeHint);
+    const retryPolicy = normalizeRetryPolicy(policy.retryPolicy as Partial<RetryPolicy>);
+    const maxRetries = retryPolicy.maxAttempts || this.getMaxRetries(operationType);
+    const nextRetryAt = this.calculateNextRetry(retryCount, retryPolicy);
 
     await db.query(
       `INSERT INTO error_retries (
@@ -58,7 +68,7 @@ export class ErrorRecoveryEngine {
         maxRetries,
         nextRetryAt,
         'pending',
-        JSON.stringify(metadata || {}),
+        JSON.stringify({ ...(metadata || {}), errorCode: policy.code, retryPolicy }),
       ]
     );
 
@@ -133,8 +143,9 @@ export class ErrorRecoveryEngine {
     const result = await db.query<{
       retry_count: number;
       max_retries: number;
+      metadata: string | null;
     }>(
-      `SELECT retry_count, max_retries
+      `SELECT retry_count, max_retries, metadata
        FROM error_retries
        WHERE id = $1`,
       [retryId]
@@ -145,6 +156,7 @@ export class ErrorRecoveryEngine {
       throw new Error('Retry not found');
     }
 
+    const retryPolicy = this.parseRetryPolicy(row.metadata);
     const { retry_count, max_retries } = row;
     const newRetryCount = retry_count + 1;
 
@@ -158,11 +170,17 @@ export class ErrorRecoveryEngine {
       );
 
       logger.warn('Retry failed after max attempts', { retryId, retryCount: newRetryCount });
+      await enqueueDeadLetter({
+        source: 'error-recovery.retry',
+        operationId: retryId,
+        error: 'Max retries reached',
+        metadata: retryPolicy ? { retryPolicy } : undefined,
+      });
       return { shouldRetry: false };
     }
 
     // Schedule next retry
-    const nextRetryAt = this.calculateNextRetry(newRetryCount);
+    const nextRetryAt = this.calculateNextRetry(newRetryCount, retryPolicy);
 
     await db.query(
       `UPDATE error_retries
@@ -253,10 +271,12 @@ export class ErrorRecoveryEngine {
   /**
    * Calculate next retry time using exponential backoff
    */
-  private calculateNextRetry(retryCount: number): Date {
-    // Exponential backoff: 1min, 2min, 4min, 8min, 16min, 30min (max)
-    const baseDelay = 60 * 1000; // 1 minute in milliseconds
-    const delay = Math.min(baseDelay * Math.pow(2, retryCount), 30 * 60 * 1000); // Max 30 minutes
+  private calculateNextRetry(retryCount: number, retryPolicy?: RetryPolicy): Date {
+    const policy = retryPolicy || normalizeRetryPolicy();
+    const delay = Math.min(
+      policy.initialDelayMs * Math.pow(policy.backoffMultiplier, retryCount),
+      policy.maxDelayMs
+    );
     return new Date(Date.now() + delay);
   }
 
@@ -273,6 +293,16 @@ export class ErrorRecoveryEngine {
     };
 
     return maxRetriesMap[operationType] || 5;
+  }
+
+  private parseRetryPolicy(metadata: string | null): RetryPolicy | undefined {
+    if (!metadata) return undefined;
+    try {
+      const parsed = JSON.parse(metadata) as { retryPolicy?: RetryPolicy };
+      return parsed.retryPolicy ? normalizeRetryPolicy(parsed.retryPolicy) : undefined;
+    } catch {
+      return undefined;
+    }
   }
 }
 

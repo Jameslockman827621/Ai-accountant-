@@ -4,9 +4,11 @@ import { AuthRequest } from '../middleware/auth';
 import { sloTrackingService } from '../services/sloTracking';
 import { UserRole } from '@ai-accountant/shared-types';
 import { AuthorizationError } from '@ai-accountant/shared-utils';
+import { AlertingService } from '../services/alertingService';
 
 const router = Router();
 const logger = createLogger('monitoring-service');
+const alertingService = new AlertingService();
 
 // SLO Tracking Routes
 router.post('/slos', async (req: AuthRequest, res: Response) => {
@@ -66,6 +68,22 @@ router.get('/slos/:id', async (req: AuthRequest, res: Response) => {
     res.json(slo);
   } catch (error) {
     logger.error('Error getting SLO', error instanceof Error ? error : new Error(String(error)));
+    throw error;
+  }
+});
+
+// Active incidents + recovery runbooks
+router.get('/incidents/active', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const incidents = await alertingService.getActiveIncidents();
+    res.json({ incidents });
+  } catch (error) {
+    logger.error('Error getting active incidents', error instanceof Error ? error : new Error(String(error)));
     throw error;
   }
 });

@@ -4,9 +4,47 @@ import { AuthRequest } from '../middleware/auth';
 import { sendEmail, generateVATEstimationEmail } from '../services/email';
 import { enhancedNotificationService } from '../services/enhancedNotification';
 import { db } from '@ai-accountant/database';
+import { notificationManager } from '../services/notificationManager';
+import { deliverWithResilience } from '../services/deliveryOrchestrator';
 
 const router = Router();
 const logger = createLogger('notification-service');
+
+// Unified inbox for email, in-app, and webhook notifications
+router.get('/', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const notifications = await notificationManager.getNotifications(
+      req.user.tenantId,
+      req.user.userId,
+      false,
+      100
+    );
+
+    const unreadCount = await notificationManager.getUnreadCount(req.user.tenantId, req.user.userId);
+    const channelBreakdown = notifications.reduce(
+      (acc, n) => {
+        const channel = (n.metadata?.channel as string) || 'in_app';
+        acc[channel] = (acc[channel] || 0) + 1;
+        return acc;
+      },
+      {} as Record<string, number>
+    );
+
+    res.json({
+      notifications,
+      unreadCount,
+      channelBreakdown,
+    });
+  } catch (error) {
+    logger.error('Failed to load notifications', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to load notifications' });
+  }
+});
 
 // Send VAT estimation email
 router.post('/vat-estimation', async (req: AuthRequest, res: Response) => {
@@ -68,6 +106,44 @@ router.post('/vat-estimation', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Send VAT estimation failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to send VAT estimation' });
+  }
+});
+
+// Resilient dispatch API (email, in-app, webhook)
+router.post('/send', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { templateId, variables, channels } = req.body;
+    const deliveryIds = await deliverWithResilience({
+      tenantId: req.user.tenantId,
+      userId: req.user.userId,
+      templateId,
+      variables,
+      channels,
+    });
+
+    await notificationManager.createNotification(
+      req.user.tenantId,
+      req.user.userId,
+      'info',
+      'Notification queued',
+      `Dispatch started for ${channels?.join(', ') || 'in_app'}`,
+      undefined,
+      {
+        channel: channels?.join(',') || 'in_app',
+        templateId,
+        deliveryIds,
+      }
+    );
+
+    res.json({ deliveryIds });
+  } catch (error) {
+    logger.error('Resilient dispatch failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to dispatch notification' });
   }
 });
 
@@ -172,6 +248,36 @@ router.put('/preferences', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Update preferences failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to update preferences' });
+  }
+});
+
+router.post('/:id/read', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    await notificationManager.markAsRead(req.params.id, req.user.tenantId);
+    res.json({ message: 'Notification marked as read' });
+  } catch (error) {
+    logger.error('Mark as read failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to mark as read' });
+  }
+});
+
+router.post('/read-all', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    await notificationManager.markAllAsRead(req.user.tenantId, req.user.userId);
+    res.json({ message: 'All notifications marked as read' });
+  } catch (error) {
+    logger.error('Mark all as read failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to mark all as read' });
   }
 });
 

@@ -1,6 +1,8 @@
 import { db } from '@ai-accountant/database';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { TenantId } from '@ai-accountant/shared-types';
+import { applyStandardCode, resolveStandardPolicy } from '@ai-accountant/resilience/errorStandards';
+import { enqueueDeadLetter } from '@ai-accountant/resilience/deadLetterQueue';
 
 const logger = createLogger('error-handling-service');
 
@@ -11,6 +13,7 @@ export interface ErrorRecord {
   entityType: 'document' | 'ledger_entry' | 'filing' | 'transaction';
   entityId: string;
   errorMessage: string;
+  errorCode?: string;
   retryable: boolean;
   retryCount: number;
   status: 'pending' | 'retrying' | 'resolved' | 'failed';
@@ -24,18 +27,41 @@ export async function recordError(
   entityType: ErrorRecord['entityType'],
   entityId: string,
   errorMessage: string,
-  retryable: boolean = true
+  retryable: boolean = true,
+  errorCodeHint?: string
 ): Promise<string> {
   const errorId = crypto.randomUUID();
+  const policy = resolveStandardPolicy(
+    errorType === 'validation'
+      ? 'validation'
+      : errorType === 'network'
+        ? 'integration'
+        : errorType === 'system'
+          ? 'infrastructure'
+          : 'processing',
+    errorCodeHint
+  );
+  const codedMessage = applyStandardCode(errorMessage, policy);
 
   await db.query(
     `INSERT INTO error_records (
       id, tenant_id, error_type, entity_type, entity_id, error_message, retryable, retry_count, status, created_at
     ) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, 'pending', NOW())`,
-    [errorId, tenantId, errorType, entityType, entityId, errorMessage, retryable]
+    [errorId, tenantId, errorType, entityType, entityId, codedMessage, retryable && policy.retryPolicy.maxAttempts > 0]
   );
 
-  logger.info('Error recorded', { errorId, tenantId, errorType, entityType, entityId });
+  logger.info('Error recorded', { errorId, tenantId, errorType, entityType, entityId, errorCode: policy.code });
+
+  if (!retryable || policy.retryPolicy.maxAttempts === 0) {
+    await enqueueDeadLetter({
+      source: 'error-handling.record',
+      tenantId,
+      operationId: entityId,
+      operationType: entityType,
+      error: codedMessage,
+      policy,
+    });
+  }
   return errorId;
 }
 

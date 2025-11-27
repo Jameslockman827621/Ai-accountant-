@@ -187,6 +187,44 @@ export class AlertingService {
     }));
   }
 
+  async getActiveIncidents(limit = 20): Promise<{
+    id: string;
+    ruleName: string;
+    severity: AlertRule['severity'];
+    firedAt: Date;
+    runbookUrl: string | null;
+    serviceName: string | null;
+    context: Record<string, unknown>;
+  }[]> {
+    const result = await db.query<{
+      id: string;
+      rule_name: string;
+      severity: AlertRule['severity'];
+      fired_at: Date;
+      runbook_url: string | null;
+      service_name: string | null;
+      context: Record<string, unknown>;
+    }>(
+      `SELECT af.id, ar.rule_name, ar.severity, af.fired_at, ar.runbook_url, ar.service_name, af.context
+       FROM alert_fires af
+       JOIN alert_rules ar ON af.alert_rule_id = ar.id
+       WHERE af.status = 'firing'
+       ORDER BY af.fired_at DESC
+       LIMIT $1`,
+      [limit]
+    );
+
+    return result.rows.map(row => ({
+      id: row.id,
+      ruleName: row.rule_name,
+      severity: row.severity,
+      firedAt: row.fired_at,
+      runbookUrl: row.runbook_url,
+      serviceName: row.service_name,
+      context: row.context,
+    }));
+  }
+
   /**
    * Resolve alert
    */
