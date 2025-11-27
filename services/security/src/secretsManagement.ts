@@ -19,6 +19,7 @@ export class SecretsManager {
   private config: SecretsConfig;
   private cache: Map<string, { value: string; expiresAt: number }> = new Map();
   private cacheTTL = 3600000; // 1 hour
+  private hydrated = false;
 
   constructor(config: SecretsConfig) {
     this.config = config;
@@ -58,6 +59,12 @@ export class SecretsManager {
       logger.error('Failed to get secret', error, { path });
       return null;
     }
+  }
+
+  hydrate(): void {
+    if (this.hydrated) return;
+    this.hydrated = true;
+    logger.info('Secrets manager hydrated', { provider: this.config.provider, enabled: this.config.enabled });
   }
 
   private async getFromVault(path: string): Promise<string | null> {
@@ -110,4 +117,17 @@ export class SecretsManager {
 
 export const createSecretsManager = (config: SecretsConfig): SecretsManager => {
   return new SecretsManager(config);
+};
+
+export const createDefaultSecretsManager = (): SecretsManager => {
+  const provider = (process.env.SECRETS_PROVIDER as SecretsConfig['provider']) || 'local';
+  const manager = new SecretsManager({
+    provider,
+    vaultUrl: process.env.VAULT_URL,
+    vaultToken: process.env.VAULT_TOKEN,
+    awsRegion: process.env.AWS_REGION,
+    enabled: process.env.SECRETS_ENABLED !== 'false',
+  });
+  manager.hydrate();
+  return manager;
 };

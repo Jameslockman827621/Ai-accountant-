@@ -66,6 +66,33 @@ const DEFAULT_SLOS: SLO[] = [
     metric: 'document_processing_time',
     service: 'document-ingest',
   },
+  {
+    id: 'slo-queue-lag',
+    name: 'Queue Lag Compliance',
+    description: '95% of queue events under 2 minutes of lag',
+    target: 0.95,
+    window: 6 * 3600, // 6 hours
+    metric: 'queue_lag',
+    service: 'all',
+  },
+  {
+    id: 'slo-ocr-throughput',
+    name: 'OCR Throughput',
+    description: 'Keep OCR throughput above 30 docs/minute across tenants',
+    target: 0.90,
+    window: 3600, // hourly
+    metric: 'ocr_throughput',
+    service: 'ocr',
+  },
+  {
+    id: 'slo-filing-success',
+    name: 'Filing Success Rate',
+    description: '98% of filings complete without error',
+    target: 0.98,
+    window: 24 * 3600, // 1 day
+    metric: 'filing_success',
+    service: 'filing',
+  },
 ];
 
 export class SLOMonitor {
@@ -127,6 +154,12 @@ export class SLOMonitor {
         return await this.getSuccessRate(slo.service, start, end);
       case 'document_processing_time':
         return await this.getDocumentProcessingCompliance(slo.service, start, end);
+      case 'queue_lag':
+        return await this.getQueueLagCompliance(slo.service, start, end);
+      case 'ocr_throughput':
+        return await this.getOcrThroughputCompliance(start, end);
+      case 'filing_success':
+        return await this.getFilingSuccessRate(start, end);
       default:
         logger.warn('Unknown metric', { metric: slo.metric });
         return 0;
@@ -181,6 +214,47 @@ export class SLOMonitor {
     );
 
     return result.rows[0]?.compliance || 1.0;
+  }
+
+  private async getQueueLagCompliance(service: string, start: Date, end: Date): Promise<number> {
+    const result = await db.query<{ compliance: number }>(
+      `SELECT
+        COUNT(*) FILTER (WHERE value <= 120)::float / NULLIF(COUNT(*), 0) as compliance
+       FROM metrics
+       WHERE name = 'queue_lag_seconds'
+         AND (tags->>'service' = $1 OR $1 = 'all')
+         AND timestamp BETWEEN $2 AND $3`,
+      [service, start, end]
+    );
+
+    return result.rows[0]?.compliance || 1.0;
+  }
+
+  private async getOcrThroughputCompliance(start: Date, end: Date): Promise<number> {
+    const expectedThroughput = 30; // docs/minute target for capacity planning
+    const result = await db.query<{ avg_throughput: number }>(
+      `SELECT AVG(value) as avg_throughput
+       FROM metrics
+       WHERE name = 'ocr_throughput_per_minute'
+         AND timestamp BETWEEN $1 AND $2`,
+      [start, end]
+    );
+
+    const avg = result.rows[0]?.avg_throughput || expectedThroughput;
+    const ratio = avg / expectedThroughput;
+    return Math.min(ratio, 1);
+  }
+
+  private async getFilingSuccessRate(start: Date, end: Date): Promise<number> {
+    const result = await db.query<{ success_rate: number }>(
+      `SELECT AVG(value)::float as success_rate
+       FROM metrics
+       WHERE name = 'filing_result'
+         AND timestamp BETWEEN $1 AND $2`,
+      [start, end]
+    );
+
+    return result.rows[0]?.success_rate || 1.0;
   }
 
   private determineStatus(currentValue: number, target: number): 'meeting' | 'at_risk' | 'breached' {

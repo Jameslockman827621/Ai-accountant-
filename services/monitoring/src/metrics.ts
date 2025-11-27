@@ -50,6 +50,11 @@ export const queueDepth = meter.createUpDownCounter('queue_depth', {
   description: 'Current queue depth',
 });
 
+export const queueLagSeconds = meter.createHistogram('queue_lag_seconds', {
+  description: 'Time messages spend waiting in queue',
+  unit: 's',
+});
+
 export const queueProcessed = meter.createCounter('queue_processed_total', {
   description: 'Total number of queue items processed',
 });
@@ -71,6 +76,11 @@ export const extractionLatency = meter.createHistogram('extraction_latency_ms', 
 
 export const extractionCount = meter.createCounter('extraction_total', {
   description: 'Total number of extractions',
+});
+
+export const ocrThroughput = meter.createHistogram('ocr_throughput_per_minute', {
+  description: 'Documents processed per minute by OCR',
+  unit: '1',
 });
 
 // Reconciliation metrics
@@ -109,6 +119,10 @@ export const filingCount = meter.createCounter('filing_total', {
 
 export const filingErrors = meter.createCounter('filing_errors_total', {
   description: 'Total number of filing errors',
+});
+
+export const filingSuccessRate = meter.createUpDownCounter('filing_success_rate', {
+  description: 'Rolling filing success ratio (0-1)',
 });
 
 // Assistant metrics

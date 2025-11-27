@@ -13,9 +13,12 @@ import { createLogger } from '@ai-accountant/shared-utils';
 
 const logger = createLogger('tracing');
 
-// Create trace exporter (Jaeger/Tempo compatible)
+// Create trace exporter (Jaeger/Tempo/Grafana Agent compatible)
 const traceExporter = new OTLPTraceExporter({
-  url: process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || 'http://localhost:4318/v1/traces',
+  url:
+    process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT ||
+    process.env.GRAFANA_OTLP_ENDPOINT ||
+    'http://localhost:4318/v1/traces',
   headers: process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS
     ? JSON.parse(process.env.OTEL_EXPORTER_OTLP_TRACES_HEADERS)
     : {},
@@ -49,6 +52,7 @@ export function initializeTracing() {
   sdk.start();
   logger.info('Tracing initialized', {
     endpoint: process.env.OTEL_EXPORTER_OTLP_TRACES_ENDPOINT || 'http://localhost:4318/v1/traces',
+    destination: process.env.GRAFANA_OTLP_ENDPOINT ? 'grafana/tempo' : 'collector',
   });
 
   // Graceful shutdown
