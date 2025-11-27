@@ -10,8 +10,17 @@ import {
   addComment,
   SupportTicket,
 } from '../services/tickets';
-import { ValidationError } from '@ai-accountant/shared-utils';
+import { ValidationError, searchKnowledgeArticles } from '@ai-accountant/shared-utils';
 import { knowledgeBaseEngine } from '../services/knowledgeBaseEngine';
+import {
+  attachSlaToCase,
+  assignCase,
+  createCase,
+  getCaseAiResponse,
+  getCases,
+  listSlaPolicies,
+  upsertSlaPolicy,
+} from '../services/caseLifecycle';
 const router = Router();
 const logger = createLogger('support-service');
 const TICKET_STATUSES: ReadonlyArray<SupportTicket['status']> = [
@@ -58,6 +67,41 @@ router.post('/tickets', async (req: AuthRequest, res: Response) => {
   }
 });
 
+// Create a case with SLA + channel metadata
+router.post('/cases', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { subject, description, priority, channel, customerEmail, customerName, slaPolicyId } = req.body;
+
+    if (!channel || !['chat', 'email', 'portal'].includes(channel)) {
+      throw new ValidationError('channel must be chat, email, or portal');
+    }
+
+    const caseId = await createCase(req.user.tenantId, req.user.userId, {
+      subject,
+      description,
+      priority: (priority as SupportTicket['priority']) || 'medium',
+      channel,
+      customerEmail,
+      customerName,
+      slaPolicyId,
+    });
+
+    res.status(201).json({ caseId, message: 'Case created' });
+  } catch (error) {
+    logger.error('Create case failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to create case' });
+  }
+});
+
 // Get tickets
 router.get('/tickets', async (req: AuthRequest, res: Response) => {
   try {
@@ -81,6 +125,34 @@ router.get('/tickets', async (req: AuthRequest, res: Response) => {
   } catch (error) {
     logger.error('Get tickets failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to get tickets' });
+  }
+});
+
+// Get cases with SLA and channel metadata
+router.get('/cases', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const statusParam = req.query.status;
+    const normalizedStatus = typeof statusParam === 'string' ? statusParam : undefined;
+    const statusFilter = normalizedStatus && isTicketStatus(normalizedStatus) ? normalizedStatus : undefined;
+
+    if (normalizedStatus && !statusFilter) {
+      throw new ValidationError('Invalid status filter');
+    }
+
+    const cases = await getCases(req.user.tenantId, statusFilter);
+    res.json({ cases });
+  } catch (error) {
+    logger.error('Get cases failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to get cases' });
   }
 });
 
@@ -177,6 +249,39 @@ router.post('/tickets/:ticketId/assign', async (req: AuthRequest, res: Response)
   }
 });
 
+// Assign a case to an agent
+router.post('/cases/:caseId/assign', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { caseId } = req.params;
+    const { assignedTo } = req.body;
+
+    if (!caseId) {
+      res.status(400).json({ error: 'caseId is required' });
+      return;
+    }
+
+    if (!assignedTo) {
+      throw new ValidationError('assignedTo is required');
+    }
+
+    await assignCase(caseId, req.user.tenantId, assignedTo);
+
+    res.json({ message: 'Case assigned' });
+  } catch (error) {
+    logger.error('Assign case failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to assign case' });
+  }
+});
+
 // Add comment to ticket
 router.post('/tickets/:ticketId/comments', async (req: AuthRequest, res: Response) => {
   try {
@@ -209,6 +314,113 @@ router.post('/tickets/:ticketId/comments', async (req: AuthRequest, res: Respons
   }
 });
 
+// AI assistant suggested reply for a case
+router.get('/cases/:caseId/ai-response', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { caseId } = req.params;
+    if (!caseId) {
+      res.status(400).json({ error: 'caseId is required' });
+      return;
+    }
+
+    const payload = await getCaseAiResponse(caseId, req.user.tenantId, req.user.userId);
+
+    res.json(payload);
+  } catch (error) {
+    logger.error('Get AI response failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(404).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to get AI response' });
+  }
+});
+
+// Attach SLA policy to a case
+router.post('/cases/:caseId/sla', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { caseId } = req.params;
+    const { slaPolicyId } = req.body;
+
+    if (!caseId) {
+      res.status(400).json({ error: 'caseId is required' });
+      return;
+    }
+
+    if (!slaPolicyId) {
+      throw new ValidationError('slaPolicyId is required');
+    }
+
+    await attachSlaToCase(caseId, req.user.tenantId, slaPolicyId);
+    res.json({ message: 'SLA policy attached' });
+  } catch (error) {
+    logger.error('Attach SLA failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to attach SLA' });
+  }
+});
+
+// Manage SLA policies
+router.get('/sla-policies', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const policies = await listSlaPolicies(req.user.tenantId);
+    res.json({ policies });
+  } catch (error) {
+    logger.error('List SLA policies failed', error instanceof Error ? error : new Error(String(error)));
+    res.status(500).json({ error: 'Failed to list SLA policies' });
+  }
+});
+
+router.post('/sla-policies', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { name, priority, responseMinutes, resolutionMinutes } = req.body;
+
+    if (!name || !priority || responseMinutes === undefined || resolutionMinutes === undefined) {
+      throw new ValidationError('name, priority, responseMinutes, and resolutionMinutes are required');
+    }
+
+    const policyId = await upsertSlaPolicy(
+      req.user.tenantId,
+      name,
+      priority as SupportTicket['priority'],
+      Number(responseMinutes),
+      Number(resolutionMinutes)
+    );
+
+    res.status(201).json({ policyId, message: 'SLA policy saved' });
+  } catch (error) {
+    logger.error('Save SLA policy failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to save SLA policy' });
+  }
+});
+
 // Search knowledge base
 router.get('/knowledge-base/search', async (req: AuthRequest, res: Response) => {
   try {
@@ -236,6 +448,36 @@ router.get('/knowledge-base/search', async (req: AuthRequest, res: Response) => 
       return;
     }
     res.status(500).json({ error: 'Failed to search knowledge base' });
+  }
+});
+
+// Search static runbooks/FAQs (shared utils)
+router.get('/knowledge/runbooks', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const { q, category, limit } = req.query;
+
+    if (!q || typeof q !== 'string') {
+      throw new ValidationError('Search query (q) is required');
+    }
+
+    const results = searchKnowledgeArticles(q, {
+      category: typeof category === 'string' ? (category as any) : undefined,
+      limit: limit ? parseInt(limit as string, 10) : 10,
+    });
+
+    res.json({ results });
+  } catch (error) {
+    logger.error('Search runbooks failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to search runbooks' });
   }
 });
 
