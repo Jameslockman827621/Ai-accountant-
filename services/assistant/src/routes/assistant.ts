@@ -9,6 +9,7 @@ import { db } from '@ai-accountant/database';
 import { runAssistantEvaluation } from '../services/evaluator';
 import { complianceModeService } from '../services/complianceMode';
 import { guardrailService } from '../services/guardrails';
+import { getPayrollGuidance } from '../services/payrollAdvisor';
 
 const router = Router();
 const logger = createLogger('assistant-service');
@@ -135,6 +136,25 @@ router.get('/filings/:filingId/explain', async (req: AuthRequest, res: Response)
   } catch (error) {
     logger.error('Explain filing failed', error instanceof Error ? error : new Error(String(error)));
     res.status(500).json({ error: 'Failed to explain filing calculation' });
+  }
+});
+
+router.post('/payroll/compliance', async (req: AuthRequest, res: Response) => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
+    }
+
+    const guidance = await getPayrollGuidance(req.user.tenantId, req.body || {});
+    res.json({ guidance });
+  } catch (error) {
+    logger.error('Payroll compliance guidance failed', error instanceof Error ? error : new Error(String(error)));
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    res.status(500).json({ error: 'Failed to generate payroll compliance guidance' });
   }
 });
 
