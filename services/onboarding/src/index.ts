@@ -10,6 +10,7 @@ import { connectorRouter } from './routes/connectors';
 import { consentRouter } from './routes/consent';
 import { errorHandler } from './middleware/errorHandler';
 import { authenticate } from './middleware/auth';
+import { runConnectivityChecks } from './services/connectivity';
 
 config();
 
@@ -28,8 +29,14 @@ app.use(cors({
 
 app.use(express.json());
 
-app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', service: 'onboarding-service' });
+app.get('/health', async (_req, res) => {
+  const connectivity = await runConnectivityChecks();
+  const degraded = connectivity.dependencies.some(dep => !dep.success);
+  res.json({
+    status: degraded ? 'degraded' : 'ok',
+    service: 'onboarding-service',
+    dependencies: connectivity.dependencies,
+  });
 });
 
 app.use('/api/onboarding', authenticate, onboardingRouter);

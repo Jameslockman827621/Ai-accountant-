@@ -8,6 +8,7 @@ import { initializeTracing } from './tracing';
 import { registerAlertRules } from './alertRules';
 import { alertingService } from './alerts';
 import { createServiceLogger, createMetricsMiddleware, createTracingMiddleware } from '@ai-accountant/observability';
+import { telemetryRouter } from './routes/telemetry';
 
 const SERVICE_NAME = 'monitoring-service';
 const logger = createServiceLogger(SERVICE_NAME);
@@ -21,6 +22,7 @@ registerAlertRules();
 app.use(express.json());
 app.use(createMetricsMiddleware(SERVICE_NAME));
 app.use(createTracingMiddleware(SERVICE_NAME));
+app.use('/api', telemetryRouter);
 
 // Health check
 app.get('/health', (_req, res) => {

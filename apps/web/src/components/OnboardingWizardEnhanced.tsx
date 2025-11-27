@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DocumentUpload from './DocumentUpload';
 import { DocumentType } from '@ai-accountant/shared-types';
 import UnifiedConnectionsPanel from './UnifiedConnectionsPanel';
+import KYCVerificationPanel from './KYCVerificationPanel';
 import type {
   OnboardingEventType,
   OnboardingProgress,
@@ -19,6 +20,9 @@ interface OnboardingWizardEnhancedProps {
   trackEvent?: (eventType: OnboardingEventType, stepName?: OnboardingStep, metadata?: Record<string, unknown>) => Promise<void>;
   isSubmitting: boolean;
   getStepData: (step: OnboardingStep) => Promise<Record<string, unknown> | null>;
+  onTrySampleCompany?: () => Promise<void>;
+  sampleState?: 'idle' | 'loading' | 'ready' | 'error';
+  sampleError?: string | null;
 }
 
 interface OnboardingSchema {
@@ -75,6 +79,9 @@ export default function OnboardingWizardEnhanced({
   trackEvent,
   isSubmitting,
   getStepData,
+  onTrySampleCompany,
+  sampleState = 'idle',
+  sampleError = null,
 }: OnboardingWizardEnhancedProps) {
   const { getSchema, saveStepData } = useOnboarding(token);
   const [schema, setSchema] = useState<OnboardingSchema | null>(null);
@@ -465,11 +472,22 @@ export default function OnboardingWizardEnhanced({
     }
 
     // Render fields from schema
-    return (
+    const fieldContent = (
       <div className="space-y-4">
         {currentStepDef.fields.map(field => renderField(field))}
       </div>
     );
+
+    if (progress.currentStep === 'business_profile') {
+      return (
+        <div className="space-y-6">
+          {fieldContent}
+          <KYCVerificationPanel token={token} variant="onboarding" />
+        </div>
+      );
+    }
+
+    return fieldContent;
   };
 
   if (loadingSchema || !schema) {
@@ -587,6 +605,25 @@ export default function OnboardingWizardEnhanced({
             )}
 
             <div className="flex gap-3">
+              {onTrySampleCompany && (
+                <div className="flex flex-col justify-center gap-1 text-left">
+                  <button
+                    type="button"
+                    onClick={onTrySampleCompany}
+                    disabled={sampleState === 'loading'}
+                    className="inline-flex items-center justify-center rounded-lg border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {sampleState === 'loading' ? 'Loading sample data…' : 'Try sample company'}
+                  </button>
+                  {sampleState === 'ready' && (
+                    <span className="text-xs text-green-700">Sample company data is ready to explore.</span>
+                  )}
+                  {sampleState === 'error' && (
+                    <span className="text-xs text-red-600">{sampleError || 'Unable to load sample data.'}</span>
+                  )}
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={handleSubmit}
