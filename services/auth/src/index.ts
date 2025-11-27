@@ -8,6 +8,7 @@ import { authRouter } from './routes/auth';
 import { userRouter } from './routes/users';
 import { tenantRouter } from './routes/tenants';
 import { organizationRouter } from './routes/organizations';
+import { auditRouter } from './routes/audit';
 import { errorHandler } from './middleware/errorHandler';
 
 config();
@@ -48,6 +49,7 @@ app.use('/api/auth', authRouter);
 app.use('/api/users', userRouter);
 app.use('/api/tenants', tenantRouter);
 app.use('/api/organizations', organizationRouter);
+app.use('/api/audit', auditRouter);
 
 // Error handling
 app.use(errorHandler);

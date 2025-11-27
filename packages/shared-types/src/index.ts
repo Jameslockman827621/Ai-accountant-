@@ -460,3 +460,31 @@ export const ProcessingQueues = {
 } as const;
 
 export type ProcessingQueueName = keyof typeof ProcessingQueues;
+
+export interface AccessLogEntry {
+  id: AuditLogId;
+  tenantId: TenantId;
+  actorId: UserId;
+  action: string;
+  resource?: string;
+  status: 'allowed' | 'denied';
+  message?: string;
+  traceId?: string;
+  createdAt: Date;
+  metadata?: Record<string, unknown>;
+}
+
+export {
+  AccessAction,
+  AccessPolicy,
+  ApprovalChain,
+  ApprovalDecision,
+  ApprovalRequest,
+  ApprovalRequestStep,
+  approvalChains,
+  accessPolicies,
+  findPolicy,
+  findApprovalChain,
+  type ApprovalStep,
+  type RiskLevel,
+} from './policies';

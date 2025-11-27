@@ -10,3 +10,12 @@ export {
   meter,
 } from './metrics';
 export { withExponentialBackoff } from './retry';
+export {
+  createDataMutationTrace,
+  completeDataMutationTrace,
+  getLineageEvent,
+  listLineageEvents,
+  type DataLineageEvent,
+  type DataMutationOperation,
+  type DataMutationStatus,
+} from './lineage';
