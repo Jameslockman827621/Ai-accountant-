@@ -11,11 +11,12 @@ import { buildForecastingPortfolio } from '../services/forecastingModels';
 const router = Router();
 const logger = createLogger('analytics-service');
 
-const ensureUser = (req: AuthRequest, res: Response) => {
+const ensureUser = (req: AuthRequest, res: Response): AuthRequest['user'] | null => {
   if (!req.user) {
     res.status(401).json({ error: 'Unauthorized' });
     return null;
   }
+
   return req.user;
 };
 
