@@ -7,3 +7,4 @@ export * from './services/worldClassEnhancements';
 export * from './services/euTaxSystem';
 export * from './services/fxConversion';
 export * from './services/multiCurrencyLedger';
+export * from './services/rulePacks';

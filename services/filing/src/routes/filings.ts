@@ -46,7 +46,10 @@ import { generateClientSummary } from '../services/clientSummary';
 import { filingLifecycleService } from '../services/filingLifecycle';
 import { filingWorkflowService } from '../services/filingWorkflows';
 import { runHmrcSubmissionFlow } from '../services/hmrcFlowManager';
-import { getFilingFlowParameters } from '../services/filingFlowParameters';
+import {
+  getFilingFlowParameters,
+  listFilingFlowParameters,
+} from '../services/filingFlowParameters';
 
 const router = Router();
 const logger = createLogger('filing-service');
@@ -119,6 +122,12 @@ router.post('/', async (req: AuthRequest, res: Response) => {
     }
     res.status(500).json({ error: 'Failed to create filing' });
   }
+});
+
+// List filing flow parameters to help clients resolve rule packs
+router.get('/flows', (_req: AuthRequest, res: Response) => {
+  const flows = listFilingFlowParameters();
+  res.json({ flows });
 });
 
 // Attest filing

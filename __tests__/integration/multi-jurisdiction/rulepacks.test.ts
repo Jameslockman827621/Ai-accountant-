@@ -1,6 +1,6 @@
-import { listRulePacks, getRulePackById } from '../../services/multi-jurisdiction/src/services/rulePacks';
-import { HMRC_VAT_RULE_PACK } from '../../packages/hmrc/src';
-import dataset from '../golden-dataset/multiJurisdiction.json';
+import { listRulePacks, getRulePackById } from '@ai-accountant/multi-jurisdiction/services/rulePacks';
+import { HMRC_VAT_RULE_PACK } from '@ai-accountant/hmrc';
+import dataset from '../../golden-dataset/multiJurisdiction.json';
 
 describe('multi-jurisdiction rule packs', () => {
   it('exposes EU/US/UK/AU/CA packs', () => {

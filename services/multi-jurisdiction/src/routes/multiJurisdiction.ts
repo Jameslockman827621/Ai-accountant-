@@ -23,7 +23,12 @@ import {
   revalueAccountBalances,
   getCurrencyExposureReport,
 } from '../services/multiCurrencyLedger';
-import { getRulePackById, listRulePacks } from '../services/rulePacks';
+import {
+  getRulePackById,
+  getRulePacksByJurisdiction,
+  listRulePacks,
+  JurisdictionCode,
+} from '../services/rulePacks';
 
 const logger = createLogger('multi-jurisdiction-routes');
 const router = Router();
@@ -283,6 +288,14 @@ router.get('/rulepacks/:id', (req, res) => {
     return res.status(404).json({ error: 'Rule pack not found' });
   }
   return res.json({ rulePack: pack });
+});
+
+router.get('/rulepacks/jurisdiction/:jurisdiction', (req, res) => {
+  const packs = getRulePacksByJurisdiction(req.params.jurisdiction as JurisdictionCode);
+  if (!packs || packs.length === 0) {
+    return res.status(404).json({ error: 'No rule packs found for jurisdiction' });
+  }
+  return res.json({ rulePacks: packs });
 });
 
 export default router;
