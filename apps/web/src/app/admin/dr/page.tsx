@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface DrSimulationLog {
   backupId: string;
@@ -19,10 +20,14 @@ interface DrMetrics {
   passRate: number;
 }
 
-async function fetchJson<T>(path: string): Promise<T | null> {
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000').replace(/\/$/, '');
+
+async function fetchJson<T>(path: string, token: string): Promise<T | null> {
   try {
-    const baseUrl = process.env.NEXT_PUBLIC_MONITORING_URL || '';
-    const res = await fetch(`${baseUrl}${path}`, { cache: 'no-store' });
+    const res = await fetch(`${API_BASE}${path}`, {
+      cache: 'no-store',
+      headers: { Authorization: `Bearer ${token}` },
+    });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch (error) {
@@ -34,24 +39,35 @@ async function fetchJson<T>(path: string): Promise<T | null> {
 export default function DisasterRecoveryDashboard() {
   const [simulations, setSimulations] = useState<DrSimulationLog[]>([]);
   const [metrics, setMetrics] = useState<DrMetrics | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
+    const storedToken = localStorage.getItem('authToken') || localStorage.getItem('auth_token');
+    if (!storedToken) {
+      router.push('/');
+      return;
+    }
+    setToken(storedToken);
+
     async function load() {
-      const logs = await fetchJson<{ logs: DrSimulationLog[] }>('/api/monitoring/dr-simulations');
+      const logs = await fetchJson<{ logs: DrSimulationLog[] }>('/api/monitoring/dr-simulations', storedToken);
       if (logs?.logs) {
         setSimulations(logs.logs);
       } else {
         setSimulations([]);
       }
 
-      const snapshot = await fetchJson<DrMetrics>('/api/monitoring/dr-simulations/metrics');
+      const snapshot = await fetchJson<DrMetrics>('/api/monitoring/dr-simulations/metrics', storedToken);
       if (snapshot) {
         setMetrics(snapshot);
       }
     }
 
     load();
-  }, []);
+  }, [router]);
+
+  if (!token) return null;
 
   return (
     <div className="min-h-screen bg-gray-50">

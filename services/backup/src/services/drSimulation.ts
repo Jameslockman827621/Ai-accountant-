@@ -1,4 +1,3 @@
-import fetch from 'node-fetch';
 import { createLogger } from '@ai-accountant/shared-utils';
 import { backupCatalogService } from './backupCatalog';
 
@@ -44,12 +43,17 @@ export class DisasterRecoverySimulation {
   }
 
   private async reportToMonitoring(result: DisasterRecoveryResult): Promise<void> {
-    const monitoringUrl = process.env.MONITORING_SERVICE_URL || 'http://localhost:3025/api/monitoring/dr-simulations';
+    const monitoringUrl =
+      process.env.MONITORING_SERVICE_URL || 'http://localhost:3010/api/monitoring/dr-simulations';
+    const serviceToken = process.env.MONITORING_SERVICE_TOKEN || process.env.SERVICE_AUTH_TOKEN;
 
     try {
       await fetch(monitoringUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(serviceToken ? { 'x-service-token': serviceToken } : {}),
+        },
         body: JSON.stringify({
           backupId: result.backupId,
           simulationId: result.simulationId,
