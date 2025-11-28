@@ -11,16 +11,22 @@ import { buildForecastingPortfolio } from '../services/forecastingModels';
 const router = Router();
 const logger = createLogger('analytics-service');
 
+const ensureUser = (req: AuthRequest, res: Response) => {
+  if (!req.user) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return null;
+  }
+  return req.user;
+};
+
 // Predict revenue
 router.post('/predict/revenue', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+    const user = ensureUser(req, res);
+    if (!user) return;
 
     const { months } = req.body;
-    const prediction = await predictRevenue(req.user.tenantId, months || 6);
+    const prediction = await predictRevenue(user.tenantId, months || 6);
 
     res.json({ prediction });
   } catch (error) {
@@ -32,12 +38,10 @@ router.post('/predict/revenue', async (req: AuthRequest, res: Response) => {
 // Detect trends
 router.get('/trends', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+    const user = ensureUser(req, res);
+    if (!user) return;
 
-    const trends = await detectTrends(req.user.tenantId);
+    const trends = await detectTrends(user.tenantId);
     res.json({ trends });
   } catch (error) {
     logger.error('Detect trends failed', error instanceof Error ? error : new Error(String(error)));
@@ -48,10 +52,8 @@ router.get('/trends', async (req: AuthRequest, res: Response) => {
 // Dashboard stats
 router.get('/dashboard', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+    const user = ensureUser(req, res);
+    if (!user) return;
 
     const { startDate, endDate } = req.query;
 
@@ -63,7 +65,7 @@ router.get('/dashboard', async (req: AuthRequest, res: Response) => {
       options.periodEnd = new Date(String(endDate));
     }
 
-    const stats = await getDashboardStats(req.user.tenantId, options);
+    const stats = await getDashboardStats(user.tenantId, options);
 
     res.json({ stats });
   } catch (error) {
@@ -74,12 +76,10 @@ router.get('/dashboard', async (req: AuthRequest, res: Response) => {
 
 router.post('/scenarios', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+    const user = ensureUser(req, res);
+    if (!user) return;
 
-    const result = await runScenarioAnalysis(req.user.tenantId, req.body ?? {});
+    const result = await runScenarioAnalysis(user.tenantId, req.body ?? {});
     res.json({ scenario: result });
   } catch (error) {
     logger.error('Scenario planning failed', error instanceof Error ? error : new Error(String(error)));
@@ -93,11 +93,9 @@ router.post('/scenarios', async (req: AuthRequest, res: Response) => {
 
 router.get('/insights', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
-    const insights = await getExecutiveInsights(req.user.tenantId);
+    const user = ensureUser(req, res);
+    if (!user) return;
+    const insights = await getExecutiveInsights(user.tenantId);
     res.json({ insights });
   } catch (error) {
     logger.error('Get insights failed', error instanceof Error ? error : new Error(String(error)));
@@ -107,13 +105,11 @@ router.get('/insights', async (req: AuthRequest, res: Response) => {
 
 router.post('/cashflow/pipeline', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+    const user = ensureUser(req, res);
+    if (!user) return;
 
     const { horizonMonths, sensitivity } = req.body || {};
-    const result = await runCashflowPipeline(req.user.tenantId, {
+    const result = await runCashflowPipeline(user.tenantId, {
       horizonMonths,
       sensitivity,
     });
@@ -127,13 +123,11 @@ router.post('/cashflow/pipeline', async (req: AuthRequest, res: Response) => {
 
 router.get('/forecasting/models', async (req: AuthRequest, res: Response) => {
   try {
-    if (!req.user) {
-      res.status(401).json({ error: 'Unauthorized' });
-      return;
-    }
+    const user = ensureUser(req, res);
+    if (!user) return;
 
     const periods = Number(req.query.periods) || 6;
-    const portfolio = await buildForecastingPortfolio(req.user.tenantId, periods);
+    const portfolio = await buildForecastingPortfolio(user.tenantId, periods);
 
     res.json({ portfolio });
   } catch (error) {
