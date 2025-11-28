@@ -1,8 +1,7 @@
 import { Router, Response } from 'express';
-import { createLogger } from '@ai-accountant/shared-utils';
+import { createLogger, ValidationError } from '@ai-accountant/shared-utils';
 import { AuthRequest } from '../middleware/auth';
 import { predictRevenue, detectTrends } from '../services/predictive';
-import { ValidationError } from '@ai-accountant/shared-utils';
 import { getDashboardStats } from '../services/dashboard';
 import { runScenarioAnalysis } from '../services/scenarioPlanner';
 import { getExecutiveInsights } from '../services/insights';
